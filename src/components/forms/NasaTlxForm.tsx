@@ -1,23 +1,35 @@
-import { useId } from "react";
+import {
+  useId,
+} from "react";
 
-export interface NasaTlxValues {
-  mentalDemand: number;
-  physicalDemand: number;
-  temporalDemand: number;
-  performance: number;
-  effort: number;
-  frustration: number;
-}
+import {
+  NASA_TLX_RATINGS,
+  isNasaTlxValue,
+} from "../../types/questionnaire";
 
-export type NasaTlxDimension =
-  keyof NasaTlxValues;
+import type {
+  NasaTlxDimension,
+  NasaTlxRating,
+  NasaTlxRatings,
+} from "../../types/questionnaire";
+
+export type {
+  NasaTlxDimension,
+  NasaTlxRating,
+} from "../../types/questionnaire";
+
+export type NasaTlxValues =
+  NasaTlxRatings;
 
 interface NasaTlxFormProps {
   values: NasaTlxValues;
 
   onChange: (
     dimension: NasaTlxDimension,
-    value: number,
+    value: Exclude<
+      NasaTlxRating,
+      null
+    >,
   ) => void;
 
   disabled?: boolean;
@@ -32,75 +44,152 @@ interface NasaTlxScale {
   highLabel: string;
 }
 
-const nasaTlxScales: NasaTlxScale[] = [
-  {
-    dimension: "mentalDemand",
-    title: "Mental demand",
-    question:
-      "How mentally demanding was the task?",
-    lowLabel: "Very low",
-    highLabel: "Very high",
-  },
-  {
-    dimension: "physicalDemand",
-    title: "Physical demand",
-    question:
-      "How physically demanding was the task?",
-    lowLabel: "Very low",
-    highLabel: "Very high",
-  },
-  {
-    dimension: "temporalDemand",
-    title: "Temporal demand",
-    question:
-      "How hurried or rushed did you feel while completing the task?",
-    lowLabel: "Very low",
-    highLabel: "Very high",
-  },
-  {
-    dimension: "performance",
-    title: "Performance",
-    question:
-      "How unsuccessful do you think you were in accomplishing the task?",
-    lowLabel: "Perfect",
-    highLabel: "Failure",
-  },
-  {
-    dimension: "effort",
-    title: "Effort",
-    question:
-      "How hard did you have to work to accomplish your level of performance?",
-    lowLabel: "Very low",
-    highLabel: "Very high",
-  },
-  {
-    dimension: "frustration",
-    title: "Frustration",
-    question:
-      "How insecure, discouraged, irritated, stressed, or annoyed did you feel?",
-    lowLabel: "Very low",
-    highLabel: "Very high",
-  },
-];
+const nasaTlxScales:
+  NasaTlxScale[] = [
+    {
+      dimension:
+        "mentalDemand",
 
-function clampValue(
-  value: number,
-): number {
-  return Math.min(
-    100,
-    Math.max(0, value),
-  );
+      title:
+        "Mental demand",
+
+      question:
+        "How mentally demanding was the task?",
+
+      lowLabel:
+        "Very low",
+
+      highLabel:
+        "Very high",
+    },
+
+    {
+      dimension:
+        "physicalDemand",
+
+      title:
+        "Physical demand",
+
+      question:
+        "How physically demanding was the task?",
+
+      lowLabel:
+        "Very low",
+
+      highLabel:
+        "Very high",
+    },
+
+    {
+      dimension:
+        "temporalDemand",
+
+      title:
+        "Temporal demand",
+
+      question:
+        "How hurried or rushed did you feel while completing the task?",
+
+      lowLabel:
+        "Very low",
+
+      highLabel:
+        "Very high",
+    },
+
+    {
+      dimension:
+        "performance",
+
+      title:
+        "Performance",
+
+      question:
+        "How unsuccessful do you think you were in accomplishing the task?",
+
+      lowLabel:
+        "Perfect",
+
+      highLabel:
+        "Failure",
+    },
+
+    {
+      dimension:
+        "effort",
+
+      title:
+        "Effort",
+
+      question:
+        "How hard did you have to work to accomplish your level of performance?",
+
+      lowLabel:
+        "Very low",
+
+      highLabel:
+        "Very high",
+    },
+
+    {
+      dimension:
+        "frustration",
+
+      title:
+        "Frustration",
+
+      question:
+        "How insecure, discouraged, irritated, stressed, or annoyed did you feel?",
+
+      lowLabel:
+        "Very low",
+
+      highLabel:
+        "Very high",
+    },
+  ];
+
+function normalizeRating(
+  value: NasaTlxRating,
+): NasaTlxRating {
+  return isNasaTlxValue(
+    value,
+  )
+    ? value
+    : null;
 }
 
-export function createDefaultNasaTlxValues(): NasaTlxValues {
+export function createDefaultNasaTlxValues():
+  NasaTlxValues {
   return {
-    mentalDemand: 50,
-    physicalDemand: 50,
-    temporalDemand: 50,
-    performance: 50,
-    effort: 50,
-    frustration: 50,
+    mentalDemand:
+      null,
+
+    physicalDemand:
+      null,
+
+    temporalDemand:
+      null,
+
+    performance:
+      null,
+
+    effort:
+      null,
+
+    frustration:
+      null,
   };
+}
+
+export function isNasaTlxComplete(
+  values: NasaTlxValues,
+): boolean {
+  return Object.values(
+    values,
+  ).every(
+    isNasaTlxValue,
+  );
 }
 
 export default function NasaTlxForm({
@@ -109,25 +198,36 @@ export default function NasaTlxForm({
   disabled = false,
   className = "",
 }: NasaTlxFormProps) {
-  const generatedId = useId();
+  const generatedId =
+    useId();
 
   const formClassName = [
     "nasa-tlx-form",
+
     disabled
       ? "nasa-tlx-form-disabled"
       : "",
+
     className,
   ]
-    .filter(Boolean)
-    .join(" ");
+    .filter(
+      Boolean,
+    )
+    .join(
+      " ",
+    );
 
   return (
     <fieldset
-      className={formClassName}
-      disabled={disabled}
+      className={
+        formClassName
+      }
+      disabled={
+        disabled
+      }
     >
       <legend className="sr-only">
-        Task workload ratings
+        NASA Task Load Index ratings
       </legend>
 
       <div className="nasa-scale-list">
@@ -139,94 +239,152 @@ export default function NasaTlxForm({
             lowLabel,
             highLabel,
           }) => {
-            const inputId =
+            const groupId =
               `${generatedId}-${dimension}`;
 
             const questionId =
-              `${inputId}-question`;
+              `${groupId}-question`;
 
-            const value =
-              clampValue(
-                values[dimension],
+            const labelsId =
+              `${groupId}-labels`;
+
+            const selectedValue =
+              normalizeRating(
+                values[
+                  dimension
+                ],
               );
 
             return (
-              <div
-                key={dimension}
+              <fieldset
+                key={
+                  dimension
+                }
                 className="nasa-scale-card"
+                aria-describedby={`${questionId} ${labelsId}`}
               >
-                <div className="nasa-scale-header">
-                  <div>
-                    <label
-                      className="nasa-scale-title"
-                      htmlFor={inputId}
-                    >
-                      {title}
-                    </label>
+                <legend className="nasa-scale-title">
+                  {title}
+                </legend>
 
-                    <p id={questionId}>
-                      {question}
-                    </p>
-                  </div>
+                <div className="nasa-scale-header">
+                  <p
+                    id={
+                      questionId
+                    }
+                  >
+                    {question}
+                  </p>
 
                   <output
                     className="nasa-scale-value"
-                    htmlFor={inputId}
                     aria-live="polite"
                   >
-                    {value}
+                    {selectedValue ===
+                    null
+                      ? "Not selected"
+                      : `${selectedValue}`}
                   </output>
                 </div>
 
-                <input
-                  id={inputId}
-                  className="nasa-scale-input"
-                  type="range"
-                  min={0}
-                  max={100}
-                  step={5}
-                  value={value}
-                  disabled={disabled}
-                  aria-describedby={
-                    questionId
-                  }
-                  aria-valuemin={0}
-                  aria-valuemax={100}
-                  aria-valuenow={value}
-                  aria-valuetext={
-                    `${value} out of 100`
-                  }
-                  onChange={(event) =>
-                    onChange(
-                      dimension,
-                      clampValue(
-                        Number(
-                          event.target.value,
-                        ),
-                      ),
-                    )
-                  }
-                />
+                <div
+                  className="nasa-likert-scale"
+                  role="radiogroup"
+                  aria-label={`${title} rating`}
+                >
+                  {NASA_TLX_RATINGS.map(
+                    (
+                      rating,
+                    ) => {
+                      const inputId =
+                        `${groupId}-${rating}`;
+
+                      const selected =
+                        selectedValue ===
+                        rating;
+
+                      return (
+                        <label
+                          key={
+                            rating
+                          }
+                          className={[
+                            "nasa-likert-option",
+
+                            selected
+                              ? "nasa-likert-option-selected"
+                              : "",
+                          ]
+                            .filter(
+                              Boolean,
+                            )
+                            .join(
+                              " ",
+                            )}
+                          htmlFor={
+                            inputId
+                          }
+                        >
+                          <input
+                            id={
+                              inputId
+                            }
+                            className="nasa-likert-input"
+                            type="radio"
+                            name={
+                              groupId
+                            }
+                            value={
+                              rating
+                            }
+                            checked={
+                              selected
+                            }
+                            disabled={
+                              disabled
+                            }
+                            aria-label={`${title}: ${rating} out of 7`}
+                            onChange={() =>
+                              onChange(
+                                dimension,
+                                rating,
+                              )
+                            }
+                          />
+
+                          <span
+                            className="nasa-likert-point"
+                            aria-hidden="true"
+                          />
+
+                          <span
+                            className="nasa-likert-number"
+                            aria-hidden="true"
+                          >
+                            {rating}
+                          </span>
+                        </label>
+                      );
+                    },
+                  )}
+                </div>
 
                 <div
+                  id={
+                    labelsId
+                  }
                   className="nasa-scale-labels"
                   aria-hidden="true"
                 >
                   <span>
-                    0
-                    <small>
-                      {lowLabel}
-                    </small>
+                    {lowLabel}
                   </span>
 
                   <span>
-                    100
-                    <small>
-                      {highLabel}
-                    </small>
+                    {highLabel}
                   </span>
                 </div>
-              </div>
+              </fieldset>
             );
           },
         )}

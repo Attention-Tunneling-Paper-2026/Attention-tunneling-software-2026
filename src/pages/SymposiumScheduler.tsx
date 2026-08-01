@@ -1,5 +1,8 @@
 import {
   DndContext,
+  pointerWithin,
+  rectIntersection,
+  type CollisionDetection,
   type DragEndEvent,
   type DragStartEvent,
 } from "@dnd-kit/core";
@@ -12,6 +15,7 @@ import {
 } from "lucide-react";
 
 import {
+  type MouseEvent,
   useEffect,
   useRef,
   useState,
@@ -67,6 +71,7 @@ import {
 
 import type {
   EditCategory,
+  TrialEndReason,
 } from "../types/events";
 
 import type {
@@ -74,10 +79,13 @@ import type {
   Room,
   Slot,
   StudyTrialNumber,
+  StudyTrialOrder,
 } from "../types/scheduler";
 
 import {
+  DEFAULT_CONDITION_ORDER,
   getConditionForTrial,
+  isConditionOrder,
 } from "../types/scheduler";
 
 import "../styles/scheduler.css";
@@ -93,6 +101,12 @@ const PROBE_COLLAPSE_SECONDS =
 
 const AI_ANALYSIS_DELAY_MS =
   1000;
+
+const MACRO_STRUCTURE_DEFINITION =
+  "room_majority_topic_mapping_ignoring_slot_order";
+
+const THEORETICAL_EDIT_TAXONOMY_VERSION =
+  "symposium_edit_taxonomy_v1";
 
 type AssistantStatus =
   | "idle"
@@ -116,6 +130,58 @@ interface EditHistoryAnalysis {
 
   isBacktracking:
     boolean;
+}
+
+/*
+ * Prefer the cell directly under the pointer. The fallback keeps
+ * keyboard and non-pointer dragging functional.
+ */
+const preciseCollisionDetection:
+  CollisionDetection = (
+    args,
+  ) => {
+    const pointerCollisions =
+      pointerWithin(
+        args,
+      );
+
+    return pointerCollisions.length >
+      0
+      ? pointerCollisions
+      : rectIntersection(
+          args,
+        );
+  };
+
+function isRoom(
+  value: unknown,
+): value is Room {
+  return (
+    value === "A" ||
+    value === "B" ||
+    value === "C"
+  );
+}
+
+function isSlot(
+  value: unknown,
+): value is Slot {
+  return (
+    value === 1 ||
+    value === 2 ||
+    value === 3 ||
+    value === 4
+  );
+}
+
+function isStudyTrialOrder(
+  value: unknown,
+): value is StudyTrialOrder {
+  return (
+    value === 1 ||
+    value === 2 ||
+    value === 3
+  );
 }
 
 function getCurrentTimeMs():
@@ -276,6 +342,13 @@ export default function SymposiumScheduler({
     false,
   );
 
+  const [
+    participantAssignmentMade,
+    setParticipantAssignmentMade,
+  ] = useState(
+    false,
+  );
+
   const eventTrialStartedRef =
     useRef(
       false,
@@ -291,9 +364,28 @@ export default function SymposiumScheduler({
       false,
     );
 
+  const timerWarningLoggedRef =
+    useRef({
+      amber:
+        false,
+
+      red:
+        false,
+    });
+
   const submitInProgressRef =
     useRef(
       false,
+    );
+
+  const submitTrialRef =
+    useRef<
+      (
+        reason:
+          TrialEndReason,
+      ) => void
+    >(
+      () => undefined,
     );
 
   const probeShownAtRef =
@@ -371,10 +463,28 @@ export default function SymposiumScheduler({
         state.moveOrSwapTalk,
     );
 
-  const canMoveOrSwapTalk =
+  const validateMoveOrSwapTalk =
     useSchedulerStore(
       (state) =>
-        state.canMoveOrSwapTalk,
+        state.validateMoveOrSwapTalk,
+    );
+
+  const unassignTalk =
+    useSchedulerStore(
+      (state) =>
+        state.unassignTalk,
+    );
+
+  const setTrialLocked =
+    useSchedulerStore(
+      (state) =>
+        state.setTrialLocked,
+    );
+
+  const trialLocked =
+    useSchedulerStore(
+      (state) =>
+        state.trialLocked,
     );
 
   const setActiveTalkId =
@@ -423,6 +533,12 @@ export default function SymposiumScheduler({
         state.markAssistantAnalysisStarted,
     );
 
+  const markAssistantAnalysisCompleted =
+    useStudySessionStore(
+      (state) =>
+        state.markAssistantAnalysisCompleted,
+    );
+
   const markAssistantRecommendationShown =
     useStudySessionStore(
       (state) =>
@@ -439,6 +555,12 @@ export default function SymposiumScheduler({
     useStudySessionStore(
       (state) =>
         state.markProbeShown,
+    );
+
+  const markProbeCollapsed =
+    useStudySessionStore(
+      (state) =>
+        state.markProbeCollapsed,
     );
 
   const markProbeAcknowledged =
@@ -465,16 +587,18 @@ export default function SymposiumScheduler({
     );
 
   const trialOrder =
-    trialProgress?.trialOrder &&
-    trialProgress.trialOrder > 0
+    isStudyTrialOrder(
+      trialProgress?.trialOrder,
+    )
       ? trialProgress.trialOrder
       : taskNumber;
 
   const conditionOrder =
-    trialProgress?.conditionOrder &&
-    trialProgress.conditionOrder > 0
+    isConditionOrder(
+      trialProgress?.conditionOrder,
+    )
       ? trialProgress.conditionOrder
-      : trialOrder;
+      : DEFAULT_CONDITION_ORDER;
 
   const isFirstTrial =
     trialProgress?.trialOrder &&
@@ -502,10 +626,34 @@ export default function SymposiumScheduler({
     remainingSeconds ===
     0;
 
+  const currentSnapshot =
+    createScheduleSnapshot(
+      placements,
+    );
+
+  /*
+   * Manual submission requires a complete schedule with no original
+   * speaker conflicts. Semantic probe compliance is measured but never
+   * gates submission.
+   */
+  const manualSubmitAllowed =
+    assistantReady &&
+    !trialSubmitted &&
+    currentSnapshot.preProbeFeasible;
+
   const interactionDisabled =
     !assistantReady ||
     timerExpired ||
-    trialSubmitted;
+    trialSubmitted ||
+    trialLocked;
+
+  useEffect(() => {
+    setParticipantAssignmentMade(
+      false,
+    );
+  }, [
+    taskNumber,
+  ]);
 
   useEffect(() => {
     if (
@@ -514,12 +662,16 @@ export default function SymposiumScheduler({
     ) {
       initializeTrial(
         taskNumber,
+        conditionOrder,
+        trialOrder,
       );
     }
   }, [
+    conditionOrder,
     initializeTrial,
     schedulerTrialNumber,
     taskNumber,
+    trialOrder,
   ]);
 
   useEffect(() => {
@@ -570,6 +722,10 @@ export default function SymposiumScheduler({
     const timeoutId =
       window.setTimeout(
         () => {
+          markAssistantAnalysisCompleted(
+            taskNumber,
+          );
+
           markAssistantRecommendationShown(
             taskNumber,
           );
@@ -653,6 +809,7 @@ export default function SymposiumScheduler({
     addEvent,
     assistantStatus,
     expectedCondition,
+    markAssistantAnalysisCompleted,
     markAssistantRecommendationShown,
     taskNumber,
   ]);
@@ -737,6 +894,18 @@ export default function SymposiumScheduler({
       structuralSignatureAfter:
         initialSnapshot.structuralSignature,
 
+      macroStructureSignatureBefore:
+        initialSnapshot.macroStructureSignature,
+
+      macroStructureSignatureAfter:
+        initialSnapshot.macroStructureSignature,
+
+      roomCompositionSignatureBefore:
+        initialSnapshot.roomCompositionSignature,
+
+      roomCompositionSignatureAfter:
+        initialSnapshot.roomCompositionSignature,
+
       scoreBefore:
         initialSnapshot.score.totalScore,
 
@@ -770,11 +939,23 @@ export default function SymposiumScheduler({
       structuralSignature:
         initialSnapshot.structuralSignature,
 
+      macroStructureSignature:
+        initialSnapshot.macroStructureSignature,
+
+      roomCompositionSignature:
+        initialSnapshot.roomCompositionSignature,
+
       postProbeFeasibleBefore:
-        initialSnapshot.postProbeFeasible,
+        null,
 
       postProbeFeasibleAfter:
-        initialSnapshot.postProbeFeasible,
+        null,
+
+      unresolvedDemoTalkIdsBefore:
+        null,
+
+      unresolvedDemoTalkIdsAfter:
+        null,
 
       resultingViolations:
         initialSnapshot.resultingViolations,
@@ -855,8 +1036,17 @@ export default function SymposiumScheduler({
           initialSnapshot.stateHash ===
           expectedInitialHash,
 
+        initialMacroStructureSignature:
+          initialSnapshot.macroStructureSignature,
+
         initialRoomCompositionSignature:
           initialSnapshot.roomCompositionSignature,
+
+        macroStructureDefinition:
+          MACRO_STRUCTURE_DEFINITION,
+
+        theoreticalEditTaxonomyVersion:
+          THEORETICAL_EDIT_TAXONOMY_VERSION,
 
         initialDistanceToBestPostProbeSolution:
           initialSnapshot.distanceToBestPostProbeSolution,
@@ -919,6 +1109,75 @@ export default function SymposiumScheduler({
   useEffect(() => {
     if (
       !assistantReady ||
+      trialSubmitted
+    ) {
+      return;
+    }
+
+    const warningLevel =
+      remainingSeconds === 300
+        ? "amber"
+        : remainingSeconds === 180
+          ? "red"
+          : null;
+
+    if (
+      warningLevel === null ||
+      timerWarningLoggedRef.current[
+        warningLevel
+      ]
+    ) {
+      return;
+    }
+
+    timerWarningLoggedRef.current[
+      warningLevel
+    ] = true;
+
+    addEvent({
+      eventType:
+        "timer_warning",
+
+      trialNumber:
+        taskNumber,
+
+      condition:
+        expectedCondition,
+
+      phase:
+        probeShownAtRef.current ===
+        null
+          ? "pre_probe"
+          : "post_probe",
+
+      remainingMs:
+        remainingSeconds *
+        1000,
+
+      timerWarningLevel:
+        warningLevel,
+
+      metadata: {
+        taskId:
+          "symposium",
+
+        taskNumber,
+
+        remainingSeconds,
+      },
+    });
+  }, [
+    addEvent,
+    assistantReady,
+    expectedCondition,
+    remainingSeconds,
+    taskNumber,
+    trialSubmitted,
+  ]);
+
+  useEffect(() => {
+    if (
+      !assistantReady ||
       remainingSeconds !== 0 ||
       timerExpiredLoggedRef.current
     ) {
@@ -932,6 +1191,10 @@ export default function SymposiumScheduler({
       null,
     );
 
+    setTrialLocked(
+      true,
+    );
+
     const snapshot =
       createScheduleSnapshot(
         clonePlacements(
@@ -940,6 +1203,23 @@ export default function SymposiumScheduler({
             .placements,
         ),
       );
+
+    const probeWasShown =
+      probeShownAtRef.current !==
+      null;
+
+    const timerPostProbeFeasible =
+      probeWasShown
+        ? snapshot.postProbeFeasible
+        : null;
+
+    const timerUnresolvedDemoTalkIds =
+      probeWasShown
+        ? [
+            ...snapshot
+              .unresolvedDemoTalkIds,
+          ]
+        : null;
 
     addEvent({
       eventType:
@@ -971,6 +1251,18 @@ export default function SymposiumScheduler({
 
       structuralSignatureAfter:
         snapshot.structuralSignature,
+
+      macroStructureSignatureBefore:
+        snapshot.macroStructureSignature,
+
+      macroStructureSignatureAfter:
+        snapshot.macroStructureSignature,
+
+      roomCompositionSignatureBefore:
+        snapshot.roomCompositionSignature,
+
+      roomCompositionSignatureAfter:
+        snapshot.roomCompositionSignature,
 
       scoreBefore:
         snapshot.score.totalScore,
@@ -1005,11 +1297,41 @@ export default function SymposiumScheduler({
       structuralSignature:
         snapshot.structuralSignature,
 
+      accepted:
+        true,
+
+      trialEndReason:
+        "timeout",
+
+      probeCompliant:
+        probeWasShown
+          ? snapshot.semanticProbeCompliant
+          : null,
+
+      probeVisible:
+        probeWasShown,
+
+      probeAcknowledged:
+        probeWasShown
+          ? probeAcknowledged
+          : undefined,
+
+      probeIntegrationDetected:
+        probeWasShown
+          ? probeIntegrated
+          : undefined,
+
       postProbeFeasibleBefore:
-        snapshot.postProbeFeasible,
+        timerPostProbeFeasible,
 
       postProbeFeasibleAfter:
-        snapshot.postProbeFeasible,
+        timerPostProbeFeasible,
+
+      unresolvedDemoTalkIdsBefore:
+        timerUnresolvedDemoTalkIds,
+
+      unresolvedDemoTalkIdsAfter:
+        timerUnresolvedDemoTalkIds,
 
       resultingViolations:
         snapshot.resultingViolations,
@@ -1027,12 +1349,23 @@ export default function SymposiumScheduler({
           0,
 
         probeShown:
-          probeShownAtRef.current !==
-          null,
+          probeWasShown,
 
-        probeAcknowledged,
+        probeAcknowledged:
+          probeWasShown
+            ? probeAcknowledged
+            : null,
 
-        probeIntegrated,
+        probeIntegrationDetected:
+          probeWasShown
+            ? probeIntegrated
+            : null,
+
+        postProbeFeasible:
+          timerPostProbeFeasible,
+
+        unresolvedDemoTalkIds:
+          timerUnresolvedDemoTalkIds,
 
         roomCompositionSignature:
           snapshot.roomCompositionSignature,
@@ -1042,8 +1375,20 @@ export default function SymposiumScheduler({
 
         scorePercentage:
           snapshot.score.scorePercentage,
+
+        preProbeFeasible:
+          snapshot.preProbeFeasible,
+
+        semanticProbeCompliant:
+          probeWasShown
+            ? snapshot.semanticProbeCompliant
+            : null,
       },
     });
+
+    submitTrialRef.current(
+      "timeout",
+    );
   }, [
     addEvent,
     assistantReady,
@@ -1052,6 +1397,7 @@ export default function SymposiumScheduler({
     probeIntegrated,
     remainingSeconds,
     setActiveTalkId,
+    setTrialLocked,
     taskNumber,
   ]);
 
@@ -1166,11 +1512,30 @@ export default function SymposiumScheduler({
         probeAcknowledged:
           false,
 
+        integrationConsistentEdit:
+          false,
+
+        probeIntegrationDetected:
+          false,
+
+        latencyFromProbeMs:
+          0,
+
         postProbeFeasibleBefore:
           snapshot.postProbeFeasible,
 
         postProbeFeasibleAfter:
           snapshot.postProbeFeasible,
+
+        unresolvedDemoTalkIdsBefore: [
+          ...snapshot
+            .unresolvedDemoTalkIds,
+        ],
+
+        unresolvedDemoTalkIdsAfter: [
+          ...snapshot
+            .unresolvedDemoTalkIds,
+        ],
 
         resultingViolations:
           snapshot.resultingViolations,
@@ -1203,6 +1568,21 @@ export default function SymposiumScheduler({
           requiredTalkIds:
             SEMANTIC_PROBE.requiredTalkIds,
 
+          probeShownAtElapsedMs:
+            elapsedSeconds *
+            1000,
+
+          probeAcknowledged:
+            false,
+
+          postProbeFeasible:
+            snapshot.postProbeFeasible,
+
+          unresolvedDemoTalkIds: [
+            ...snapshot
+              .unresolvedDemoTalkIds,
+          ],
+
           roomCompositionSignature:
             snapshot.roomCompositionSignature,
 
@@ -1234,6 +1614,8 @@ export default function SymposiumScheduler({
 
   useEffect(() => {
     if (
+      SEMANTIC_PROBE.displayMode !==
+        "transient" ||
       !probeVisible ||
       probeAcknowledged ||
       probeCollapsed ||
@@ -1245,6 +1627,46 @@ export default function SymposiumScheduler({
     const timeoutId =
       window.setTimeout(
         () => {
+          markProbeCollapsed(
+            taskNumber,
+          );
+
+          addEvent({
+            eventType:
+              "probe_collapsed",
+
+            trialNumber:
+              taskNumber,
+
+            condition:
+              expectedCondition,
+
+            phase:
+              "post_probe",
+
+            probeVisible:
+              true,
+
+            probeAcknowledged:
+              false,
+
+            metadata: {
+              taskId:
+                "symposium",
+
+              taskNumber,
+
+              probeId:
+                SEMANTIC_PROBE.id,
+
+              probeVersion:
+                SEMANTIC_PROBE_VERSION,
+
+              displayMode:
+                SEMANTIC_PROBE.displayMode,
+            },
+          });
+
           setProbeCollapsed(
             true,
           );
@@ -1259,9 +1681,13 @@ export default function SymposiumScheduler({
       );
     };
   }, [
+    addEvent,
+    expectedCondition,
+    markProbeCollapsed,
     probeAcknowledged,
     probeCollapsed,
     probeVisible,
+    taskNumber,
     trialSubmitted,
   ]);
 
@@ -1408,13 +1834,22 @@ export default function SymposiumScheduler({
               probeShownAtRef.current,
           );
 
+    const snapshot =
+      createScheduleSnapshot(
+        clonePlacements(
+          useSchedulerStore
+            .getState()
+            .placements,
+        ),
+      );
+
     markProbeAcknowledged(
       taskNumber,
     );
 
     addEvent({
       eventType:
-        "probe_acknowledged",
+        "probe_ack",
 
       trialNumber:
         taskNumber,
@@ -1428,11 +1863,36 @@ export default function SymposiumScheduler({
       probeLatencyMs:
         latencyMs,
 
+      probeAcknowledgmentSource:
+        "banner_ok",
+
+      latencyFromProbeMs:
+        latencyMs,
+
       probeVisible:
         true,
 
       probeAcknowledged:
         true,
+
+      probeIntegrationDetected:
+        probeIntegrated,
+
+      postProbeFeasibleBefore:
+        snapshot.postProbeFeasible,
+
+      postProbeFeasibleAfter:
+        snapshot.postProbeFeasible,
+
+      unresolvedDemoTalkIdsBefore: [
+        ...snapshot
+          .unresolvedDemoTalkIds,
+      ],
+
+      unresolvedDemoTalkIdsAfter: [
+        ...snapshot
+          .unresolvedDemoTalkIds,
+      ],
 
       metadata: {
         taskId:
@@ -1443,8 +1903,31 @@ export default function SymposiumScheduler({
         probeId:
           SEMANTIC_PROBE.id,
 
+        probeVersion:
+          SEMANTIC_PROBE_VERSION,
+
         acknowledgementLatencyMs:
           latencyMs,
+
+        probeAcknowledged:
+          true,
+
+        affectedRoom:
+          SEMANTIC_PROBE.affectedRoom,
+
+        requiredProjectorRoom:
+          SEMANTIC_PROBE.requiredProjectorRoom,
+
+        requiredTalkIds:
+          SEMANTIC_PROBE.requiredTalkIds,
+
+        postProbeFeasible:
+          snapshot.postProbeFeasible,
+
+        unresolvedDemoTalkIds: [
+          ...snapshot
+            .unresolvedDemoTalkIds,
+        ],
       },
     });
 
@@ -1490,11 +1973,19 @@ export default function SymposiumScheduler({
       probeLatencyMs:
         latencyMs,
 
+      latencyFromProbeMs:
+        latencyMs,
+
       probeVisible:
         true,
 
-      probeAcknowledged:
-        false,
+      probeAcknowledged,
+
+      probeAcknowledgmentSource:
+        "bell",
+
+      probeIntegrationDetected:
+        probeIntegrated,
 
       metadata: {
         taskId:
@@ -1505,8 +1996,20 @@ export default function SymposiumScheduler({
         probeId:
           SEMANTIC_PROBE.id,
 
+        probeVersion:
+          SEMANTIC_PROBE_VERSION,
+
         notificationOpenLatencyMs:
           latencyMs,
+
+        affectedRoom:
+          SEMANTIC_PROBE.affectedRoom,
+
+        requiredProjectorRoom:
+          SEMANTIC_PROBE.requiredProjectorRoom,
+
+        requiredTalkIds:
+          SEMANTIC_PROBE.requiredTalkIds,
       },
     });
 
@@ -1705,6 +2208,18 @@ export default function SymposiumScheduler({
       structuralSignatureAfter:
         snapshot.structuralSignature,
 
+      macroStructureSignatureBefore:
+        snapshot.macroStructureSignature,
+
+      macroStructureSignatureAfter:
+        snapshot.macroStructureSignature,
+
+      roomCompositionSignatureBefore:
+        snapshot.roomCompositionSignature,
+
+      roomCompositionSignatureAfter:
+        snapshot.roomCompositionSignature,
+
       scoreBefore:
         snapshot.score.totalScore,
 
@@ -1821,21 +2336,421 @@ export default function SymposiumScheduler({
           talkId,
       );
 
+    const targetData =
+      over?.data.current;
+
     const targetType =
-      over?.data.current
-        ?.type;
+      targetData?.type;
+
+    const targetRoomValue =
+      targetData?.room;
+
+    const targetSlotValue =
+      targetData?.slot;
 
     const targetRoom =
-      over?.data.current
-        ?.room as
-        | Room
-        | undefined;
+      isRoom(
+        targetRoomValue,
+      )
+        ? targetRoomValue
+        : undefined;
 
     const targetSlot =
-      over?.data.current
-        ?.slot as
-        | Slot
-        | undefined;
+      isSlot(
+        targetSlotValue,
+      )
+        ? targetSlotValue
+        : undefined;
+
+    const targetReportedLegal =
+      targetData?.dropIsLegal;
+
+    if (
+      targetType ===
+      "unassigned-tray"
+    ) {
+      const trayDropAllowed =
+        targetData?.allowTrayUnplace ===
+        true;
+
+      const trayDropSucceeded =
+        Boolean(
+          sourcePlacement,
+        ) &&
+        trayDropAllowed &&
+        unassignTalk(
+          talkId,
+        );
+
+      if (
+        !trayDropSucceeded
+      ) {
+        const illegalReason =
+          trayDropAllowed
+            ? "source_not_found"
+            : "tray_unplace_disabled";
+
+        addEvent({
+          eventType:
+            "illegal_drop",
+
+          trialNumber:
+            taskNumber,
+
+          condition:
+            expectedCondition,
+
+          talkId,
+
+          fromRoom:
+            sourcePlacement?.room,
+
+          fromSlot:
+            sourcePlacement?.slot,
+
+          source:
+            sourcePlacement
+              ? "schedule_grid"
+              : "unassigned_tray",
+
+          action:
+            "no_op",
+
+          success:
+            false,
+
+          illegalReason,
+
+          dragDurationMs,
+
+          scheduleBefore:
+            previousSnapshot.canonicalSchedule,
+
+          scheduleAfter:
+            previousSnapshot.canonicalSchedule,
+
+          stateHashBefore:
+            previousSnapshot.stateHash,
+
+          stateHashAfter:
+            previousSnapshot.stateHash,
+
+          structuralSignatureBefore:
+            previousSnapshot.structuralSignature,
+
+          structuralSignatureAfter:
+            previousSnapshot.structuralSignature,
+
+          scoreBefore:
+            previousSnapshot.score.totalScore,
+
+          scoreAfter:
+            previousSnapshot.score.totalScore,
+
+          scoreDelta:
+            0,
+
+          speakerConflictsBefore:
+            previousSnapshot.speakerConflictPairCount,
+
+          speakerConflictsAfter:
+            previousSnapshot.speakerConflictPairCount,
+
+          hammingDistanceFromAIBefore:
+            previousSnapshot.hammingDistanceFromAI,
+
+          hammingDistanceFromAIAfter:
+            previousSnapshot.hammingDistanceFromAI,
+
+          insideAIFamilyBefore:
+            previousSnapshot.insideAIFamily,
+
+          insideAIFamilyAfter:
+            previousSnapshot.insideAIFamily,
+
+          statePreviouslyVisited:
+            true,
+
+          editCategory:
+            "illegal_edit",
+
+          probeVisible,
+
+          probeAcknowledged,
+
+          metadata: {
+            taskId:
+              "symposium",
+
+            taskNumber,
+
+            reason:
+              illegalReason,
+          },
+        });
+
+        setActiveTalkId(
+          null,
+        );
+
+        return;
+      }
+
+      const nextPlacements =
+        clonePlacements(
+          useSchedulerStore
+            .getState()
+            .placements,
+        );
+
+      const probeActive =
+        probeShownAtRef.current !==
+        null;
+
+      const metrics =
+        calculateSchedulerMetrics(
+          previousPlacements,
+          nextPlacements,
+          probeActive,
+        );
+
+      const stateHistory =
+        stateHistoryRef.current;
+
+      const visitCountBefore =
+        stateVisitCountsRef.current.get(
+          metrics.stateHash,
+        ) ?? 0;
+
+      const statePreviouslyVisited =
+        visitCountBefore >
+        0;
+
+      const isImmediateReversal =
+        stateHistory.length >=
+          2 &&
+        stateHistory[
+          stateHistory.length -
+          2
+        ] ===
+          metrics.stateHash;
+
+      stateHistoryRef.current = [
+        ...stateHistory,
+        metrics.stateHash,
+      ];
+
+      stateVisitCountsRef.current.set(
+        metrics.stateHash,
+        visitCountBefore + 1,
+      );
+
+      const latencyFromProbeMs =
+        probeShownAtRef.current ===
+        null
+          ? null
+          : Math.max(
+              0,
+              getCurrentTimeMs() -
+                probeShownAtRef.current,
+            );
+
+      const firstProbeIntegration =
+        metrics.integrationConsistentEdit &&
+        !probeIntegrated;
+
+      if (
+        firstProbeIntegration
+      ) {
+        setProbeIntegrated(
+          true,
+        );
+      }
+
+      if (
+        probeActive
+      ) {
+        postProbeEditCountRef.current +=
+          1;
+      }
+
+      addEvent({
+        eventType:
+          "unplace",
+
+        trialNumber:
+          taskNumber,
+
+        condition:
+          expectedCondition,
+
+        phase:
+          probeActive
+            ? "post_probe"
+            : "pre_probe",
+
+        talkId,
+
+        fromRoom:
+          sourcePlacement?.room,
+
+        fromSlot:
+          sourcePlacement?.slot,
+
+        source:
+          "schedule_grid",
+
+        action:
+          "unplace",
+
+        success:
+          true,
+
+        dragDurationMs,
+
+        latencyFromProbeMs,
+
+        scheduleBefore:
+          metrics.previousCanonicalSchedule,
+
+        scheduleAfter:
+          metrics.canonicalSchedule,
+
+        stateHashBefore:
+          metrics.previousStateHash,
+
+        stateHashAfter:
+          metrics.stateHash,
+
+        structuralSignatureBefore:
+          metrics.previousStructuralSignature,
+
+        structuralSignatureAfter:
+          metrics.structuralSignature,
+
+        macroStructureSignatureBefore:
+          metrics.previousMacroStructureSignature,
+
+        macroStructureSignatureAfter:
+          metrics.macroStructureSignature,
+
+        roomCompositionSignatureBefore:
+          metrics.previousRoomCompositionSignature,
+
+        roomCompositionSignatureAfter:
+          metrics.roomCompositionSignature,
+
+        scoreBefore:
+          metrics.previousScore.totalScore,
+
+        scoreAfter:
+          metrics.score.totalScore,
+
+        scoreDelta:
+          metrics.scoreDelta,
+
+        speakerConflictsBefore:
+          metrics.previousScore
+            .violatedSpeakerPairChecks,
+
+        speakerConflictsAfter:
+          metrics.score
+            .violatedSpeakerPairChecks,
+
+        hammingDistanceFromAIBefore:
+          metrics.previousHammingDistanceFromAI,
+
+        hammingDistanceFromAIAfter:
+          metrics.hammingDistanceFromAI,
+
+        insideAIFamilyBefore:
+          metrics.previousInsideAIFamily,
+
+        insideAIFamilyAfter:
+          metrics.insideAIFamily,
+
+        statePreviouslyVisited,
+
+        isImmediateReversal,
+
+        isBacktracking:
+          statePreviouslyVisited,
+
+        editCategory:
+          "move_to_unassigned",
+
+        probeVisible:
+          probeActive,
+
+        probeAcknowledged,
+
+        integrationConsistentEdit:
+          metrics.integrationConsistentEdit,
+
+        probeIntegrationDetected:
+          probeActive
+            ? probeIntegrated ||
+              firstProbeIntegration
+            : null,
+
+        postProbeFeasibleBefore:
+          metrics.postProbeFeasibleBefore,
+
+        postProbeFeasibleAfter:
+          metrics.postProbeFeasibleAfter,
+
+        unresolvedDemoTalkIdsBefore:
+          metrics.unresolvedDemoTalkIdsBefore,
+
+        unresolvedDemoTalkIdsAfter:
+          metrics.unresolvedDemoTalkIdsAfter,
+
+        resultingViolations:
+          metrics.resultingViolations,
+
+        violationCount:
+          metrics.violationCount,
+
+        metadata: {
+          taskId:
+            "symposium",
+
+          taskNumber,
+
+          changedTalkIds:
+            metrics.changedTalkIds,
+
+          probeActive,
+
+          firstProbeIntegration,
+
+          postProbeEditIndex:
+            probeActive
+              ? postProbeEditCountRef.current
+              : null,
+
+          completeAssignment:
+            metrics.completeAssignment,
+
+          structurallyLegal:
+            metrics.structurallyLegal,
+
+          preProbeFeasible:
+            metrics.preProbeFeasible,
+
+          semanticProbeCompliant:
+            probeActive
+              ? metrics.semanticProbeCompliant
+              : null,
+        },
+      });
+
+      setActiveTalkId(
+        null,
+      );
+
+      return;
+    }
 
     if (
       targetType !==
@@ -2079,12 +2994,24 @@ export default function SymposiumScheduler({
             targetSlot,
       );
 
-    const legal =
-      canMoveOrSwapTalk(
+    /*
+     * The typed validator checks both sides of a possible swap.
+     * Speaker conflicts remain visible and violable.
+     */
+    const moveValidation =
+      validateMoveOrSwapTalk(
         talkId,
         targetRoom,
         targetSlot,
       );
+
+    const targetCellReportedIllegal =
+      targetReportedLegal ===
+      false;
+
+    const legal =
+      !targetCellReportedIllegal &&
+      moveValidation.valid;
 
     const success =
       legal &&
@@ -2129,8 +3056,14 @@ export default function SymposiumScheduler({
         action:
           "no_op",
 
+        displacedTalkId:
+          moveValidation.displacedTalkId,
+
         success:
           false,
+
+        illegalReason:
+          moveValidation.reason,
 
         dragDurationMs,
 
@@ -2203,8 +3136,24 @@ export default function SymposiumScheduler({
               targetPlacement,
             ),
 
+          activeOrigin:
+            active.data.current
+              ?.origin ??
+            active.data.current
+              ?.source ??
+            null,
+
+          targetReportedLegal:
+            targetReportedLegal ??
+            null,
+
           reason:
-            "Structurally illegal placement",
+            moveValidation.reason ??
+            (
+              targetCellReportedIllegal
+                ? "The selected target cell or swap is structurally illegal"
+                : "Structurally illegal placement or swap"
+            ),
         },
       });
 
@@ -2328,6 +3277,12 @@ export default function SymposiumScheduler({
       );
     }
 
+    const probeIntegrationDetectedAfterEdit =
+      probeActive
+        ? probeIntegrated ||
+          firstProbeIntegration
+        : null;
+
     if (
       metrics.isSalvageAttempt
     ) {
@@ -2344,6 +3299,17 @@ export default function SymposiumScheduler({
         : targetPlacement
           ? "swap"
           : "move";
+
+    if (
+      action ===
+        "assign" &&
+      taskNumber !==
+        3
+    ) {
+      setParticipantAssignmentMade(
+        true,
+      );
+    }
 
     const editCategory =
       getEditCategory(
@@ -2408,10 +3374,18 @@ export default function SymposiumScheduler({
 
       action,
 
+      displacedTalkId:
+        moveValidation.displacedTalkId,
+
       success:
         true,
 
       dragDurationMs,
+
+      probeLatencyMs:
+        latencyFromProbeMs,
+
+      latencyFromProbeMs,
 
       scheduleBefore:
         metrics.previousCanonicalSchedule,
@@ -2430,6 +3404,18 @@ export default function SymposiumScheduler({
 
       structuralSignatureAfter:
         metrics.structuralSignature,
+
+      macroStructureSignatureBefore:
+        metrics.previousMacroStructureSignature,
+
+      macroStructureSignatureAfter:
+        metrics.macroStructureSignature,
+
+      roomCompositionSignatureBefore:
+        metrics.previousRoomCompositionSignature,
+
+      roomCompositionSignatureAfter:
+        metrics.roomCompositionSignature,
 
       scoreBefore:
         metrics.previousScore.totalScore,
@@ -2469,6 +3455,10 @@ export default function SymposiumScheduler({
 
       editCategory,
 
+      theoreticalEditCategory:
+        metrics.theoreticalEditCategory ??
+        undefined,
+
       isSalvageAttempt:
         metrics.isSalvageAttempt,
 
@@ -2499,13 +3489,19 @@ export default function SymposiumScheduler({
         metrics.integrationConsistentEdit,
 
       probeIntegrationDetected:
-        metrics.integrationConsistentEdit,
+        probeIntegrationDetectedAfterEdit,
 
       postProbeFeasibleBefore:
         metrics.postProbeFeasibleBefore,
 
       postProbeFeasibleAfter:
         metrics.postProbeFeasibleAfter,
+
+      unresolvedDemoTalkIdsBefore:
+        metrics.unresolvedDemoTalkIdsBefore,
+
+      unresolvedDemoTalkIdsAfter:
+        metrics.unresolvedDemoTalkIdsAfter,
 
       resultingViolations:
         metrics.resultingViolations,
@@ -2515,6 +3511,12 @@ export default function SymposiumScheduler({
 
       structuralSignature:
         metrics.structuralSignature,
+
+      macroStructureSignature:
+        metrics.macroStructureSignature,
+
+      roomCompositionSignature:
+        metrics.roomCompositionSignature,
 
       moatCrossed:
         metrics.moatCrossed,
@@ -2533,11 +3535,26 @@ export default function SymposiumScheduler({
         changedTalkIds:
           metrics.changedTalkIds,
 
+        previousMacroStructureSignature:
+          metrics.previousMacroStructureSignature,
+
+        macroStructureSignature:
+          metrics.macroStructureSignature,
+
         previousRoomCompositionSignature:
           metrics.previousRoomCompositionSignature,
 
         roomCompositionSignature:
           metrics.roomCompositionSignature,
+
+        macroStructureDefinition:
+          MACRO_STRUCTURE_DEFINITION,
+
+        theoreticalEditCategory:
+          metrics.theoreticalEditCategory,
+
+        theoreticalEditTaxonomyVersion:
+          THEORETICAL_EDIT_TAXONOMY_VERSION,
 
         previousDistanceToBestPostProbeSolution:
           metrics.previousDistanceToBestPostProbeSolution,
@@ -2583,7 +3600,25 @@ export default function SymposiumScheduler({
 
         firstProbeIntegration,
 
+        probeIntegrationDetected:
+          probeIntegrationDetectedAfterEdit,
+
+        integrationTalkIds:
+          metrics.integrationTalkIds,
+
         latencyFromProbeMs,
+
+        postProbeFeasibleBefore:
+          metrics.postProbeFeasibleBefore,
+
+        postProbeFeasibleAfter:
+          metrics.postProbeFeasibleAfter,
+
+        unresolvedDemoTalkIdsBefore:
+          metrics.unresolvedDemoTalkIdsBefore,
+
+        unresolvedDemoTalkIdsAfter:
+          metrics.unresolvedDemoTalkIdsAfter,
 
         postProbeEditIndex,
 
@@ -2631,7 +3666,17 @@ export default function SymposiumScheduler({
           metrics.structurallyLegal,
 
         postProbeFeasible:
-          metrics.postProbeFeasible,
+          probeActive
+            ? metrics.postProbeFeasible
+            : null,
+
+        unresolvedDemoTalkIds:
+          probeActive
+            ? [
+                ...metrics
+                  .unresolvedDemoTalkIds,
+              ]
+            : null,
       },
     });
 
@@ -2640,7 +3685,11 @@ export default function SymposiumScheduler({
     );
   }
 
-  function handleSubmit() {
+  function handleSubmit(
+    submissionReason:
+      TrialEndReason =
+        "submitted",
+  ) {
     if (
       trialSubmitted ||
       submitInProgressRef.current ||
@@ -2664,9 +3713,68 @@ export default function SymposiumScheduler({
         finalPlacements,
       );
 
+    if (
+      submissionReason ===
+        "submitted" &&
+      !snapshot.preProbeFeasible
+    ) {
+      submitInProgressRef.current =
+        false;
+
+      return;
+    }
+
+    setTrialLocked(
+      true,
+    );
+
     const probeWasShown =
       probeShownAtRef.current !==
       null;
+
+    const submissionLatencyFromProbeMs =
+      probeShownAtRef.current ===
+      null
+        ? null
+        : Math.max(
+            0,
+            getCurrentTimeMs() -
+              probeShownAtRef.current,
+          );
+
+    const submissionPostProbeFeasible =
+      probeWasShown
+        ? snapshot.postProbeFeasible
+        : null;
+
+    const submissionUnresolvedDemoTalkIds =
+      probeWasShown
+        ? [
+            ...snapshot
+              .unresolvedDemoTalkIds,
+          ]
+        : null;
+
+    const submissionProbeIntegrationDetected =
+      probeWasShown
+        ? probeIntegrated
+        : null;
+
+    const detectionMiss =
+      probeWasShown
+        ? !probeAcknowledged
+        : null;
+
+    const integrationMiss =
+      probeWasShown
+        ? !probeIntegrated
+        : null;
+
+    const detectionWithoutIntegration =
+      probeWasShown
+        ? probeAcknowledged &&
+          !probeIntegrated
+        : null;
 
     setActiveTalkId(
       null,
@@ -2695,26 +3803,44 @@ export default function SymposiumScheduler({
 
       timerExpired,
 
+      trialEndReason:
+        submissionReason,
+
+      accepted:
+        true,
+
+      preProbeFeasible:
+        snapshot.preProbeFeasible,
+
+      semanticProbeCompliant:
+        probeWasShown
+          ? snapshot.semanticProbeCompliant
+          : null,
+
       probeShown:
         probeWasShown,
 
       probeVisible,
 
-      probeAcknowledged,
+      probeAcknowledged:
+        probeWasShown
+          ? probeAcknowledged
+          : null,
 
-      probeIntegrated,
+      probeIntegrated:
+        submissionProbeIntegrationDetected,
 
-      detectionMiss:
-        probeWasShown &&
-        !probeAcknowledged,
+      probeIntegrationDetected:
+        submissionProbeIntegrationDetected,
 
-      integrationMiss:
-        probeWasShown &&
-        !probeIntegrated,
+      detectionMiss,
 
-      detectionWithoutIntegration:
-        probeAcknowledged &&
-        !probeIntegrated,
+      integrationMiss,
+
+      detectionWithoutIntegration,
+
+      latencyFromProbeMs:
+        submissionLatencyFromProbeMs,
 
       postProbeEditCount:
         postProbeEditCountRef.current,
@@ -2743,8 +3869,17 @@ export default function SymposiumScheduler({
       scoringVersion:
         SCORING_VERSION,
 
+      macroStructureSignature:
+        snapshot.macroStructureSignature,
+
       roomCompositionSignature:
         snapshot.roomCompositionSignature,
+
+      macroStructureDefinition:
+        MACRO_STRUCTURE_DEFINITION,
+
+      theoreticalEditTaxonomyVersion:
+        THEORETICAL_EDIT_TAXONOMY_VERSION,
 
       distanceToBestPostProbeSolution:
         snapshot.distanceToBestPostProbeSolution,
@@ -2765,7 +3900,13 @@ export default function SymposiumScheduler({
         snapshot.structurallyLegal,
 
       postProbeFeasible:
-        snapshot.postProbeFeasible,
+        submissionPostProbeFeasible,
+
+      unresolvedDemoTalkIds:
+        submissionUnresolvedDemoTalkIds,
+
+      finalScheduleHash:
+        snapshot.stateHash,
 
       finalScore:
         snapshot.score.totalScore,
@@ -2789,6 +3930,17 @@ export default function SymposiumScheduler({
 
       phase:
         "submitted",
+
+      accepted:
+        true,
+
+      trialEndReason:
+        submissionReason,
+
+      probeCompliant:
+        probeWasShown
+          ? snapshot.semanticProbeCompliant
+          : null,
 
       scheduleBefore:
         snapshot.canonicalSchedule,
@@ -2841,16 +3993,41 @@ export default function SymposiumScheduler({
       probeVisible:
         probeWasShown,
 
-      probeAcknowledged,
+      probeAcknowledged:
+        probeWasShown
+          ? probeAcknowledged
+          : undefined,
 
       probeIntegrationDetected:
-        probeIntegrated,
+        submissionProbeIntegrationDetected ??
+        undefined,
+
+      latencyFromProbeMs:
+        submissionLatencyFromProbeMs,
+
+      detectionMiss,
+
+      integrationMiss,
+
+      detectionWithoutIntegration,
+
+      postProbeFeasible:
+        submissionPostProbeFeasible,
+
+      unresolvedDemoTalkIds:
+        submissionUnresolvedDemoTalkIds,
 
       postProbeFeasibleBefore:
-        snapshot.postProbeFeasible,
+        submissionPostProbeFeasible,
 
       postProbeFeasibleAfter:
-        snapshot.postProbeFeasible,
+        submissionPostProbeFeasible,
+
+      unresolvedDemoTalkIdsBefore:
+        submissionUnresolvedDemoTalkIds,
+
+      unresolvedDemoTalkIdsAfter:
+        submissionUnresolvedDemoTalkIds,
 
       resultingViolations:
         snapshot.resultingViolations,
@@ -2861,6 +4038,12 @@ export default function SymposiumScheduler({
       structuralSignature:
         snapshot.structuralSignature,
 
+      macroStructureSignature:
+        snapshot.macroStructureSignature,
+
+      roomCompositionSignature:
+        snapshot.roomCompositionSignature,
+
       metadata:
         commonMetadata,
     });
@@ -2868,6 +4051,7 @@ export default function SymposiumScheduler({
     const submitted =
       markTrialSubmitted(
         taskNumber,
+        submissionReason,
       );
 
     if (
@@ -2875,6 +4059,10 @@ export default function SymposiumScheduler({
     ) {
       submitInProgressRef.current =
         false;
+
+      setTrialLocked(
+        false,
+      );
 
       return;
     }
@@ -2901,7 +4089,7 @@ export default function SymposiumScheduler({
 
     addEvent({
       eventType:
-        "trial_submitted",
+        "trial_end",
 
       trialNumber:
         taskNumber,
@@ -2911,6 +4099,17 @@ export default function SymposiumScheduler({
 
       phase:
         "submitted",
+
+      accepted:
+        true,
+
+      trialEndReason:
+        submissionReason,
+
+      probeCompliant:
+        probeWasShown
+          ? snapshot.semanticProbeCompliant
+          : null,
 
       scheduleBefore:
         snapshot.canonicalSchedule,
@@ -2963,16 +4162,41 @@ export default function SymposiumScheduler({
       probeVisible:
         probeWasShown,
 
-      probeAcknowledged,
+      probeAcknowledged:
+        probeWasShown
+          ? probeAcknowledged
+          : undefined,
 
       probeIntegrationDetected:
-        probeIntegrated,
+        submissionProbeIntegrationDetected ??
+        undefined,
+
+      latencyFromProbeMs:
+        submissionLatencyFromProbeMs,
+
+      detectionMiss,
+
+      integrationMiss,
+
+      detectionWithoutIntegration,
+
+      postProbeFeasible:
+        submissionPostProbeFeasible,
+
+      unresolvedDemoTalkIds:
+        submissionUnresolvedDemoTalkIds,
 
       postProbeFeasibleBefore:
-        snapshot.postProbeFeasible,
+        submissionPostProbeFeasible,
 
       postProbeFeasibleAfter:
-        snapshot.postProbeFeasible,
+        submissionPostProbeFeasible,
+
+      unresolvedDemoTalkIdsBefore:
+        submissionUnresolvedDemoTalkIds,
+
+      unresolvedDemoTalkIdsAfter:
+        submissionUnresolvedDemoTalkIds,
 
       resultingViolations:
         snapshot.resultingViolations,
@@ -2982,6 +4206,12 @@ export default function SymposiumScheduler({
 
       structuralSignature:
         snapshot.structuralSignature,
+
+      macroStructureSignature:
+        snapshot.macroStructureSignature,
+
+      roomCompositionSignature:
+        snapshot.roomCompositionSignature,
 
       metadata:
         commonMetadata,
@@ -3029,8 +4259,14 @@ export default function SymposiumScheduler({
     );
   }
 
+  submitTrialRef.current =
+    handleSubmit;
+
   return (
     <DndContext
+      collisionDetection={
+        preciseCollisionDetection
+      }
       onDragStart={
         handleDragStart
       }
@@ -3049,7 +4285,7 @@ export default function SymposiumScheduler({
             </div>
 
             <div className="scheduler-task">
-              Task {taskNumber} of 3
+              Task {trialOrder} of 3
             </div>
           </div>
 
@@ -3079,16 +4315,18 @@ export default function SymposiumScheduler({
             <button
               type="button"
               className="scheduler-submit"
-              onClick={
-                handleSubmit
-              }
+              onClick={() => {
+                handleSubmit(
+                  "submitted",
+                );
+              }}
               disabled={
-                !assistantReady ||
-                trialSubmitted
+                !manualSubmitAllowed ||
+                timerExpired
               }
             >
               {timerExpired
-                ? "Finish Trial"
+                ? "Submitting..."
                 : "Submit Schedule"}
             </button>
           </div>
@@ -3114,8 +4352,8 @@ export default function SymposiumScheduler({
 
         {timerExpired && (
           <div className="trial-timeout-message">
-            Time is over. Submit your current schedule to
-            finish the trial.
+            Time is over. Your current schedule is being
+            submitted automatically.
           </div>
         )}
 
@@ -3176,7 +4414,7 @@ export default function SymposiumScheduler({
                       aria-hidden="true"
                     />
 
-                    Analyze task
+                    Generate answer
                   </div>
                 </>
               )}
@@ -3191,7 +4429,10 @@ export default function SymposiumScheduler({
           >
             {assistantReady ? (
               <>
-                <CurrentConflictsPanel />
+                {taskNumber === 3 ||
+                participantAssignmentMade ? (
+                  <CurrentConflictsPanel />
+                ) : null}
 
                 <SchedulerGrid />
 
@@ -3232,7 +4473,10 @@ export default function SymposiumScheduler({
               role="dialog"
               aria-modal="true"
               aria-labelledby="task-details-title"
-              onClick={(event) => {
+              onClick={(
+                event:
+                  MouseEvent<HTMLElement>,
+              ) => {
                 event.stopPropagation();
               }}
             >
@@ -3243,8 +4487,9 @@ export default function SymposiumScheduler({
                   </h2>
 
                   <p>
-                    Schedule all twelve talks into the
-                    available rooms and time slots.
+                    Schedule all twelve talks while satisfying
+                    the scheduling constraints and considering
+                    both scheduling preferences.
                   </p>
                 </div>
 

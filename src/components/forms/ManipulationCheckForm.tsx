@@ -1,74 +1,145 @@
 import LikertScale from "./LikertScale";
 
 export interface ManipulationCheckValues {
-  recommendationSpecificity: number | null;
-  solutionConcreteness: number | null;
-  solutionCompleteness: number | null;
-  directUsability: number | null;
+  recommendationSpecificity:
+    number | null;
+
+  solutionConcreteness:
+    number | null;
+
+  solutionCompleteness:
+    number | null;
+
+  directUsability:
+    number | null;
 }
 
 export type ManipulationCheckDimension =
   keyof ManipulationCheckValues;
 
 interface ManipulationCheckFormProps {
-  values: ManipulationCheckValues;
+  values:
+    ManipulationCheckValues;
 
   onChange: (
-    dimension: ManipulationCheckDimension,
-    value: number,
+    dimension:
+      ManipulationCheckDimension,
+    value:
+      number,
   ) => void;
 
-  disabled?: boolean;
-  className?: string;
+  disabled?:
+    boolean;
+
+  className?:
+    string;
 }
 
 interface ManipulationCheckItem {
-  dimension: ManipulationCheckDimension;
-  title: string;
-  statement: string;
+  dimension:
+    ManipulationCheckDimension;
+
+  title:
+    string;
+
+  statement:
+    string;
 }
 
-const manipulationCheckItems: ManipulationCheckItem[] = [
-  {
-    dimension: "recommendationSpecificity",
-    title: "Recommendation specificity",
-    statement:
-      "The AI recommendation was specific rather than general.",
-  },
-  {
-    dimension: "solutionConcreteness",
-    title: "Solution concreteness",
-    statement:
-      "The AI provided a concrete scheduling solution rather than only a general strategy.",
-  },
-  {
-    dimension: "solutionCompleteness",
-    title: "Solution completeness",
-    statement:
-      "The AI provided a complete proposed schedule.",
-  },
-  {
-    dimension: "directUsability",
-    title: "Direct usability",
-    statement:
-      "I could use the AI output directly with little additional planning.",
-  },
-];
+const MIN_RATING =
+  1;
+
+const MAX_RATING =
+  7;
+
+const manipulationCheckItems:
+  ManipulationCheckItem[] = [
+    {
+      dimension:
+        "recommendationSpecificity",
+
+      title:
+        "Perceived recommendation specificity",
+
+      statement:
+        "The AI recommendation was specific rather than general.",
+    },
+
+    {
+      dimension:
+        "solutionConcreteness",
+
+      title:
+        "Perceived solution concreteness",
+
+      statement:
+        "The AI provided a concrete scheduling solution rather than only a general strategy.",
+    },
+
+    {
+      dimension:
+        "solutionCompleteness",
+
+      title:
+        "Perceived solution completeness",
+
+      statement:
+        "The AI provided a complete proposed schedule.",
+    },
+
+    {
+      dimension:
+        "directUsability",
+
+      title:
+        "Perceived direct usability",
+
+      statement:
+        "I could use the AI output directly with little additional planning.",
+    },
+  ];
+
+function isValidManipulationRating(
+  value:
+    number | null,
+): value is number {
+  return (
+    value !==
+      null &&
+    Number.isInteger(
+      value,
+    ) &&
+    value >=
+      MIN_RATING &&
+    value <=
+      MAX_RATING
+  );
+}
 
 export function createDefaultManipulationCheckValues(): ManipulationCheckValues {
   return {
-    recommendationSpecificity: null,
-    solutionConcreteness: null,
-    solutionCompleteness: null,
-    directUsability: null,
+    recommendationSpecificity:
+      null,
+
+    solutionConcreteness:
+      null,
+
+    solutionCompleteness:
+      null,
+
+    directUsability:
+      null,
   };
 }
 
 export function isManipulationCheckComplete(
-  values: ManipulationCheckValues,
+  values:
+    ManipulationCheckValues,
 ): boolean {
-  return Object.values(values).every(
-    (value) => value !== null,
+  return Object.values(
+    values,
+  ).every(
+    isValidManipulationRating,
   );
 }
 
@@ -80,21 +151,31 @@ export default function ManipulationCheckForm({
 }: ManipulationCheckFormProps) {
   const formClassName = [
     "manipulation-check-form",
+
     disabled
       ? "manipulation-check-form-disabled"
       : "",
+
     className,
   ]
-    .filter(Boolean)
-    .join(" ");
+    .filter(
+      Boolean,
+    )
+    .join(
+      " ",
+    );
 
   return (
     <fieldset
-      className={formClassName}
-      disabled={disabled}
+      className={
+        formClassName
+      }
+      disabled={
+        disabled
+      }
     >
       <legend className="sr-only">
-        AI assistance ratings
+        Perceived AI assistance ratings
       </legend>
 
       <div className="likert-list">
@@ -105,15 +186,37 @@ export default function ManipulationCheckForm({
             statement,
           }) => (
             <LikertScale
-              key={dimension}
+              key={
+                dimension
+              }
               name={`manipulation-${dimension}`}
-              title={title}
-              description={statement}
+              title={
+                title
+              }
+              description={
+                statement
+              }
               lowLabel="Strongly disagree"
               highLabel="Strongly agree"
-              value={values[dimension]}
-              disabled={disabled}
-              onChange={(value) =>
+              value={
+                values[
+                  dimension
+                ]
+              }
+              min={
+                MIN_RATING
+              }
+              max={
+                MAX_RATING
+              }
+              required
+              disabled={
+                disabled
+              }
+              ariaLabel={`${title}, rated from ${MIN_RATING} strongly disagree to ${MAX_RATING} strongly agree`}
+              onChange={(
+                value,
+              ) =>
                 onChange(
                   dimension,
                   value,

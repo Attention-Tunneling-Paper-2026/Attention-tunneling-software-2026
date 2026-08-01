@@ -1,6 +1,12 @@
-import { useId } from "react";
+import {
+  useId,
+} from "react";
 
-interface LikertScaleProps {
+import {
+  LIKERT_RATINGS,
+} from "../../types/questionnaire";
+
+export interface LikertScaleProps {
   name: string;
   title: string;
   description?: string;
@@ -10,7 +16,9 @@ interface LikertScaleProps {
 
   value: number | null;
 
-  onChange: (value: number) => void;
+  onChange: (
+    value: number,
+  ) => void;
 
   min?: number;
   max?: number;
@@ -22,6 +30,32 @@ interface LikertScaleProps {
   className?: string;
 }
 
+function createLikertOptions(
+  min: number,
+  max: number,
+): number[] {
+  if (
+    !Number.isInteger(
+      min,
+    ) ||
+    !Number.isInteger(
+      max,
+    ) ||
+    max <
+      min
+  ) {
+    return [];
+  }
+
+  return LIKERT_RATINGS.filter(
+    (rating) =>
+      rating >=
+        min &&
+      rating <=
+        max,
+  );
+}
+
 export default function LikertScale({
   name,
   title,
@@ -30,112 +64,230 @@ export default function LikertScale({
   highLabel,
   value,
   onChange,
-  min = 1,
-  max = 7,
+  min = 0,
+  max = 5,
   required = true,
   disabled = false,
   ariaLabel,
   className = "",
 }: LikertScaleProps) {
-  const generatedId = useId();
+  const generatedId =
+    useId();
 
-  const descriptionId = description
-    ? `${generatedId}-description`
-    : undefined;
+  const titleId =
+    `${generatedId}-title`;
 
-  const options = Array.from(
-    {
-      length: max - min + 1,
-    },
-    (_, index) => min + index,
-  );
+  const descriptionId =
+    description
+      ? `${generatedId}-description`
+      : undefined;
+
+  const labelsId =
+    `${generatedId}-labels`;
+
+  const options =
+    createLikertOptions(
+      min,
+      max,
+    );
+
+  const selectedValue =
+    value !==
+      null &&
+    options.includes(
+      value,
+    )
+      ? value
+      : null;
 
   const fieldsetClassName = [
     "likert-card",
+
     disabled
       ? "likert-card-disabled"
       : "",
+
     className,
   ]
-    .filter(Boolean)
-    .join(" ");
+    .filter(
+      Boolean,
+    )
+    .join(
+      " ",
+    );
+
+  const describedBy = [
+    descriptionId,
+    labelsId,
+  ]
+    .filter(
+      Boolean,
+    )
+    .join(
+      " ",
+    );
+
+  const minimumOption =
+    options[0] ??
+    min;
+
+  const maximumOption =
+    options[
+      options.length -
+      1
+    ] ??
+    max;
 
   return (
     <fieldset
-      className={fieldsetClassName}
-      disabled={disabled}
-      aria-label={ariaLabel}
-      aria-describedby={descriptionId}
+      className={
+        fieldsetClassName
+      }
+      disabled={
+        disabled
+      }
+      aria-labelledby={
+        titleId
+      }
+      aria-describedby={
+        describedBy
+      }
     >
       <legend>
-        <strong>{title}</strong>
+        <span className="likert-legend-content">
+          <strong
+            id={
+              titleId
+            }
+          >
+            {title}
+          </strong>
 
-        {description ? (
-          <span id={descriptionId}>
-            {description}
-          </span>
-        ) : null}
+          {description ? (
+            <span
+              id={
+                descriptionId
+              }
+              className="likert-description"
+            >
+              {description}
+            </span>
+          ) : null}
+        </span>
       </legend>
 
       <div
         className="likert-options"
         role="radiogroup"
-        aria-label={ariaLabel ?? title}
+        aria-label={
+          ariaLabel ??
+          title
+        }
+        aria-required={
+          required
+        }
+        data-option-count={
+          options.length
+        }
       >
-        {options.map((option) => {
-          const optionId =
-            `${generatedId}-${option}`;
+        {options.map(
+          (
+            option,
+          ) => {
+            const optionId =
+              `${generatedId}-${option}`;
 
-          const selected =
-            value === option;
+            const selected =
+              selectedValue ===
+              option;
 
-          return (
-            <label
-              key={option}
-              htmlFor={optionId}
-              className={[
-                "likert-option",
-                selected
-                  ? "likert-option-selected"
-                  : "",
-              ]
-                .filter(Boolean)
-                .join(" ")}
-            >
-              <input
-                id={optionId}
-                type="radio"
-                name={name}
-                value={option}
-                checked={selected}
-                required={required}
-                disabled={disabled}
-                onChange={() =>
-                  onChange(option)
+            return (
+              <label
+                key={
+                  option
                 }
-              />
+                htmlFor={
+                  optionId
+                }
+                className={[
+                  "likert-option",
 
-              <span aria-hidden="true">
-                {option}
-              </span>
+                  selected
+                    ? "likert-option-selected"
+                    : "",
+                ]
+                  .filter(
+                    Boolean,
+                  )
+                  .join(
+                    " ",
+                  )}
+              >
+                <input
+                  id={
+                    optionId
+                  }
+                  className="likert-input"
+                  type="radio"
+                  name={
+                    name
+                  }
+                  value={
+                    option
+                  }
+                  checked={
+                    selected
+                  }
+                  required={
+                    required
+                  }
+                  disabled={
+                    disabled
+                  }
+                  aria-label={`${title}: ${option} out of ${maximumOption}`}
+                  onChange={() =>
+                    onChange(
+                      option,
+                    )
+                  }
+                />
 
-              <span className="sr-only">
-                Rating {option} of {max}
-              </span>
-            </label>
-          );
-        })}
+                <span
+                  className="likert-number"
+                  aria-hidden="true"
+                >
+                  {option}
+                </span>
+              </label>
+            );
+          },
+        )}
       </div>
 
-      <div className="likert-labels">
+      <div
+        id={
+          labelsId
+        }
+        className="likert-labels"
+      >
         <span>
-          <strong>{min}</strong>
-          <small>{lowLabel}</small>
+          <strong>
+            {minimumOption}
+          </strong>
+
+          <small>
+            {lowLabel}
+          </small>
         </span>
 
         <span>
-          <strong>{max}</strong>
-          <small>{highLabel}</small>
+          <strong>
+            {maximumOption}
+          </strong>
+
+          <small>
+            {highLabel}
+          </small>
         </span>
       </div>
     </fieldset>

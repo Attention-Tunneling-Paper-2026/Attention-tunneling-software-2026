@@ -1,6 +1,7 @@
 import {
   formatAllowedRooms,
   formatAllowedSlots,
+  getSpeakerDisplayLabel,
   TALKS,
 } from "../../data/symposium";
 
@@ -67,9 +68,9 @@ export default function TaskSummaryTable() {
                 `task-summary-topic task-summary-topic-${talk.topic.toLowerCase()}`;
 
               const speakerLabel =
-                talk.speaker
-                  ? `Dr. ${talk.speaker}`
-                  : "Solo speaker";
+                getSpeakerDisplayLabel(
+                  talk.speaker,
+                );
 
               return (
                 <tr key={talk.id}>

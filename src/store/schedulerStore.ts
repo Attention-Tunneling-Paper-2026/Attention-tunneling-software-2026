@@ -1,751 +1,755 @@
-import {
-  create,
-} from "zustand";
+import { create } from "zustand";
 
 import {
+  ROOM_DETAILS,
   TALKS,
   getInitialPlacements,
-  getInitialPlacementsForTrial,
   getTalkById,
 } from "../data/symposium";
 
 import {
+  DEFAULT_CONDITION_ORDER,
   getConditionForTrial,
 } from "../types/scheduler";
 
 import type {
   ConcretizationLevel,
+  ConditionOrder,
+  DragOrigin,
+  IllegalMoveReason,
+  MoveValidationResult,
   Placement,
+  ScheduleMoveAction,
   Room,
   Slot,
   StudyTrialNumber,
+  StudyTrialOrder,
 } from "../types/scheduler";
 
 interface ScheduleState {
-  level:
-    ConcretizationLevel;
-
-  trialNumber:
-    StudyTrialNumber;
-
-  placements:
-    Placement[];
-
-  unassignedTalkIds:
-    string[];
-
-  activeTalkId:
-    string | null;
-
-  scheduleRevision:
-    number;
+  level: ConcretizationLevel;
+  trialNumber: StudyTrialNumber;
+  trialOrder: StudyTrialOrder;
+  conditionOrder: ConditionOrder;
+  placements: Placement[];
+  unassignedTalkIds: string[];
+  activeTalkId: string | null;
+  activeDragOrigin: DragOrigin | null;
+  scheduleRevision: number;
+  allowTrayUnplace: boolean;
+  trialLocked: boolean;
 }
 
-interface SchedulerStore
-  extends ScheduleState {
-  setActiveTalkId: (
-    talkId:
-      string | null,
-  ) => void;
+interface SchedulerStore extends ScheduleState {
+  setActiveTalkId: (talkId: string | null) => void;
+  setActiveDragOrigin: (origin: DragOrigin | null) => void;
+  setAllowTrayUnplace: (allowed: boolean) => void;
+  setTrialLocked: (locked: boolean) => void;
 
   initializeTrial: (
-    trialNumber:
-      StudyTrialNumber,
+    trialNumber: StudyTrialNumber,
+    conditionOrder?: ConditionOrder,
+    trialOrder?: StudyTrialOrder,
   ) => void;
 
   initializeSchedule: (
-    level:
-      ConcretizationLevel,
-
-    trialNumber?:
-      StudyTrialNumber,
+    level: ConcretizationLevel,
+    trialNumber?: StudyTrialNumber,
+    trialOrder?: StudyTrialOrder,
+    conditionOrder?: ConditionOrder,
   ) => void;
 
-  setLevel: (
-    level:
-      ConcretizationLevel,
-  ) => void;
+  setLevel: (level: ConcretizationLevel) => void;
+  resetSchedule: () => void;
+  resetForNewParticipant: () => void;
+  getPlacementsSnapshot: () => Placement[];
 
-  resetSchedule:
-    () => void;
-
-  resetForNewParticipant:
-    () => void;
-
-  getPlacementsSnapshot:
-    () => Placement[];
+  validateMoveOrSwapTalk: (
+    talkId: string,
+    targetRoom: Room,
+    targetSlot: Slot,
+  ) => MoveValidationResult;
 
   canMoveOrSwapTalk: (
-    talkId:
-      string,
-
-    targetRoom:
-      Room,
-
-    targetSlot:
-      Slot,
+    talkId: string,
+    targetRoom: Room,
+    targetSlot: Slot,
   ) => boolean;
 
   moveOrSwapTalk: (
-    talkId:
-      string,
-
-    targetRoom:
-      Room,
-
-    targetSlot:
-      Slot,
+    talkId: string,
+    targetRoom: Room,
+    targetSlot: Slot,
   ) => boolean;
 
-  unassignTalk: (
-    talkId:
-      string,
-  ) => boolean;
+  unassignTalk: (talkId: string) => boolean;
 }
 
-const INITIAL_TRIAL_NUMBER:
-  StudyTrialNumber = 1;
+const INITIAL_TRIAL_NUMBER: StudyTrialNumber = 1;
+const INITIAL_TRIAL_ORDER: StudyTrialOrder = 1;
+
+/*
+ * Keeping this false preserves the verified swap neighborhood for the
+ * fully populated AI artifact. It can still be changed through the
+ * existing setter when a pilot configuration requires tray unplacement.
+ */
+const DEFAULT_ALLOW_TRAY_UNPLACE = false;
 
 function clonePlacements(
-  placements:
-    Placement[],
+  placements: Placement[],
 ): Placement[] {
-  return placements.map(
-    (placement) => ({
-      ...placement,
-    }),
-  );
+  return placements.map((placement) => ({
+    ...placement,
+  }));
 }
 
 function sortPlacements(
-  placements:
-    Placement[],
+  placements: Placement[],
 ): Placement[] {
-  return [
-    ...placements,
-  ].sort(
-    (
-      first,
-      second,
-    ) => {
-      const roomComparison =
-        first.room.localeCompare(
-          second.room,
-        );
+  return [...placements].sort((first, second) => {
+    const roomComparison =
+      first.room.localeCompare(second.room);
 
-      if (
-        roomComparison !==
-        0
-      ) {
-        return roomComparison;
-      }
+    if (roomComparison !== 0) {
+      return roomComparison;
+    }
 
-      if (
-        first.slot !==
-        second.slot
-      ) {
-        return (
-          first.slot -
-          second.slot
-        );
-      }
+    if (first.slot !== second.slot) {
+      return first.slot - second.slot;
+    }
 
-      return first.talkId.localeCompare(
-        second.talkId,
-      );
-    },
-  );
+    return first.talkId.localeCompare(
+      second.talkId,
+    );
+  });
 }
 
 function getUnassignedTalkIds(
-  placements:
-    Placement[],
+  placements: Placement[],
 ): string[] {
-  const assignedTalkIds =
-    new Set(
-      placements.map(
-        (placement) =>
-          placement.talkId,
-      ),
-    );
+  const assignedTalkIds = new Set(
+    placements.map(
+      (placement) => placement.talkId,
+    ),
+  );
 
-  return TALKS
-    .filter(
-      (talk) =>
-        !assignedTalkIds.has(
-          talk.id,
-        ),
-    )
-    .map(
-      (talk) =>
-        talk.id,
+  return TALKS.filter(
+    (talk) => !assignedTalkIds.has(talk.id),
+  ).map((talk) => talk.id);
+}
+
+function getTrialOrderForCondition(
+  level: ConcretizationLevel,
+  conditionOrder: ConditionOrder,
+): StudyTrialOrder {
+  const index = conditionOrder.indexOf(level);
+
+  if (index < 0) {
+    throw new Error(
+      `Condition ${level} is missing from order ${conditionOrder}.`,
     );
+  }
+
+  return (index + 1) as StudyTrialOrder;
 }
 
 function createScheduleState(
-  level:
-    ConcretizationLevel,
-
-  trialNumber:
-    StudyTrialNumber,
-
-  scheduleRevision =
-    0,
+  level: ConcretizationLevel,
+  trialNumber: StudyTrialNumber,
+  trialOrder: StudyTrialOrder,
+  conditionOrder: ConditionOrder,
+  scheduleRevision = 0,
+  allowTrayUnplace = DEFAULT_ALLOW_TRAY_UNPLACE,
 ): ScheduleState {
-  const placements =
-    sortPlacements(
-      clonePlacements(
-        getInitialPlacements(
-          level,
-        ),
-      ),
-    );
+  const placements = sortPlacements(
+    clonePlacements(
+      getInitialPlacements(level),
+    ),
+  );
 
   return {
     level,
-
     trialNumber,
-
+    trialOrder,
+    conditionOrder,
     placements,
-
     unassignedTalkIds:
-      getUnassignedTalkIds(
-        placements,
-      ),
-
-    activeTalkId:
-      null,
-
+      getUnassignedTalkIds(placements),
+    activeTalkId: null,
+    activeDragOrigin: null,
     scheduleRevision,
+    allowTrayUnplace,
+    trialLocked: false,
   };
 }
 
 function createTrialScheduleState(
-  trialNumber:
-    StudyTrialNumber,
-
-  scheduleRevision =
-    0,
+  trialNumber: StudyTrialNumber,
+  conditionOrder: ConditionOrder =
+    DEFAULT_CONDITION_ORDER,
+  trialOrder?: StudyTrialOrder,
+  scheduleRevision = 0,
+  allowTrayUnplace = DEFAULT_ALLOW_TRAY_UNPLACE,
 ): ScheduleState {
-  const level =
-    getConditionForTrial(
-      trialNumber,
+  const level = getConditionForTrial(trialNumber);
+  const resolvedTrialOrder =
+    trialOrder ??
+    getTrialOrderForCondition(
+      level,
+      conditionOrder,
     );
 
-  const placements =
-    sortPlacements(
-      clonePlacements(
-        getInitialPlacementsForTrial(
-          trialNumber,
-        ),
-      ),
-    );
-
-  return {
+  return createScheduleState(
     level,
-
     trialNumber,
-
-    placements,
-
-    unassignedTalkIds:
-      getUnassignedTalkIds(
-        placements,
-      ),
-
-    activeTalkId:
-      null,
-
+    resolvedTrialOrder,
+    conditionOrder,
     scheduleRevision,
-  };
-}
-
-function isStructurallyLegal(
-  talkId:
-    string,
-
-  room:
-    Room,
-
-  slot:
-    Slot,
-): boolean {
-  const talk =
-    getTalkById(
-      talkId,
-    );
-
-  if (
-    !talk
-  ) {
-    return false;
-  }
-
-  return (
-    talk.allowedRooms.includes(
-      room,
-    ) &&
-    talk.allowedSlots.includes(
-      slot,
-    )
+    allowTrayUnplace,
   );
 }
 
 function getPlacementForTalk(
-  placements:
-    Placement[],
-
-  talkId:
-    string,
+  placements: Placement[],
+  talkId: string,
 ): Placement | undefined {
   return placements.find(
-    (placement) =>
-      placement.talkId ===
-      talkId,
+    (placement) => placement.talkId === talkId,
   );
 }
 
 function getPlacementAtCell(
-  placements:
-    Placement[],
-
-  room:
-    Room,
-
-  slot:
-    Slot,
+  placements: Placement[],
+  room: Room,
+  slot: Slot,
 ): Placement | undefined {
   return placements.find(
     (placement) =>
-      placement.room ===
-        room &&
-      placement.slot ===
-        slot,
+      placement.room === room &&
+      placement.slot === slot,
   );
+}
+
+function getIllegalPlacementReason(
+  talkId: string,
+  room: Room,
+  slot: Slot,
+  displaced = false,
+): IllegalMoveReason | undefined {
+  const talk = getTalkById(talkId);
+
+  if (!talk) {
+    return "talk_not_found";
+  }
+
+  if (!talk.allowedRooms.includes(room)) {
+    if (
+      talk.demo &&
+      !ROOM_DETAILS[room].hasProjector
+    ) {
+      return displaced
+        ? "displaced_talk_projector_required"
+        : "target_projector_required";
+    }
+
+    if (
+      talk.id === "N3" &&
+      ROOM_DETAILS[room].capacity < 80
+    ) {
+      return displaced
+        ? "displaced_talk_capacity_insufficient"
+        : "target_capacity_insufficient";
+    }
+
+    return displaced
+      ? "displaced_talk_room_not_allowed"
+      : "target_room_not_allowed";
+  }
+
+  if (!talk.allowedSlots.includes(slot)) {
+    return displaced
+      ? "displaced_talk_slot_not_allowed"
+      : "target_slot_not_allowed";
+  }
+
+  return undefined;
 }
 
 function placementsAreEqual(
-  first:
-    Placement[],
-
-  second:
-    Placement[],
+  first: Placement[],
+  second: Placement[],
 ): boolean {
-  if (
-    first.length !==
-    second.length
-  ) {
+  if (first.length !== second.length) {
     return false;
   }
 
-  return first.every(
-    (placement) => {
-      const matchingPlacement =
-        getPlacementForTalk(
-          second,
-          placement.talkId,
-        );
-
-      return (
-        matchingPlacement?.room ===
-          placement.room &&
-        matchingPlacement.slot ===
-          placement.slot
+  return first.every((placement) => {
+    const matchingPlacement =
+      getPlacementForTalk(
+        second,
+        placement.talkId,
       );
-    },
-  );
+
+    return (
+      matchingPlacement?.room ===
+        placement.room &&
+      matchingPlacement.slot === placement.slot
+    );
+  });
 }
 
-const initialState =
-  createTrialScheduleState(
-    INITIAL_TRIAL_NUMBER,
-  );
+function clearDragState(): Pick<
+  ScheduleState,
+  "activeTalkId" | "activeDragOrigin"
+> {
+  return {
+    activeTalkId: null,
+    activeDragOrigin: null,
+  };
+}
+
+const initialState = createTrialScheduleState(
+  INITIAL_TRIAL_NUMBER,
+  DEFAULT_CONDITION_ORDER,
+  INITIAL_TRIAL_ORDER,
+);
 
 export const useSchedulerStore =
-  create<SchedulerStore>(
-    (
-      set,
-      get,
-    ) => ({
-      ...initialState,
+  create<SchedulerStore>((set, get) => ({
+    ...initialState,
 
-      setActiveTalkId: (
-        talkId,
-      ) => {
-        if (
-          talkId !==
-            null &&
-          !getTalkById(
-            talkId,
-          )
-        ) {
-          return;
-        }
+    setActiveTalkId: (talkId) => {
+      if (
+        talkId !== null &&
+        !getTalkById(talkId)
+      ) {
+        return;
+      }
 
-        set({
-          activeTalkId:
-            talkId,
-        });
-      },
+      if (talkId === null) {
+        set(clearDragState());
+        return;
+      }
 
-      initializeTrial: (
-        trialNumber,
-      ) => {
-        const nextRevision =
-          get()
-            .scheduleRevision +
-          1;
+      const origin: DragOrigin =
+        getPlacementForTalk(
+          get().placements,
+          talkId,
+        )
+          ? "grid"
+          : "tray";
 
-        set(
-          createTrialScheduleState(
-            trialNumber,
-            nextRevision,
-          ),
+      set({
+        activeTalkId: talkId,
+        activeDragOrigin: origin,
+      });
+    },
+
+    setActiveDragOrigin: (origin) => {
+      set({ activeDragOrigin: origin });
+    },
+
+    setAllowTrayUnplace: (allowed) => {
+      set({ allowTrayUnplace: allowed });
+    },
+
+    setTrialLocked: (locked) => {
+      set({
+        trialLocked: locked,
+        ...(locked ? clearDragState() : {}),
+      });
+    },
+
+    initializeTrial: (
+      trialNumber,
+      conditionOrder = DEFAULT_CONDITION_ORDER,
+      trialOrder,
+    ) => {
+      const state = get();
+
+      set(
+        createTrialScheduleState(
+          trialNumber,
+          conditionOrder,
+          trialOrder,
+          state.scheduleRevision + 1,
+          state.allowTrayUnplace,
+        ),
+      );
+    },
+
+    initializeSchedule: (
+      level,
+      trialNumber,
+      trialOrder,
+      conditionOrder,
+    ) => {
+      const state = get();
+      const resolvedConditionOrder =
+        conditionOrder ?? state.conditionOrder;
+      const resolvedTrialNumber =
+        trialNumber ?? state.trialNumber;
+      const resolvedTrialOrder =
+        trialOrder ??
+        getTrialOrderForCondition(
+          level,
+          resolvedConditionOrder,
         );
-      },
 
-      initializeSchedule: (
-        level,
-        trialNumber,
-      ) => {
-        const state =
-          get();
+      set(
+        createScheduleState(
+          level,
+          resolvedTrialNumber,
+          resolvedTrialOrder,
+          resolvedConditionOrder,
+          state.scheduleRevision + 1,
+          state.allowTrayUnplace,
+        ),
+      );
+    },
 
-        const resolvedTrialNumber =
-          trialNumber ??
-          state.trialNumber;
+    setLevel: (level) => {
+      const state = get();
 
-        set(
-          createScheduleState(
+      set(
+        createScheduleState(
+          level,
+          state.trialNumber,
+          getTrialOrderForCondition(
             level,
-            resolvedTrialNumber,
-            state.scheduleRevision +
-              1,
+            state.conditionOrder,
           ),
+          state.conditionOrder,
+          state.scheduleRevision + 1,
+          state.allowTrayUnplace,
+        ),
+      );
+    },
+
+    resetSchedule: () => {
+      const state = get();
+
+      set(
+        createTrialScheduleState(
+          state.trialNumber,
+          state.conditionOrder,
+          state.trialOrder,
+          state.scheduleRevision + 1,
+          state.allowTrayUnplace,
+        ),
+      );
+    },
+
+    resetForNewParticipant: () => {
+      set(
+        createTrialScheduleState(
+          INITIAL_TRIAL_NUMBER,
+          DEFAULT_CONDITION_ORDER,
+          INITIAL_TRIAL_ORDER,
+          0,
+          DEFAULT_ALLOW_TRAY_UNPLACE,
+        ),
+      );
+    },
+
+    getPlacementsSnapshot: () =>
+      clonePlacements(get().placements),
+
+    validateMoveOrSwapTalk: (
+      talkId,
+      targetRoom,
+      targetSlot,
+    ) => {
+      const state = get();
+      const sourcePlacement =
+        getPlacementForTalk(
+          state.placements,
+          talkId,
         );
-      },
-
-      setLevel: (
-        level,
-      ) => {
-        const state =
-          get();
-
-        set(
-          createScheduleState(
-            level,
-            state.trialNumber,
-            state.scheduleRevision +
-              1,
-          ),
+      const targetPlacement =
+        getPlacementAtCell(
+          state.placements,
+          targetRoom,
+          targetSlot,
         );
-      },
+      const action: ScheduleMoveAction =
+        targetPlacement &&
+        targetPlacement.talkId !== talkId
+          ? "swap"
+          : "move";
 
-      resetSchedule:
-        () => {
-          const state =
-            get();
-
-          set(
-            createTrialScheduleState(
-              state.trialNumber,
-              state.scheduleRevision +
-                1,
-            ),
-          );
-        },
-
-      resetForNewParticipant:
-        () => {
-          set(
-            createTrialScheduleState(
-              INITIAL_TRIAL_NUMBER,
-              0,
-            ),
-          );
-        },
-
-      getPlacementsSnapshot:
-        () =>
-          clonePlacements(
-            get().placements,
-          ),
-
-      canMoveOrSwapTalk: (
+      const resultBase: Omit<
+        MoveValidationResult,
+        "valid" | "reason"
+      > = {
+        action,
         talkId,
-        targetRoom,
-        targetSlot,
-      ) => {
-        const {
-          placements,
-        } = get();
+        target: {
+          room: targetRoom,
+          slot: targetSlot,
+        },
+        displacedTalkId:
+          action === "swap"
+            ? targetPlacement?.talkId
+            : undefined,
+      };
 
-        if (
-          !isStructurallyLegal(
-            talkId,
-            targetRoom,
-            targetSlot,
-          )
-        ) {
-          return false;
-        }
+      if (state.trialLocked) {
+        return {
+          ...resultBase,
+          valid: false,
+          reason: "trial_locked",
+        };
+      }
 
-        const sourcePlacement =
-          getPlacementForTalk(
-            placements,
-            talkId,
-          );
+      if (!getTalkById(talkId)) {
+        return {
+          ...resultBase,
+          valid: false,
+          reason: "talk_not_found",
+        };
+      }
 
-        const targetPlacement =
-          getPlacementAtCell(
-            placements,
-            targetRoom,
-            targetSlot,
-          );
+      const sourceIsTray =
+        state.unassignedTalkIds.includes(talkId);
 
-        if (
-          sourcePlacement?.room ===
-            targetRoom &&
-          sourcePlacement.slot ===
-            targetSlot
-        ) {
-          return true;
-        }
+      if (!sourcePlacement && !sourceIsTray) {
+        return {
+          ...resultBase,
+          valid: false,
+          reason: "source_not_found",
+        };
+      }
 
-        if (
-          !targetPlacement
-        ) {
-          return true;
-        }
+      const targetReason =
+        getIllegalPlacementReason(
+          talkId,
+          targetRoom,
+          targetSlot,
+        );
 
-        if (
-          !sourcePlacement
-        ) {
-          return false;
-        }
+      if (targetReason) {
+        return {
+          ...resultBase,
+          valid: false,
+          reason: targetReason,
+        };
+      }
 
-        return isStructurallyLegal(
+      if (
+        sourcePlacement?.room === targetRoom &&
+        sourcePlacement.slot === targetSlot
+      ) {
+        return {
+          ...resultBase,
+          valid: true,
+        };
+      }
+
+      if (!targetPlacement) {
+        return {
+          ...resultBase,
+          valid: true,
+        };
+      }
+
+      if (!sourcePlacement) {
+        return {
+          ...resultBase,
+          valid: false,
+          reason: "source_not_found",
+        };
+      }
+
+      const displacedReason =
+        getIllegalPlacementReason(
           targetPlacement.talkId,
           sourcePlacement.room,
           sourcePlacement.slot,
+          true,
         );
-      },
 
-      moveOrSwapTalk: (
+      if (displacedReason) {
+        return {
+          ...resultBase,
+          valid: false,
+          reason: displacedReason,
+        };
+      }
+
+      return {
+        ...resultBase,
+        valid: true,
+      };
+    },
+
+    canMoveOrSwapTalk: (
+      talkId,
+      targetRoom,
+      targetSlot,
+    ) =>
+      get().validateMoveOrSwapTalk(
         talkId,
         targetRoom,
         targetSlot,
-      ) => {
-        const state =
-          get();
+      ).valid,
 
-        if (
-          !state.canMoveOrSwapTalk(
-            talkId,
-            targetRoom,
-            targetSlot,
+    moveOrSwapTalk: (
+      talkId,
+      targetRoom,
+      targetSlot,
+    ) => {
+      const state = get();
+      const validation =
+        state.validateMoveOrSwapTalk(
+          talkId,
+          targetRoom,
+          targetSlot,
+        );
+
+      if (!validation.valid) {
+        set(clearDragState());
+        return false;
+      }
+
+      const sourcePlacement =
+        getPlacementForTalk(
+          state.placements,
+          talkId,
+        );
+      const targetPlacement =
+        getPlacementAtCell(
+          state.placements,
+          targetRoom,
+          targetSlot,
+        );
+
+      if (
+        sourcePlacement?.room === targetRoom &&
+        sourcePlacement.slot === targetSlot
+      ) {
+        set(clearDragState());
+        return true;
+      }
+
+      let nextPlacements: Placement[];
+
+      if (!targetPlacement) {
+        nextPlacements = state.placements
+          .filter(
+            (placement) =>
+              placement.talkId !== talkId,
           )
-        ) {
+          .map((placement) => ({
+            ...placement,
+          }));
+
+        nextPlacements.push({
+          talkId,
+          room: targetRoom,
+          slot: targetSlot,
+        });
+      } else {
+        if (!sourcePlacement) {
+          set(clearDragState());
           return false;
         }
 
-        const sourcePlacement =
-          getPlacementForTalk(
-            state.placements,
-            talkId,
-          );
+        nextPlacements = state.placements.map(
+          (placement) => {
+            if (placement.talkId === talkId) {
+              return {
+                ...placement,
+                room: targetRoom,
+                slot: targetSlot,
+              };
+            }
 
-        const targetPlacement =
-          getPlacementAtCell(
-            state.placements,
-            targetRoom,
-            targetSlot,
-          );
+            if (
+              placement.talkId ===
+              targetPlacement.talkId
+            ) {
+              return {
+                ...placement,
+                room: sourcePlacement.room,
+                slot: sourcePlacement.slot,
+              };
+            }
 
-        if (
-          sourcePlacement?.room ===
-            targetRoom &&
-          sourcePlacement.slot ===
-            targetSlot
-        ) {
-          set({
-            activeTalkId:
-              null,
-          });
+            return { ...placement };
+          },
+        );
+      }
 
-          return true;
-        }
+      const normalizedPlacements =
+        sortPlacements(nextPlacements);
 
-        let nextPlacements:
-          Placement[];
+      if (
+        placementsAreEqual(
+          state.placements,
+          normalizedPlacements,
+        )
+      ) {
+        set(clearDragState());
+        return true;
+      }
 
-        if (
-          !targetPlacement
-        ) {
-          nextPlacements =
-            state.placements
-              .filter(
-                (placement) =>
-                  placement.talkId !==
-                  talkId,
-              )
-              .map(
-                (placement) => ({
-                  ...placement,
-                }),
-              );
-
-          nextPlacements.push({
-            talkId,
-
-            room:
-              targetRoom,
-
-            slot:
-              targetSlot,
-          });
-        } else {
-          if (
-            !sourcePlacement
-          ) {
-            return false;
-          }
-
-          nextPlacements =
-            state.placements.map(
-              (placement) => {
-                if (
-                  placement.talkId ===
-                  talkId
-                ) {
-                  return {
-                    ...placement,
-
-                    room:
-                      targetRoom,
-
-                    slot:
-                      targetSlot,
-                  };
-                }
-
-                if (
-                  placement.talkId ===
-                  targetPlacement.talkId
-                ) {
-                  return {
-                    ...placement,
-
-                    room:
-                      sourcePlacement.room,
-
-                    slot:
-                      sourcePlacement.slot,
-                  };
-                }
-
-                return {
-                  ...placement,
-                };
-              },
-            );
-        }
-
-        const normalizedPlacements =
-          sortPlacements(
-            nextPlacements,
-          );
-
-        if (
-          placementsAreEqual(
-            state.placements,
+      set({
+        placements: normalizedPlacements,
+        unassignedTalkIds:
+          getUnassignedTalkIds(
             normalizedPlacements,
+          ),
+        ...clearDragState(),
+        scheduleRevision:
+          state.scheduleRevision + 1,
+      });
+
+      return true;
+    },
+
+    unassignTalk: (talkId) => {
+      const state = get();
+
+      if (
+        state.trialLocked ||
+        !state.allowTrayUnplace
+      ) {
+        set(clearDragState());
+        return false;
+      }
+
+      const sourcePlacement =
+        getPlacementForTalk(
+          state.placements,
+          talkId,
+        );
+
+      if (!sourcePlacement) {
+        set(clearDragState());
+        return false;
+      }
+
+      const nextPlacements = sortPlacements(
+        state.placements
+          .filter(
+            (placement) =>
+              placement.talkId !== talkId,
           )
-        ) {
-          set({
-            activeTalkId:
-              null,
-          });
+          .map((placement) => ({
+            ...placement,
+          })),
+      );
 
-          return true;
-        }
+      set({
+        placements: nextPlacements,
+        unassignedTalkIds:
+          getUnassignedTalkIds(nextPlacements),
+        ...clearDragState(),
+        scheduleRevision:
+          state.scheduleRevision + 1,
+      });
 
-        set({
-          placements:
-            normalizedPlacements,
-
-          unassignedTalkIds:
-            getUnassignedTalkIds(
-              normalizedPlacements,
-            ),
-
-          activeTalkId:
-            null,
-
-          scheduleRevision:
-            state.scheduleRevision +
-            1,
-        });
-
-        return true;
-      },
-
-      unassignTalk: (
-        talkId,
-      ) => {
-        const state =
-          get();
-
-        const sourcePlacement =
-          getPlacementForTalk(
-            state.placements,
-            talkId,
-          );
-
-        if (
-          !sourcePlacement
-        ) {
-          set({
-            activeTalkId:
-              null,
-          });
-
-          return false;
-        }
-
-        const nextPlacements =
-          sortPlacements(
-            state.placements
-              .filter(
-                (placement) =>
-                  placement.talkId !==
-                  talkId,
-              )
-              .map(
-                (placement) => ({
-                  ...placement,
-                }),
-              ),
-          );
-
-        set({
-          placements:
-            nextPlacements,
-
-          unassignedTalkIds:
-            getUnassignedTalkIds(
-              nextPlacements,
-            ),
-
-          activeTalkId:
-            null,
-
-          scheduleRevision:
-            state.scheduleRevision +
-            1,
-        });
-
-        return true;
-      },
-    }),
-  );
+      return true;
+    },
+  }));

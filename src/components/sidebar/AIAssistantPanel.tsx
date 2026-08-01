@@ -5,67 +5,32 @@ import {
 } from "lucide-react";
 
 import {
+  SYMPOSIUM_TASK_DATA,
+} from "../../data/tasks/symposium";
+
+import {
   useSchedulerStore,
 } from "../../store/schedulerStore";
 
-import type {
-  ConcretizationLevel,
-} from "../../types/scheduler";
-
-interface AssistantContent {
-  introduction:
-    string;
-
-  artifactMessage:
-    string;
-}
-
-const ASSISTANT_CONTENT:
-  Record<
-    ConcretizationLevel,
-    AssistantContent
-  > = {
-    A: {
-      introduction:
-        "I recommend organizing the symposium into topic tracks. Assign one topic to each room and arrange the talks according to speaker availability and room requirements.",
-
-      artifactMessage:
-        "Use this strategy as a starting point and create your own schedule while checking every constraint.",
-    },
-
-    B: {
-      introduction:
-        "I recommend organizing the symposium into topic tracks. Assign one topic to each room and arrange the talks according to speaker availability and room requirements.",
-
-      artifactMessage:
-        "I added several starting placements to demonstrate the proposed structure. Complete the remaining schedule and revise any placement you consider unsuitable.",
-    },
-
-    C: {
-      introduction:
-        "I recommend organizing the symposium into topic tracks. Assign one topic to each room and arrange the talks according to speaker availability and room requirements.",
-
-      artifactMessage:
-        "I placed a complete proposed schedule on the grid. Review every placement carefully and make any changes you consider necessary.",
-    },
-  };
+const SHARED_RECOMMENDATION =
+  "Organize by topic tracks: Room A = NLP, Room B = Health, Room C = Robotics, ordered by speaker availability.";
 
 export default function AIAssistantPanel() {
-  const level =
-    useSchedulerStore(
-      (state) =>
-        state.level,
-    );
+  const level = useSchedulerStore(
+    (state) => state.level,
+  );
 
   const assistantContent =
-    ASSISTANT_CONTENT[
-      level
-    ];
+    SYMPOSIUM_TASK_DATA
+      .assistantByCondition[level];
 
   return (
     <aside
       className="panel ai-assistant-panel"
-      aria-label="AI Scheduling Assistant"
+      aria-label={assistantContent.name}
+      data-content-version={
+        assistantContent.contentVersion
+      }
     >
       <div className="ai-panel-header">
         <div className="ai-avatar">
@@ -77,7 +42,7 @@ export default function AIAssistantPanel() {
 
         <div>
           <div className="ai-panel-name">
-            AI Scheduling Assistant
+            {assistantContent.name}
           </div>
 
           <div className="ai-panel-status">
@@ -86,7 +51,7 @@ export default function AIAssistantPanel() {
               aria-hidden="true"
             />
 
-            Analysis complete
+            {assistantContent.statusLabel}
           </div>
         </div>
       </div>
@@ -105,57 +70,22 @@ export default function AIAssistantPanel() {
 
           <div className="ai-message-bubble">
             <div className="ai-message-label">
-              Recommendation
+              {assistantContent.recommendationLabel}
             </div>
 
             <p>
-              {
-                assistantContent
-                  .introduction
-              }
+              {SHARED_RECOMMENDATION}
             </p>
 
-            <div
-              className="ai-recommendation-list"
-              aria-label="Recommended topic organization"
-            >
-              <div>
-                <strong>
-                  Room A
-                </strong>
-
-                <span>
-                  NLP
-                </span>
-              </div>
-
-              <div>
-                <strong>
-                  Room B
-                </strong>
-
-                <span>
-                  Health
-                </span>
-              </div>
-
-              <div>
-                <strong>
-                  Room C
-                </strong>
-
-                <span>
-                  Robotics
-                </span>
-              </div>
-            </div>
-
-            <p>
-              {
-                assistantContent
-                  .artifactMessage
-              }
-            </p>
+            {assistantContent
+              .prefillAcknowledgment ? (
+              <p>
+                {
+                  assistantContent
+                    .prefillAcknowledgment
+                }
+              </p>
+            ) : null}
           </div>
         </div>
       </div>

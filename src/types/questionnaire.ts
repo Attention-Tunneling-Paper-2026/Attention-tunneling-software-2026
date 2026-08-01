@@ -5,23 +5,21 @@ import type {
 } from "./scheduler";
 
 export type LikertRating =
+  | 0
   | 1
   | 2
   | 3
   | 4
-  | 5
-  | 6
-  | 7;
+  | 5;
 
 export const LIKERT_RATINGS:
   readonly LikertRating[] = [
+    0,
     1,
     2,
     3,
     4,
     5,
-    6,
-    7,
   ];
 
 export type YesNoUnsure =
@@ -48,24 +46,50 @@ export const NASA_TLX_DIMENSIONS:
     "frustration",
   ];
 
+export type NasaTlxRating =
+  | 0
+  | 1
+  | 2
+  | 3
+  | 4
+  | 5
+  | 6
+  | 7
+  | null;
+
+export const NASA_TLX_RATINGS:
+  readonly Exclude<
+    NasaTlxRating,
+    null
+  >[] = [
+    0,
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+  ];
+
 export interface NasaTlxRatings {
   mentalDemand:
-    number;
+    NasaTlxRating;
 
   physicalDemand:
-    number;
+    NasaTlxRating;
 
   temporalDemand:
-    number;
+    NasaTlxRating;
 
   performance:
-    number;
+    NasaTlxRating;
 
   effort:
-    number;
+    NasaTlxRating;
 
   frustration:
-    number;
+    NasaTlxRating;
 }
 
 export type TrialExperienceDimension =
@@ -93,18 +117,18 @@ export interface TrialExperienceRatings {
 
 export type ManipulationCheckDimension =
   | "recommendationSpecificity"
+  | "recommendationDetail"
   | "solutionConcreteness"
   | "solutionCompleteness"
-  | "recommendationDetail"
   | "directUsability"
   | "solutionActionability";
 
 export const MANIPULATION_CHECK_DIMENSIONS:
   readonly ManipulationCheckDimension[] = [
     "recommendationSpecificity",
+    "recommendationDetail",
     "solutionConcreteness",
     "solutionCompleteness",
-    "recommendationDetail",
     "directUsability",
     "solutionActionability",
   ];
@@ -113,13 +137,13 @@ export interface ManipulationCheckRatings {
   recommendationSpecificity:
     LikertRating | null;
 
+  recommendationDetail:
+    LikertRating | null;
+
   solutionConcreteness:
     LikertRating | null;
 
   solutionCompleteness:
-    LikertRating | null;
-
-  recommendationDetail:
     LikertRating | null;
 
   directUsability:
@@ -137,6 +161,25 @@ export type ProbeRecallRoom =
   | "none"
   | "unsure";
 
+export type ProbeRecognitionChoice =
+  | ""
+  | "room_c_projector_failure"
+  | "room_a_projector_failure"
+  | "room_b_unavailable"
+  | "session_time_changed"
+  | "no_update"
+  | "unsure";
+
+export const PROBE_RECOGNITION_CHOICES:
+  readonly ProbeRecognitionChoice[] = [
+    "room_c_projector_failure",
+    "room_a_projector_failure",
+    "room_b_unavailable",
+    "session_time_changed",
+    "no_update",
+    "unsure",
+  ];
+
 export interface ProbeRecallResponses {
   noticedUpdate:
     YesNoUnsure;
@@ -149,6 +192,9 @@ export interface ProbeRecallResponses {
 
   recallConfidence:
     LikertRating | null;
+
+  recognitionChoice:
+    ProbeRecognitionChoice;
 }
 
 export interface TrialQuestionnaireResponse {
@@ -270,22 +316,22 @@ export function createDefaultNasaTlxRatings():
   NasaTlxRatings {
   return {
     mentalDemand:
-      50,
+      null,
 
     physicalDemand:
-      50,
+      null,
 
     temporalDemand:
-      50,
+      null,
 
     performance:
-      50,
+      null,
 
     effort:
-      50,
+      null,
 
     frustration:
-      50,
+      null,
   };
 }
 
@@ -309,13 +355,13 @@ export function createDefaultManipulationCheckRatings():
     recommendationSpecificity:
       null,
 
+    recommendationDetail:
+      null,
+
     solutionConcreteness:
       null,
 
     solutionCompleteness:
-      null,
-
-    recommendationDetail:
       null,
 
     directUsability:
@@ -340,6 +386,9 @@ export function createDefaultProbeRecallResponses():
 
     recallConfidence:
       null,
+
+    recognitionChoice:
+      "",
   };
 }
 
@@ -470,29 +519,29 @@ export function isLikertRating(
       value,
     ) &&
     value >=
-      1 &&
+      0 &&
     value <=
-      7
+      5
   );
 }
 
 export function isNasaTlxValue(
   value:
     unknown,
-): value is number {
+): value is Exclude<
+  NasaTlxRating,
+  null
+> {
   return (
     typeof value ===
       "number" &&
-    Number.isFinite(
+    Number.isInteger(
       value,
     ) &&
     value >=
       0 &&
     value <=
-      100 &&
-    value %
-      5 ===
-      0
+      7
   );
 }
 
@@ -529,6 +578,29 @@ export function isProbeRecallRoom(
       "C" ||
     value ===
       "none" ||
+    value ===
+      "unsure"
+  );
+}
+
+export function isProbeRecognitionChoice(
+  value:
+    unknown,
+): value is Exclude<
+  ProbeRecognitionChoice,
+  ""
+> {
+  return (
+    value ===
+      "room_c_projector_failure" ||
+    value ===
+      "room_a_projector_failure" ||
+    value ===
+      "room_b_unavailable" ||
+    value ===
+      "session_time_changed" ||
+    value ===
+      "no_update" ||
     value ===
       "unsure"
   );
@@ -591,6 +663,14 @@ export function isProbeRecallComplete(
   }
 
   if (
+    !isProbeRecognitionChoice(
+      values.recognitionChoice,
+    )
+  ) {
+    return false;
+  }
+
+  if (
     values.noticedUpdate ===
       "yes" &&
     values.updateDescription
@@ -613,6 +693,16 @@ export function getProbeRecallCorrect(
       "yes" &&
     values.affectedRoom ===
       "C"
+  );
+}
+
+export function getProbeRecognitionCorrect(
+  values:
+    ProbeRecallResponses,
+): boolean {
+  return (
+    values.recognitionChoice ===
+      "room_c_projector_failure"
   );
 }
 
@@ -690,6 +780,15 @@ export function getTrialQuestionnaireValidationMessage(
     )
   ) {
     return "Please provide your recall confidence rating.";
+  }
+
+  if (
+    !isProbeRecognitionChoice(
+      response.probeRecall
+        .recognitionChoice,
+    )
+  ) {
+    return "Please select the facilities update you recognize from the options.";
   }
 
   return "";

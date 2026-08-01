@@ -1,11 +1,6 @@
 import {
   ArrowRight,
-  Bot,
-  Brain,
   CheckCircle2,
-  Eye,
-  MessageSquareText,
-  Scale,
 } from "lucide-react";
 
 import {
@@ -16,12 +11,17 @@ import {
 
 import type {
   FormEvent,
-  ReactNode,
 } from "react";
 
 import {
   useNavigate,
 } from "react-router";
+
+import DebriefForm from "../components/forms/DebriefForm";
+
+import type {
+  DebriefFormValues,
+} from "../components/forms/DebriefForm";
 
 import {
   useEventLogStore,
@@ -45,351 +45,8 @@ import {
   downloadCsv,
 } from "../utils/csvExport";
 
-interface LikertQuestionProps {
-  name:
-    string;
-
-  title:
-    string;
-
-  description:
-    string;
-
-  lowLabel:
-    string;
-
-  highLabel:
-    string;
-
-  value:
-    LikertRating | null;
-
-  onChange: (
-    value:
-      LikertRating,
-  ) => void;
-}
-
-interface QuestionnaireSectionProps {
-  icon:
-    ReactNode;
-
-  title:
-    string;
-
-  description:
-    string;
-
-  children:
-    ReactNode;
-}
-
-interface ResponseOption {
-  value:
-    string;
-
-  label:
-    string;
-}
-
 const TOTAL_TRIALS =
   3;
-
-const LIKERT_OPTIONS:
-  LikertRating[] = [
-    1,
-    2,
-    3,
-    4,
-    5,
-    6,
-    7,
-  ];
-
-const influenceOptions:
-  ResponseOption[] = [
-    {
-      value:
-        "own_reasoning",
-
-      label:
-        "My own reasoning and judgment",
-    },
-
-    {
-      value:
-        "ai_recommendation",
-
-      label:
-        "The AI recommendation",
-    },
-
-    {
-      value:
-        "task_rules",
-
-      label:
-        "The task constraints and preferences",
-    },
-
-    {
-      value:
-        "task_update",
-
-      label:
-        "The update that appeared during the task",
-    },
-
-    {
-      value:
-        "time_pressure",
-
-      label:
-        "The remaining time",
-    },
-
-    {
-      value:
-        "combination",
-
-      label:
-        "A combination of these factors",
-    },
-  ];
-
-const yesNoUnsureOptions:
-  ResponseOption[] = [
-    {
-      value:
-        "yes",
-
-      label:
-        "Yes",
-    },
-
-    {
-      value:
-        "no",
-
-      label:
-        "No",
-    },
-
-    {
-      value:
-        "unsure",
-
-      label:
-        "Not sure",
-    },
-  ];
-
-function QuestionnaireSection({
-  icon,
-  title,
-  description,
-  children,
-}: QuestionnaireSectionProps) {
-  return (
-    <section className="questionnaire-section">
-      <div className="study-section-heading">
-        <div className="questionnaire-section-icon">
-          {icon}
-        </div>
-
-        <div>
-          <h2>
-            {title}
-          </h2>
-
-          <p>
-            {description}
-          </p>
-        </div>
-      </div>
-
-      {children}
-    </section>
-  );
-}
-
-function LikertQuestion({
-  name,
-  title,
-  description,
-  lowLabel,
-  highLabel,
-  value,
-  onChange,
-}: LikertQuestionProps) {
-  return (
-    <fieldset className="likert-card">
-      <legend>
-        <strong>
-          {title}
-        </strong>
-
-        <span>
-          {description}
-        </span>
-      </legend>
-
-      <div className="likert-options">
-        {LIKERT_OPTIONS.map(
-          (option) => (
-            <label
-              key={
-                option
-              }
-              className={[
-                "likert-option",
-
-                value ===
-                option
-                  ? "likert-option-selected"
-                  : "",
-              ]
-                .filter(
-                  Boolean,
-                )
-                .join(
-                  " ",
-                )}
-            >
-              <input
-                type="radio"
-                name={
-                  name
-                }
-                value={
-                  option
-                }
-                checked={
-                  value ===
-                  option
-                }
-                onChange={() => {
-                  onChange(
-                    option,
-                  );
-                }}
-              />
-
-              <span>
-                {option}
-              </span>
-            </label>
-          ),
-        )}
-      </div>
-
-      <div
-        className="likert-labels"
-        aria-hidden="true"
-      >
-        <span>
-          {lowLabel}
-        </span>
-
-        <span>
-          {highLabel}
-        </span>
-      </div>
-    </fieldset>
-  );
-}
-
-function RadioQuestion({
-  name,
-  title,
-  description,
-  options,
-  value,
-  onChange,
-}: {
-  name:
-    string;
-
-  title:
-    string;
-
-  description:
-    string;
-
-  options:
-    ResponseOption[];
-
-  value:
-    string;
-
-  onChange: (
-    value:
-      string,
-  ) => void;
-}) {
-  return (
-    <fieldset className="radio-question-card">
-      <legend>
-        <strong>
-          {title}
-        </strong>
-
-        <span>
-          {description}
-        </span>
-      </legend>
-
-      <div className="radio-question-options">
-        {options.map(
-          (option) => (
-            <label
-              key={
-                option.value
-              }
-              className={[
-                "radio-question-option",
-
-                value ===
-                option.value
-                  ? "radio-question-option-selected"
-                  : "",
-              ]
-                .filter(
-                  Boolean,
-                )
-                .join(
-                  " ",
-                )}
-            >
-              <input
-                type="radio"
-                name={
-                  name
-                }
-                value={
-                  option.value
-                }
-                checked={
-                  value ===
-                  option.value
-                }
-                onChange={() => {
-                  onChange(
-                    option.value,
-                  );
-                }}
-              />
-
-              <span>
-                {option.label}
-              </span>
-            </label>
-          ),
-        )}
-      </div>
-    </fieldset>
-  );
-}
 
 function sanitizeFilePart(
   value:
@@ -616,6 +273,248 @@ export default function PostExperimentPage() {
     attributionCheck,
     funneledDebrief,
   } = finalQuestionnaire;
+
+  const debriefValues:
+    DebriefFormValues = {
+      primaryInfluence:
+        attributionCheck
+          .primaryInfluence,
+
+      aiInfluence:
+        attributionCheck
+          .aiInfluence,
+
+      aiReliance:
+        attributionCheck
+          .aiReliance,
+
+      decisionConfidence:
+        attributionCheck
+          .decisionConfidence,
+
+      perceivedAiCompetence:
+        attributionCheck
+          .perceivedAiCompetence,
+
+      perceivedPurpose:
+        funneledDebrief
+          .perceivedPurpose,
+
+      noticedAiDifferences:
+        funneledDebrief
+          .noticedAiDifferences,
+
+      aiDifferenceDescription:
+        funneledDebrief
+          .aiDifferenceDescription,
+
+      taskUpdateImpact:
+        funneledDebrief
+          .taskUpdateImpact,
+
+      taskUpdateDescription:
+        funneledDebrief
+          .taskUpdateDescription,
+
+      noticedAnythingUnusual:
+        funneledDebrief
+          .noticedAnythingUnusual,
+
+      suspicionDescription:
+        funneledDebrief
+          .suspicionDescription,
+
+      priorStudyKnowledge:
+        funneledDebrief
+          .priorStudyKnowledge,
+
+      priorKnowledgeDescription:
+        funneledDebrief
+          .priorKnowledgeDescription,
+
+      additionalFeedback:
+        funneledDebrief
+          .additionalFeedback,
+    };
+
+  function handleDebriefChange(
+    nextValues:
+      DebriefFormValues,
+  ) {
+    if (
+      nextValues.primaryInfluence !==
+      attributionCheck
+        .primaryInfluence
+    ) {
+      setAttributionCheckValue(
+        "primaryInfluence",
+        nextValues.primaryInfluence as
+          PrimaryInfluence,
+      );
+    }
+
+    if (
+      nextValues.aiInfluence !==
+      attributionCheck
+        .aiInfluence
+    ) {
+      setAttributionCheckValue(
+        "aiInfluence",
+        nextValues.aiInfluence as
+          LikertRating | null,
+      );
+    }
+
+    if (
+      nextValues.aiReliance !==
+      attributionCheck
+        .aiReliance
+    ) {
+      setAttributionCheckValue(
+        "aiReliance",
+        nextValues.aiReliance as
+          LikertRating | null,
+      );
+    }
+
+    if (
+      nextValues.decisionConfidence !==
+      attributionCheck
+        .decisionConfidence
+    ) {
+      setAttributionCheckValue(
+        "decisionConfidence",
+        nextValues.decisionConfidence as
+          LikertRating | null,
+      );
+    }
+
+    if (
+      nextValues.perceivedAiCompetence !==
+      attributionCheck
+        .perceivedAiCompetence
+    ) {
+      setAttributionCheckValue(
+        "perceivedAiCompetence",
+        nextValues.perceivedAiCompetence as
+          LikertRating | null,
+      );
+    }
+
+    if (
+      nextValues.perceivedPurpose !==
+      funneledDebrief
+        .perceivedPurpose
+    ) {
+      setFunneledDebriefValue(
+        "perceivedPurpose",
+        nextValues.perceivedPurpose,
+      );
+    }
+
+    if (
+      nextValues.noticedAiDifferences !==
+      funneledDebrief
+        .noticedAiDifferences
+    ) {
+      setFunneledDebriefValue(
+        "noticedAiDifferences",
+        nextValues.noticedAiDifferences as
+          YesNoUnsure,
+      );
+    }
+
+    if (
+      nextValues.aiDifferenceDescription !==
+      funneledDebrief
+        .aiDifferenceDescription
+    ) {
+      setFunneledDebriefValue(
+        "aiDifferenceDescription",
+        nextValues.aiDifferenceDescription,
+      );
+    }
+
+    if (
+      nextValues.taskUpdateImpact !==
+      funneledDebrief
+        .taskUpdateImpact
+    ) {
+      setFunneledDebriefValue(
+        "taskUpdateImpact",
+        nextValues.taskUpdateImpact as
+          YesNoUnsure,
+      );
+    }
+
+    if (
+      nextValues.taskUpdateDescription !==
+      funneledDebrief
+        .taskUpdateDescription
+    ) {
+      setFunneledDebriefValue(
+        "taskUpdateDescription",
+        nextValues.taskUpdateDescription,
+      );
+    }
+
+    if (
+      nextValues.noticedAnythingUnusual !==
+      funneledDebrief
+        .noticedAnythingUnusual
+    ) {
+      setFunneledDebriefValue(
+        "noticedAnythingUnusual",
+        nextValues.noticedAnythingUnusual as
+          YesNoUnsure,
+      );
+    }
+
+    if (
+      nextValues.suspicionDescription !==
+      funneledDebrief
+        .suspicionDescription
+    ) {
+      setFunneledDebriefValue(
+        "suspicionDescription",
+        nextValues.suspicionDescription,
+      );
+    }
+
+    if (
+      nextValues.priorStudyKnowledge !==
+      funneledDebrief
+        .priorStudyKnowledge
+    ) {
+      setFunneledDebriefValue(
+        "priorStudyKnowledge",
+        nextValues.priorStudyKnowledge as
+          YesNoUnsure,
+      );
+    }
+
+    if (
+      nextValues.priorKnowledgeDescription !==
+      funneledDebrief
+        .priorKnowledgeDescription
+    ) {
+      setFunneledDebriefValue(
+        "priorKnowledgeDescription",
+        nextValues.priorKnowledgeDescription,
+      );
+    }
+
+    if (
+      nextValues.additionalFeedback !==
+      funneledDebrief
+        .additionalFeedback
+    ) {
+      setFunneledDebriefValue(
+        "additionalFeedback",
+        nextValues.additionalFeedback,
+      );
+    }
+  }
 
   useEffect(() => {
     if (
@@ -1193,515 +1092,17 @@ export default function PostExperimentPage() {
           </p>
         </section>
 
-        <QuestionnaireSection
-          icon={
-            <Scale
-              size={22}
-              aria-hidden="true"
-            />
+        <DebriefForm
+          values={
+            debriefValues
           }
-          title="Decision attribution"
-          description="These questions ask what influenced your final scheduling decisions."
-        >
-          <div className="questionnaire-question-list">
-            <RadioQuestion
-              name="primaryInfluence"
-              title="Primary influence"
-              description="Which factor had the greatest influence on your final schedules overall?"
-              options={
-                influenceOptions
-              }
-              value={
-                attributionCheck
-                  .primaryInfluence
-              }
-              onChange={(value) => {
-                setAttributionCheckValue(
-                  "primaryInfluence",
-                  value as PrimaryInfluence,
-                );
-              }}
-            />
-
-            <LikertQuestion
-              name="aiInfluence"
-              title="AI influence"
-              description="How much did the AI recommendations influence your final scheduling decisions?"
-              lowLabel="Not at all"
-              highLabel="Very strongly"
-              value={
-                attributionCheck
-                  .aiInfluence
-              }
-              onChange={(value) => {
-                setAttributionCheckValue(
-                  "aiInfluence",
-                  value,
-                );
-              }}
-            />
-
-            <LikertQuestion
-              name="aiReliance"
-              title="Reliance on the AI"
-              description="When you were uncertain, how often did you rely on the AI recommendation?"
-              lowLabel="Never"
-              highLabel="Always"
-              value={
-                attributionCheck
-                  .aiReliance
-              }
-              onChange={(value) => {
-                setAttributionCheckValue(
-                  "aiReliance",
-                  value,
-                );
-              }}
-            />
-
-            <LikertQuestion
-              name="decisionConfidence"
-              title="Decision confidence"
-              description="How confident were you in the final schedules you submitted?"
-              lowLabel="Not confident"
-              highLabel="Very confident"
-              value={
-                attributionCheck
-                  .decisionConfidence
-              }
-              onChange={(value) => {
-                setAttributionCheckValue(
-                  "decisionConfidence",
-                  value,
-                );
-              }}
-            />
-
-            <LikertQuestion
-              name="perceivedAiCompetence"
-              title="Overall AI competence"
-              description="How competent did the AI assistant appear across the three tasks?"
-              lowLabel="Not competent"
-              highLabel="Very competent"
-              value={
-                attributionCheck
-                  .perceivedAiCompetence
-              }
-              onChange={(value) => {
-                setAttributionCheckValue(
-                  "perceivedAiCompetence",
-                  value,
-                );
-              }}
-            />
-          </div>
-        </QuestionnaireSection>
-
-        <QuestionnaireSection
-          icon={
-            <Brain
-              size={22}
-              aria-hidden="true"
-            />
+          onChange={
+            handleDebriefChange
           }
-          title="Your understanding of the study"
-          description="Please answer in your own words. There are no right or wrong answers."
-        >
-          <div className="open-response-card">
-            <label htmlFor="perceivedPurpose">
-              <strong>
-                What do you think this study was investigating?
-              </strong>
-
-              <span>
-                Describe the purpose of the study as you
-                understood it.
-              </span>
-            </label>
-
-            <textarea
-              id="perceivedPurpose"
-              value={
-                funneledDebrief
-                  .perceivedPurpose
-              }
-              onChange={(event) => {
-                setFunneledDebriefValue(
-                  "perceivedPurpose",
-                  event.target.value,
-                );
-              }}
-              rows={5}
-              maxLength={1500}
-              required
-            />
-
-            <div className="response-character-count">
-              {
-                funneledDebrief
-                  .perceivedPurpose
-                  .length
-              }{" "}
-              of 1500
-            </div>
-          </div>
-        </QuestionnaireSection>
-
-        <QuestionnaireSection
-          icon={
-            <Bot
-              size={22}
-              aria-hidden="true"
-            />
+          disabled={
+            submitting
           }
-          title="AI assistance"
-          description="Reflect on whether the AI assistance appeared different across the tasks."
-        >
-          <RadioQuestion
-            name="noticedAiDifferences"
-            title="Differences between tasks"
-            description="Did the AI assistant appear to provide different amounts of detail or different forms of assistance across the three tasks?"
-            options={
-              yesNoUnsureOptions
-            }
-            value={
-              funneledDebrief
-                .noticedAiDifferences
-            }
-            onChange={(value) => {
-              setFunneledDebriefValue(
-                "noticedAiDifferences",
-                value as YesNoUnsure,
-              );
-            }}
-          />
-
-          {(
-            funneledDebrief
-              .noticedAiDifferences ===
-              "yes" ||
-            funneledDebrief
-              .noticedAiDifferences ===
-              "unsure"
-          ) && (
-            <div className="open-response-card">
-              <label htmlFor="aiDifferenceDescription">
-                <strong>
-                  Please describe any differences you noticed
-                </strong>
-
-                <span>
-                  You may describe the content, detail,
-                  presentation, or usefulness of the AI
-                  assistance.
-                </span>
-              </label>
-
-              <textarea
-                id="aiDifferenceDescription"
-                value={
-                  funneledDebrief
-                    .aiDifferenceDescription
-                }
-                onChange={(event) => {
-                  setFunneledDebriefValue(
-                    "aiDifferenceDescription",
-                    event.target.value,
-                  );
-                }}
-                rows={4}
-                maxLength={1200}
-                required={
-                  funneledDebrief
-                    .noticedAiDifferences ===
-                  "yes"
-                }
-              />
-
-              <div className="response-character-count">
-                {
-                  funneledDebrief
-                    .aiDifferenceDescription
-                    .length
-                }{" "}
-                of 1200
-              </div>
-            </div>
-          )}
-        </QuestionnaireSection>
-
-        <QuestionnaireSection
-          icon={
-            <MessageSquareText
-              size={22}
-              aria-hidden="true"
-            />
-          }
-          title="Task updates"
-          description="Consider the information update that appeared while you were scheduling."
-        >
-          <RadioQuestion
-            name="taskUpdateImpact"
-            title="Effect of the update"
-            description="Did an update that appeared during a task change your scheduling approach or final decision?"
-            options={
-              yesNoUnsureOptions
-            }
-            value={
-              funneledDebrief
-                .taskUpdateImpact
-            }
-            onChange={(value) => {
-              setFunneledDebriefValue(
-                "taskUpdateImpact",
-                value as YesNoUnsure,
-              );
-            }}
-          />
-
-          {(
-            funneledDebrief
-              .taskUpdateImpact ===
-              "yes" ||
-            funneledDebrief
-              .taskUpdateImpact ===
-              "unsure"
-          ) && (
-            <div className="open-response-card">
-              <label htmlFor="taskUpdateDescription">
-                <strong>
-                  Please describe the effect of the update
-                </strong>
-
-                <span>
-                  Explain what you changed, considered
-                  changing, or decided not to change.
-                </span>
-              </label>
-
-              <textarea
-                id="taskUpdateDescription"
-                value={
-                  funneledDebrief
-                    .taskUpdateDescription
-                }
-                onChange={(event) => {
-                  setFunneledDebriefValue(
-                    "taskUpdateDescription",
-                    event.target.value,
-                  );
-                }}
-                rows={4}
-                maxLength={1200}
-                required={
-                  funneledDebrief
-                    .taskUpdateImpact ===
-                  "yes"
-                }
-              />
-
-              <div className="response-character-count">
-                {
-                  funneledDebrief
-                    .taskUpdateDescription
-                    .length
-                }{" "}
-                of 1200
-              </div>
-            </div>
-          )}
-        </QuestionnaireSection>
-
-        <QuestionnaireSection
-          icon={
-            <Eye
-              size={22}
-              aria-hidden="true"
-            />
-          }
-          title="Study awareness"
-          description="These questions help us understand how participants interpreted the study."
-        >
-          <div className="questionnaire-question-list">
-            <RadioQuestion
-              name="noticedAnythingUnusual"
-              title="Unusual features or suspicions"
-              description="Did you notice anything unusual or form any suspicions about the task, AI assistant, or study purpose?"
-              options={
-                yesNoUnsureOptions
-              }
-              value={
-                funneledDebrief
-                  .noticedAnythingUnusual
-              }
-              onChange={(value) => {
-                setFunneledDebriefValue(
-                  "noticedAnythingUnusual",
-                  value as YesNoUnsure,
-                );
-              }}
-            />
-
-            {(
-              funneledDebrief
-                .noticedAnythingUnusual ===
-                "yes" ||
-              funneledDebrief
-                .noticedAnythingUnusual ===
-                "unsure"
-            ) && (
-              <div className="open-response-card">
-                <label htmlFor="suspicionDescription">
-                  <strong>
-                    Please describe what you noticed or
-                    suspected
-                  </strong>
-                </label>
-
-                <textarea
-                  id="suspicionDescription"
-                  value={
-                    funneledDebrief
-                      .suspicionDescription
-                  }
-                  onChange={(event) => {
-                    setFunneledDebriefValue(
-                      "suspicionDescription",
-                      event.target.value,
-                    );
-                  }}
-                  rows={4}
-                  maxLength={1200}
-                  required={
-                    funneledDebrief
-                      .noticedAnythingUnusual ===
-                    "yes"
-                  }
-                />
-
-                <div className="response-character-count">
-                  {
-                    funneledDebrief
-                      .suspicionDescription
-                      .length
-                  }{" "}
-                  of 1200
-                </div>
-              </div>
-            )}
-
-            <RadioQuestion
-              name="priorStudyKnowledge"
-              title="Prior knowledge"
-              description="Before participating, had anyone told you about the study purpose, expected results, or different AI assistance conditions?"
-              options={
-                yesNoUnsureOptions
-              }
-              value={
-                funneledDebrief
-                  .priorStudyKnowledge
-              }
-              onChange={(value) => {
-                setFunneledDebriefValue(
-                  "priorStudyKnowledge",
-                  value as YesNoUnsure,
-                );
-              }}
-            />
-
-            {(
-              funneledDebrief
-                .priorStudyKnowledge ===
-                "yes" ||
-              funneledDebrief
-                .priorStudyKnowledge ===
-                "unsure"
-            ) && (
-              <div className="open-response-card">
-                <label htmlFor="priorKnowledgeDescription">
-                  <strong>
-                    Please describe what you knew
-                  </strong>
-                </label>
-
-                <textarea
-                  id="priorKnowledgeDescription"
-                  value={
-                    funneledDebrief
-                      .priorKnowledgeDescription
-                  }
-                  onChange={(event) => {
-                    setFunneledDebriefValue(
-                      "priorKnowledgeDescription",
-                      event.target.value,
-                    );
-                  }}
-                  rows={4}
-                  maxLength={1200}
-                  required={
-                    funneledDebrief
-                      .priorStudyKnowledge ===
-                    "yes"
-                  }
-                />
-
-                <div className="response-character-count">
-                  {
-                    funneledDebrief
-                      .priorKnowledgeDescription
-                      .length
-                  }{" "}
-                  of 1200
-                </div>
-              </div>
-            )}
-          </div>
-        </QuestionnaireSection>
-
-        <QuestionnaireSection
-          icon={
-            <MessageSquareText
-              size={22}
-              aria-hidden="true"
-            />
-          }
-          title="Additional feedback"
-          description="This final response is optional."
-        >
-          <div className="open-response-card">
-            <label htmlFor="additionalFeedback">
-              <strong>
-                Is there anything else you would like to tell
-                us about your experience?
-              </strong>
-            </label>
-
-            <textarea
-              id="additionalFeedback"
-              value={
-                funneledDebrief
-                  .additionalFeedback
-              }
-              onChange={(event) => {
-                setFunneledDebriefValue(
-                  "additionalFeedback",
-                  event.target.value,
-                );
-              }}
-              rows={5}
-              maxLength={1500}
-            />
-
-            <div className="response-character-count">
-              {
-                funneledDebrief
-                  .additionalFeedback
-                  .length
-              }{" "}
-              of 1500
-            </div>
-          </div>
-        </QuestionnaireSection>
+        />
 
         {validationMessage && (
           <div

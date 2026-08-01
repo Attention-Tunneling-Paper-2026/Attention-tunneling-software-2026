@@ -1006,6 +1006,67 @@ button:disabled {
   color: var(--study-text-muted);
 }
 
+.nasa-likert-scale {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  width: 100%;
+  gap: 10px;
+  margin-top: 17px;
+}
+
+.nasa-likert-option {
+  position: relative;
+  display: grid;
+  width: 100%;
+  min-width: 0;
+  aspect-ratio: 1;
+  place-items: center;
+  border: 1px solid var(--study-border-strong);
+  border-radius: 10px;
+  font-weight: 800;
+  color: var(--study-text-soft);
+  background: var(--study-surface);
+  cursor: pointer;
+  transition:
+    border-color 150ms ease,
+    color 150ms ease,
+    background 150ms ease,
+    transform 150ms ease;
+}
+
+.nasa-likert-option:hover {
+  border-color: #93c5fd;
+  color: var(--study-primary);
+  transform: translateY(-1px);
+}
+
+.nasa-likert-option-selected {
+  border-color: var(--study-primary);
+  color: #ffffff;
+  background: var(--study-primary);
+}
+
+.nasa-likert-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.nasa-likert-point {
+  display: none;
+}
+
+.nasa-likert-number {
+  line-height: 1;
+}
+
+.nasa-likert-option:focus-within {
+  outline: 3px solid rgba(37, 99, 235, 0.28);
+  outline-offset: 2px;
+}
+
 .likert-card,
 .radio-question-card {
   margin: 0;
@@ -1034,14 +1095,17 @@ button:disabled {
 
 .likert-options {
   display: grid;
-  grid-template-columns: repeat(7, minmax(42px, 1fr));
-  gap: 8px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  width: 100%;
+  gap: 10px;
   margin-top: 17px;
 }
 
 .likert-option {
   display: grid;
-  min-height: 46px;
+  width: 100%;
+  min-width: 0;
+  aspect-ratio: 1;
   place-items: center;
   border: 1px solid var(--study-border-strong);
   border-radius: 10px;
@@ -1080,6 +1144,7 @@ button:disabled {
   display: flex;
   justify-content: space-between;
   gap: 24px;
+  width: 100%;
   margin-top: 10px;
   font-size: 0.78rem;
   color: var(--study-text-soft);
@@ -1635,13 +1700,13 @@ button:disabled {
     flex: 1 1 auto;
   }
 
+  .nasa-likert-scale,
   .likert-options {
-    grid-template-columns: repeat(7, minmax(34px, 1fr));
-    gap: 5px;
+    gap: 7px;
   }
 
-  .likert-option {
-    min-height: 42px;
+  .likert-labels {
+    width: 100%;
   }
 
   .disclosure-condition-item {
@@ -1700,11 +1765,13 @@ button:disabled {
     height: 38px;
   }
 
+  .nasa-likert-scale,
   .likert-options {
-    grid-template-columns: repeat(4, minmax(42px, 1fr));
+    gap: 5px;
   }
 
   .likert-labels {
+    width: 100%;
     margin-top: 13px;
   }
 

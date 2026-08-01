@@ -7,6 +7,9 @@ import {
   createDefaultTrialQuestionnaireResponse,
   getFinalQuestionnaireValidationMessage as validateFinalQuestionnaire,
   isFinalQuestionnaireComplete as finalQuestionnaireIsComplete,
+  isLikertRating,
+  isNasaTlxValue,
+  isProbeRecognitionChoice,
   isTrialQuestionnaireComplete as trialQuestionnaireIsComplete,
 } from "../types/questionnaire";
 
@@ -18,6 +21,7 @@ import type {
   ManipulationCheckDimension,
   ManipulationCheckRatings,
   NasaTlxDimension,
+  NasaTlxRating,
   NasaTlxRatings,
   ProbeRecallResponses,
   TrialExperienceDimension,
@@ -82,7 +86,10 @@ interface QuestionnaireStore
       NasaTlxDimension,
 
     value:
-      number,
+      Exclude<
+        NasaTlxRating,
+        null
+      >,
   ) => void;
 
   setExperienceRating: (
@@ -229,52 +236,26 @@ function removeLegacyPersistedState():
 
 removeLegacyPersistedState();
 
-function clampLikertValue(
+function normalizeNasaTlxRating(
   value:
-    number,
-): LikertRating {
-  const finiteValue =
-    Number.isFinite(
-      value,
-    )
-      ? value
-      : 1;
-
-  return Math.min(
-    7,
-    Math.max(
-      1,
-      Math.round(
-        finiteValue,
-      ),
-    ),
-  ) as LikertRating;
+    NasaTlxRating,
+): NasaTlxRating {
+  return isNasaTlxValue(
+    value,
+  )
+    ? value
+    : null;
 }
 
-function clampNasaTlxValue(
+function normalizeLikertRating(
   value:
-    number,
-): number {
-  const finiteValue =
-    Number.isFinite(
-      value,
-    )
-      ? value
-      : 0;
-
-  const roundedValue =
-    Math.round(
-      finiteValue /
-        5,
-    ) * 5;
-
-  return Math.min(
-    100,
-    Math.max(
-      0,
-      roundedValue,
-    ),
-  );
+    LikertRating | null,
+): LikertRating | null {
+  return isLikertRating(
+    value,
+  )
+    ? value
+    : null;
 }
 
 function cloneNasaTlxRatings(
@@ -282,7 +263,35 @@ function cloneNasaTlxRatings(
     NasaTlxRatings,
 ): NasaTlxRatings {
   return {
-    ...values,
+    mentalDemand:
+      normalizeNasaTlxRating(
+        values.mentalDemand,
+      ),
+
+    physicalDemand:
+      normalizeNasaTlxRating(
+        values.physicalDemand,
+      ),
+
+    temporalDemand:
+      normalizeNasaTlxRating(
+        values.temporalDemand,
+      ),
+
+    performance:
+      normalizeNasaTlxRating(
+        values.performance,
+      ),
+
+    effort:
+      normalizeNasaTlxRating(
+        values.effort,
+      ),
+
+    frustration:
+      normalizeNasaTlxRating(
+        values.frustration,
+      ),
   };
 }
 
@@ -291,7 +300,20 @@ function cloneExperienceRatings(
     TrialExperienceRatings,
 ): TrialExperienceRatings {
   return {
-    ...values,
+    scheduleCompleteness:
+      normalizeLikertRating(
+        values.scheduleCompleteness,
+      ),
+
+    aiHelpfulness:
+      normalizeLikertRating(
+        values.aiHelpfulness,
+      ),
+
+    aiCompetence:
+      normalizeLikertRating(
+        values.aiCompetence,
+      ),
   };
 }
 
@@ -300,7 +322,35 @@ function cloneManipulationCheckRatings(
     ManipulationCheckRatings,
 ): ManipulationCheckRatings {
   return {
-    ...values,
+    recommendationSpecificity:
+      normalizeLikertRating(
+        values.recommendationSpecificity,
+      ),
+
+    recommendationDetail:
+      normalizeLikertRating(
+        values.recommendationDetail,
+      ),
+
+    solutionConcreteness:
+      normalizeLikertRating(
+        values.solutionConcreteness,
+      ),
+
+    solutionCompleteness:
+      normalizeLikertRating(
+        values.solutionCompleteness,
+      ),
+
+    directUsability:
+      normalizeLikertRating(
+        values.directUsability,
+      ),
+
+    solutionActionability:
+      normalizeLikertRating(
+        values.solutionActionability,
+      ),
   };
 }
 
@@ -309,7 +359,26 @@ function cloneProbeRecallResponses(
     ProbeRecallResponses,
 ): ProbeRecallResponses {
   return {
-    ...values,
+    noticedUpdate:
+      values.noticedUpdate ??
+      "",
+
+    updateDescription:
+      values.updateDescription ??
+      "",
+
+    affectedRoom:
+      values.affectedRoom ??
+      "",
+
+    recallConfidence:
+      normalizeLikertRating(
+        values.recallConfidence,
+      ),
+
+    recognitionChoice:
+      values.recognitionChoice ??
+      "",
   };
 }
 
@@ -351,6 +420,30 @@ function cloneFinalQuestionnaire(
 
     attributionCheck: {
       ...response.attributionCheck,
+
+      aiInfluence:
+        normalizeLikertRating(
+          response.attributionCheck
+            .aiInfluence,
+        ),
+
+      aiReliance:
+        normalizeLikertRating(
+          response.attributionCheck
+            .aiReliance,
+        ),
+
+      decisionConfidence:
+        normalizeLikertRating(
+          response.attributionCheck
+            .decisionConfidence,
+        ),
+
+      perceivedAiCompetence:
+        normalizeLikertRating(
+          response.attributionCheck
+            .perceivedAiCompetence,
+        ),
     },
 
     funneledDebrief: {
@@ -428,9 +521,25 @@ export const useQuestionnaireStore =
         if (
           existingResponse
         ) {
-          return cloneTrialResponse(
-            existingResponse,
+          const normalizedResponse =
+            cloneTrialResponse(
+              existingResponse,
+            );
+
+          set(
+            (state) => ({
+              trialResponses:
+                state.trialResponses.map(
+                  (response) =>
+                    response.trialNumber ===
+                    trialNumber
+                      ? normalizedResponse
+                      : response,
+                ),
+            }),
           );
+
+          return normalizedResponse;
         }
 
         const createdResponse =
@@ -504,6 +613,14 @@ export const useQuestionnaireStore =
         dimension,
         value,
       ) => {
+        if (
+          !isNasaTlxValue(
+            value,
+          )
+        ) {
+          return;
+        }
+
         set(
           (state) => ({
             trialResponses:
@@ -525,9 +642,7 @@ export const useQuestionnaireStore =
                       ...response.nasaTlx,
 
                       [dimension]:
-                        clampNasaTlxValue(
-                          value,
-                        ),
+                        value,
                     },
                   };
                 },
@@ -541,6 +656,14 @@ export const useQuestionnaireStore =
         dimension,
         value,
       ) => {
+        if (
+          !isLikertRating(
+            value,
+          )
+        ) {
+          return;
+        }
+
         set(
           (state) => ({
             trialResponses:
@@ -562,9 +685,7 @@ export const useQuestionnaireStore =
                       ...response.experienceRatings,
 
                       [dimension]:
-                        clampLikertValue(
-                          value,
-                        ),
+                        value,
                     },
                   };
                 },
@@ -578,6 +699,14 @@ export const useQuestionnaireStore =
         dimension,
         value,
       ) => {
+        if (
+          !isLikertRating(
+            value,
+          )
+        ) {
+          return;
+        }
+
         set(
           (state) => ({
             trialResponses:
@@ -599,9 +728,7 @@ export const useQuestionnaireStore =
                       ...response.manipulationCheck,
 
                       [dimension]:
-                        clampLikertValue(
-                          value,
-                        ),
+                        value,
                     },
                   };
                 },
@@ -629,15 +756,25 @@ export const useQuestionnaireStore =
                     return response;
                   }
 
-                  const normalizedValue =
+                  if (
                     dimension ===
                       "recallConfidence" &&
-                    typeof value ===
-                      "number"
-                      ? clampLikertValue(
-                          value,
-                        )
-                      : value;
+                    !isLikertRating(
+                      value,
+                    )
+                  ) {
+                    return response;
+                  }
+
+                  if (
+                    dimension ===
+                      "recognitionChoice" &&
+                    !isProbeRecognitionChoice(
+                      value,
+                    )
+                  ) {
+                    return response;
+                  }
 
                   return {
                     ...response,
@@ -646,7 +783,7 @@ export const useQuestionnaireStore =
                       ...response.probeRecall,
 
                       [dimension]:
-                        normalizedValue,
+                        value,
                     },
                   };
                 },
@@ -860,15 +997,15 @@ export const useQuestionnaireStore =
               return {};
             }
 
-            const normalizedValue =
+            if (
               dimension !==
                 "primaryInfluence" &&
-              typeof value ===
-                "number"
-                ? clampLikertValue(
-                    value,
-                  )
-                : value;
+              !isLikertRating(
+                value,
+              )
+            ) {
+              return {};
+            }
 
             return {
               finalQuestionnaire: {
@@ -885,7 +1022,7 @@ export const useQuestionnaireStore =
                     .attributionCheck,
 
                   [dimension]:
-                    normalizedValue,
+                    value,
                 },
               },
             };

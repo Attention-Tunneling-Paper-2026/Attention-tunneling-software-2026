@@ -3,6 +3,10 @@ import {
   Megaphone,
 } from "lucide-react";
 
+import {
+  SEMANTIC_PROBE,
+} from "../../data/symposium";
+
 interface ProbeBannerProps {
   visible: boolean;
   acknowledged: boolean;
@@ -18,30 +22,44 @@ export default function ProbeBanner({
   onAcknowledge,
   onOpenCollapsed,
 }: ProbeBannerProps) {
-  if (!visible || acknowledged) {
+  if (!visible) {
     return null;
   }
 
-  if (collapsed) {
+  /*
+   * The bell remains available after acknowledgement so the facilities
+   * update is still represented through the end of the trial. The unread
+   * badge is shown only before acknowledgement.
+   */
+  if (collapsed || acknowledged) {
     return (
       <button
         type="button"
         className="probe-notification-button"
         onClick={onOpenCollapsed}
-        aria-label="Open unread facilities update"
-        title="Facilities update"
+        aria-label={
+          acknowledged
+            ? "Open acknowledged facilities update"
+            : "Open unread facilities update"
+        }
+        title={SEMANTIC_PROBE.collapsedLabel}
+        data-probe-id={SEMANTIC_PROBE.id}
+        data-probe-version={SEMANTIC_PROBE.version}
+        data-probe-acknowledged={acknowledged}
       >
         <Bell
           size={20}
           aria-hidden="true"
         />
 
-        <span
-          className="probe-notification-badge"
-          aria-hidden="true"
-        >
-          1
-        </span>
+        {!acknowledged ? (
+          <span
+            className="probe-notification-badge"
+            aria-hidden="true"
+          >
+            1
+          </span>
+        ) : null}
       </button>
     );
   }
@@ -49,9 +67,14 @@ export default function ProbeBanner({
   return (
     <section
       className="scheduler-banner"
-      role="alert"
-      aria-live="assertive"
+      role="status"
+      aria-live="polite"
       aria-atomic="true"
+      data-probe-id={SEMANTIC_PROBE.id}
+      data-probe-version={SEMANTIC_PROBE.version}
+      data-probe-display-mode={
+        SEMANTIC_PROBE.displayMode
+      }
     >
       <div className="probe-banner-message">
         <Megaphone
@@ -61,12 +84,11 @@ export default function ProbeBanner({
 
         <div>
           <strong>
-            Facilities update
+            {SEMANTIC_PROBE.title}
           </strong>
 
           <div>
-            The projector in Room C is broken for the
-            rest of the day.
+            {SEMANTIC_PROBE.message}
           </div>
         </div>
       </div>

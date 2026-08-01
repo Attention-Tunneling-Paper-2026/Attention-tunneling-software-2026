@@ -1,57 +1,100 @@
 import type {
   ConcretizationLevel,
+  ConditionOrder,
+  IllegalMoveReason,
+  ProbeDisplayMode,
   Room,
   Slot,
   StudyTaskId,
   StudyTrialNumber,
+  StudyTrialOrder,
 } from "./scheduler";
 
+export const STUDY_EVENT_TYPES = [
+  "study_started",
+  "procedure_viewed",
+  "task_selected",
+  "assistant_analysis_requested",
+  "assistant_analysis_started",
+  "assistant_analysis_completed",
+  "assistant_recommendation_shown",
+  "task_details_opened",
+  "task_details_closed",
+  "trial_start",
+  "drag_start",
+  "drop",
+  "illegal_drop",
+  "drag_cancel",
+  "probe_shown",
+  "probe_notification_opened",
+  "probe_acknowledged",
+  "timer_expired",
+  "submit_attempt",
+  "trial_submitted",
+  "questionnaire_started",
+  "questionnaire_submitted",
+  "trial_csv_exported",
+  "post_experiment_started",
+  "post_experiment_submitted",
+  "post_experiment_csv_exported",
+  "disclosure_viewed",
+  "study_completed",
+
+  /* Canonical names from the study requirements. */
+  "session_start",
+  "screen_enter",
+  "screen_exit",
+  "ai_message_shown",
+  "ai_prompt_sent",
+  "ai_response_received",
+  "ai_fallback_used",
+  "move",
+  "swap",
+  "unplace",
+  "illegal_hover",
+  "probe_ack",
+  "probe_collapsed",
+  "violations_panel_hover",
+  "idle",
+  "timer_warning",
+  "fullscreen_exit",
+  "fullscreen_enter",
+  "trial_end",
+  "form_submitted",
+  "session_end",
+  "export_downloaded",
+] as const;
+
 export type StudyEventType =
-  | "study_started"
-  | "procedure_viewed"
-  | "task_selected"
-  | "assistant_analysis_requested"
-  | "assistant_analysis_started"
-  | "assistant_analysis_completed"
-  | "assistant_recommendation_shown"
-  | "task_details_opened"
-  | "task_details_closed"
-  | "trial_start"
-  | "drag_start"
-  | "drop"
-  | "illegal_drop"
-  | "drag_cancel"
-  | "probe_shown"
-  | "probe_notification_opened"
-  | "probe_acknowledged"
-  | "timer_expired"
-  | "submit_attempt"
-  | "trial_submitted"
-  | "questionnaire_started"
-  | "questionnaire_submitted"
-  | "trial_csv_exported"
-  | "post_experiment_started"
-  | "post_experiment_submitted"
-  | "post_experiment_csv_exported"
-  | "disclosure_viewed"
-  | "study_completed";
+  (typeof STUDY_EVENT_TYPES)[number];
+
+export const STUDY_PHASES = [
+  "pre_ai",
+  "pre_probe",
+  "post_probe",
+  "submitted",
+  "questionnaire",
+  "post_experiment",
+  "disclosure",
+  "complete",
+  "tutorial",
+  "break",
+] as const;
 
 export type StudyPhase =
-  | "pre_ai"
-  | "pre_probe"
-  | "post_probe"
-  | "submitted"
-  | "questionnaire"
-  | "post_experiment"
-  | "disclosure"
-  | "complete";
+  (typeof STUDY_PHASES)[number];
+
+export const SCHEDULE_ACTIONS = [
+  "assign",
+  "move",
+  "swap",
+  "unassign",
+  "unplace",
+  "no_op",
+] as const;
 
 export type ScheduleAction =
-  | "assign"
-  | "move"
-  | "swap"
-  | "unassign"
-  | "no_op";
+  (typeof SCHEDULE_ACTIONS)[number];
 
 export type DragSource =
   | "unassigned_tray"
@@ -71,365 +114,221 @@ export type EditCategory =
   | "illegal_edit"
   | "other";
 
-export type StudyEventMetadata =
-  Record<
-    string,
-    unknown
-  >;
+export const THEORETICAL_EDIT_CATEGORIES = [
+  "within_cluster",
+  "cross_cluster",
+  "structure_breaking",
+] as const;
+
+export type TheoreticalEditCategory =
+  (typeof THEORETICAL_EDIT_CATEGORIES)[number];
+
+export type TimerWarningLevel = "amber" | "red";
+export type TrialEndReason = "submitted" | "timeout";
+export type ProbeAcknowledgmentSource = "banner_ok" | "bell";
+
+export type StudyEventMetadata = Record<string, unknown>;
+export type StudyEventPayload = Record<string, unknown>;
 
 interface StudyEventMeasurements {
-  talkId?:
-    string;
+  talkId?: string;
+  displacedTalkId?: string;
 
-  fromRoom?:
-    Room;
+  fromRoom?: Room;
+  fromSlot?: Slot;
+  toRoom?: Room;
+  toSlot?: Slot;
 
-  fromSlot?:
-    Slot;
+  source?: DragSource;
+  action?: ScheduleAction;
+  success?: boolean;
+  illegalReason?: IllegalMoveReason;
 
-  toRoom?:
-    Room;
+  dragDurationMs?: number;
+  probeLatencyMs?: number | null;
+  latencyFromProbeMs?: number | null;
 
-  toSlot?:
-    Slot;
+  scheduleBefore?: string;
+  scheduleAfter?: string;
 
-  source?:
-    DragSource;
+  stateHashBefore?: string;
+  stateHashAfter?: string;
 
-  action?:
-    ScheduleAction;
+  structuralSignatureBefore?: string;
+  structuralSignatureAfter?: string;
 
-  success?:
-    boolean;
+  macroStructureSignatureBefore?: string;
+  macroStructureSignatureAfter?: string;
 
-  dragDurationMs?:
-    number;
+  roomCompositionSignatureBefore?: string;
+  roomCompositionSignatureAfter?: string;
 
-  probeLatencyMs?:
-    number | null;
+  scoreBefore?: number;
+  scoreAfter?: number;
+  scoreDelta?: number;
 
-  scheduleBefore?:
-    string;
+  speakerConflictsBefore?: number;
+  speakerConflictsAfter?: number;
 
-  scheduleAfter?:
-    string;
+  hammingDistanceFromAIBefore?: number;
+  hammingDistanceFromAIAfter?: number;
+  hammingDistanceFromAI?: number;
 
-  stateHashBefore?:
-    string;
+  insideAIFamilyBefore?: boolean;
+  insideAIFamilyAfter?: boolean;
 
-  stateHashAfter?:
-    string;
+  statePreviouslyVisited?: boolean;
+  isImmediateReversal?: boolean;
+  isBacktracking?: boolean;
 
-  structuralSignatureBefore?:
-    string;
+  editCategory?: EditCategory;
+  theoreticalEditCategory?: TheoreticalEditCategory;
 
-  structuralSignatureAfter?:
-    string;
+  isSalvageAttempt?: boolean;
+  isNonImprovingEdit?: boolean;
+  isPlateauEdit?: boolean;
+  isDestructiveEdit?: boolean;
 
-  scoreBefore?:
-    number;
+  transitionId?: string;
+  isOptimalDestructiveTransition?: boolean;
+  strategySwitchTriggered?: boolean;
 
-  scoreAfter?:
-    number;
+  probeVisible?: boolean;
+  probeAcknowledged?: boolean | null;
+  probeDisplayMode?: ProbeDisplayMode;
+  probeAcknowledgmentSource?: ProbeAcknowledgmentSource;
 
-  scoreDelta?:
-    number;
+  integrationConsistentEdit?: boolean;
+  probeIntegrationDetected?: boolean | null;
 
-  speakerConflictsBefore?:
-    number;
+  detectionMiss?: boolean | null;
+  integrationMiss?: boolean | null;
+  detectionWithoutIntegration?: boolean | null;
 
-  speakerConflictsAfter?:
-    number;
+  postProbeFeasible?: boolean | null;
+  postProbeFeasibleBefore?: boolean | null;
+  postProbeFeasibleAfter?: boolean | null;
 
-  hammingDistanceFromAIBefore?:
-    number;
+  unresolvedDemoTalkIds?: string[] | null;
+  unresolvedDemoTalkIdsBefore?: string[] | null;
+  unresolvedDemoTalkIdsAfter?: string[] | null;
 
-  hammingDistanceFromAIAfter?:
-    number;
+  resultingViolations?: unknown[];
+  violationCount?: number;
 
-  hammingDistanceFromAI?:
-    number;
+  structuralSignature?: string;
+  macroStructureSignature?: string;
+  roomCompositionSignature?: string;
+  moatCrossed?: boolean;
 
-  insideAIFamilyBefore?:
-    boolean;
+  remainingMs?: number;
+  timerWarningLevel?: TimerWarningLevel;
+  accepted?: boolean;
+  trialEndReason?: TrialEndReason;
 
-  insideAIFamilyAfter?:
-    boolean;
-
-  statePreviouslyVisited?:
-    boolean;
-
-  isImmediateReversal?:
-    boolean;
-
-  isBacktracking?:
-    boolean;
-
-  editCategory?:
-    EditCategory;
-
-  isSalvageAttempt?:
-    boolean;
-
-  isNonImprovingEdit?:
-    boolean;
-
-  isPlateauEdit?:
-    boolean;
-
-  isDestructiveEdit?:
-    boolean;
-
-  transitionId?:
-    string;
-
-  isOptimalDestructiveTransition?:
-    boolean;
-
-  strategySwitchTriggered?:
-    boolean;
-
-  probeVisible?:
-    boolean;
-
-  probeAcknowledged?:
-    boolean;
-
-  integrationConsistentEdit?:
-    boolean;
-
-  probeIntegrationDetected?:
-    boolean;
-
-  postProbeFeasibleBefore?:
-    boolean;
-
-  postProbeFeasibleAfter?:
-    boolean;
-
-  resultingViolations?:
-    unknown[];
-
-  violationCount?:
-    number;
-
-  structuralSignature?:
-    string;
-
-  moatCrossed?:
-    boolean;
+  renderedText?: string;
+  messageId?: string;
+  contentVersion?: string;
+  probeCompliant?: boolean | null;
 }
 
-export interface StudyEvent
-  extends StudyEventMeasurements {
-  eventId:
-    string;
+export interface StudyEvent extends StudyEventMeasurements {
+  eventId: string;
+  eventIndex: number;
 
-  eventIndex:
-    number;
+  participantId: string;
+  participantToken?: string;
+  sessionId: string;
 
-  participantId:
-    string;
+  trialId: string;
+  trialNumber: StudyTrialNumber;
+  trialOrder: StudyTrialOrder | number;
+  trialIndex?: number;
 
-  sessionId:
-    string;
+  condition: ConcretizationLevel;
+  conditionOrder: ConditionOrder | number;
 
-  trialId:
-    string;
+  isFirstTrial: boolean;
+  probeExposureNumber: number;
+  probeNaive: boolean;
 
-  trialNumber:
-    StudyTrialNumber;
+  taskId: StudyTaskId;
+  skin?: StudyTaskId;
 
-  trialOrder:
-    number;
+  taskInstanceVersion?: string;
+  appVersion?: string;
+  buildHash?: string;
 
-  condition:
-    ConcretizationLevel;
+  eventType: StudyEventType;
+  phase: StudyPhase;
 
-  conditionOrder:
-    number;
+  timestampIso: string;
+  elapsedMs: number;
+  tMs?: number;
 
-  isFirstTrial:
-    boolean;
-
-  probeExposureNumber:
-    number;
-
-  probeNaive:
-    boolean;
-
-  taskId:
-    StudyTaskId;
-
-  taskInstanceVersion?:
-    string;
-
-  appVersion?:
-    string;
-
-  eventType:
-    StudyEventType;
-
-  phase:
-    StudyPhase;
-
-  timestampIso:
-    string;
-
-  elapsedMs:
-    number;
-
-  metadata?:
-    StudyEventMetadata;
+  metadata?: StudyEventMetadata;
+  payload?: StudyEventPayload;
 }
 
-export interface CreateStudyEventInput
-  extends StudyEventMeasurements {
-  eventType:
-    StudyEventType;
+export interface CreateStudyEventInput extends StudyEventMeasurements {
+  eventType: StudyEventType;
 
-  eventIndex?:
-    number;
+  eventIndex?: number;
 
-  trialNumber?:
-    StudyTrialNumber;
+  trialNumber?: StudyTrialNumber;
+  trialOrder?: StudyTrialOrder | number;
+  trialIndex?: number;
 
-  trialOrder?:
-    number;
+  condition?: ConcretizationLevel;
+  conditionOrder?: ConditionOrder | number;
 
-  condition?:
-    ConcretizationLevel;
+  isFirstTrial?: boolean;
+  probeExposureNumber?: number;
+  probeNaive?: boolean;
 
-  conditionOrder?:
-    number;
+  taskId?: StudyTaskId;
+  skin?: StudyTaskId;
 
-  isFirstTrial?:
-    boolean;
+  taskInstanceVersion?: string;
+  appVersion?: string;
+  buildHash?: string;
 
-  probeExposureNumber?:
-    number;
+  phase?: StudyPhase;
+  tMs?: number;
 
-  probeNaive?:
-    boolean;
-
-  taskId?:
-    StudyTaskId;
-
-  taskInstanceVersion?:
-    string;
-
-  appVersion?:
-    string;
-
-  phase?:
-    StudyPhase;
-
-  metadata?:
-    StudyEventMetadata;
+  participantToken?: string;
+  metadata?: StudyEventMetadata;
+  payload?: StudyEventPayload;
 }
 
 export function isStudyEventType(
-  value:
-    unknown,
+  value: unknown,
 ): value is StudyEventType {
-  return (
-    value ===
-      "study_started" ||
-    value ===
-      "procedure_viewed" ||
-    value ===
-      "task_selected" ||
-    value ===
-      "assistant_analysis_requested" ||
-    value ===
-      "assistant_analysis_started" ||
-    value ===
-      "assistant_analysis_completed" ||
-    value ===
-      "assistant_recommendation_shown" ||
-    value ===
-      "task_details_opened" ||
-    value ===
-      "task_details_closed" ||
-    value ===
-      "trial_start" ||
-    value ===
-      "drag_start" ||
-    value ===
-      "drop" ||
-    value ===
-      "illegal_drop" ||
-    value ===
-      "drag_cancel" ||
-    value ===
-      "probe_shown" ||
-    value ===
-      "probe_notification_opened" ||
-    value ===
-      "probe_acknowledged" ||
-    value ===
-      "timer_expired" ||
-    value ===
-      "submit_attempt" ||
-    value ===
-      "trial_submitted" ||
-    value ===
-      "questionnaire_started" ||
-    value ===
-      "questionnaire_submitted" ||
-    value ===
-      "trial_csv_exported" ||
-    value ===
-      "post_experiment_started" ||
-    value ===
-      "post_experiment_submitted" ||
-    value ===
-      "post_experiment_csv_exported" ||
-    value ===
-      "disclosure_viewed" ||
-    value ===
-      "study_completed"
+  return STUDY_EVENT_TYPES.includes(
+    value as StudyEventType,
   );
 }
 
 export function isStudyPhase(
-  value:
-    unknown,
+  value: unknown,
 ): value is StudyPhase {
-  return (
-    value ===
-      "pre_ai" ||
-    value ===
-      "pre_probe" ||
-    value ===
-      "post_probe" ||
-    value ===
-      "submitted" ||
-    value ===
-      "questionnaire" ||
-    value ===
-      "post_experiment" ||
-    value ===
-      "disclosure" ||
-    value ===
-      "complete"
+  return STUDY_PHASES.includes(
+    value as StudyPhase,
   );
 }
 
 export function isScheduleAction(
-  value:
-    unknown,
+  value: unknown,
 ): value is ScheduleAction {
-  return (
-    value ===
-      "assign" ||
-    value ===
-      "move" ||
-    value ===
-      "swap" ||
-    value ===
-      "unassign" ||
-    value ===
-      "no_op"
+  return SCHEDULE_ACTIONS.includes(
+    value as ScheduleAction,
+  );
+}
+
+export function isTheoreticalEditCategory(
+  value: unknown,
+): value is TheoreticalEditCategory {
+  return THEORETICAL_EDIT_CATEGORIES.includes(
+    value as TheoreticalEditCategory,
   );
 }

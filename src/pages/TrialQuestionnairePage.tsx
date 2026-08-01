@@ -23,6 +23,13 @@ import {
   useParams,
 } from "react-router";
 
+import LikertScale from "../components/forms/LikertScale";
+import NasaTlxForm from "../components/forms/NasaTlxForm";
+
+import {
+  SEMANTIC_PROBE,
+} from "../data/symposium";
+
 import {
   buildTrialEventRows,
   buildTrialSummaryRows,
@@ -40,16 +47,20 @@ import {
   useStudySessionStore,
 } from "../store/studySessionStore";
 
+import type {
+  StudyTrialProgress,
+} from "../types/study";
+
 import {
+  MANIPULATION_CHECK_DIMENSIONS,
   isTrialQuestionnaireComplete,
 } from "../types/questionnaire";
 
 import type {
   LikertRating,
   ManipulationCheckDimension,
-  NasaTlxDimension,
-  NasaTlxRatings,
   ProbeRecallRoom,
+  ProbeRecognitionChoice,
   TrialExperienceDimension,
   TrialExperienceRatings,
 } from "../types/questionnaire";
@@ -60,6 +71,7 @@ import {
 
 import type {
   StudyTrialNumber,
+  StudyTrialOrder,
 } from "../types/scheduler";
 
 import {
@@ -68,81 +80,11 @@ import {
   getTrialSummaryCsvFileName,
 } from "../utils/csvExport";
 
-type NasaDimension =
-  NasaTlxDimension;
-
 type ExperienceDimension =
   TrialExperienceDimension;
 
 type ManipulationDimension =
   ManipulationCheckDimension;
-
-interface NasaScaleProps {
-  id:
-    NasaDimension;
-
-  title:
-    string;
-
-  question:
-    string;
-
-  lowLabel:
-    string;
-
-  highLabel:
-    string;
-
-  value:
-    number;
-
-  onChange: (
-    value:
-      number,
-  ) => void;
-}
-
-interface LikertScaleProps {
-  name:
-    string;
-
-  title:
-    string;
-
-  description:
-    string;
-
-  lowLabel:
-    string;
-
-  highLabel:
-    string;
-
-  value:
-    LikertRating | null;
-
-  onChange: (
-    value:
-      LikertRating,
-  ) => void;
-}
-
-interface NasaQuestion {
-  id:
-    NasaDimension;
-
-  title:
-    string;
-
-  question:
-    string;
-
-  lowLabel:
-    string;
-
-  highLabel:
-    string;
-}
 
 interface ExperienceQuestion {
   id:
@@ -164,121 +106,16 @@ interface ExperienceQuestion {
 const TOTAL_TRIALS =
   3;
 
-const LIKERT_OPTIONS:
-  LikertRating[] = [
-    1,
-    2,
-    3,
-    4,
-    5,
-    6,
-    7,
-  ];
-
-const NASA_QUESTIONS:
-  NasaQuestion[] = [
-    {
-      id:
-        "mentalDemand",
-
-      title:
-        "Mental demand",
-
-      question:
-        "How mentally demanding was the task?",
-
-      lowLabel:
-        "Very low",
-
-      highLabel:
-        "Very high",
-    },
-
-    {
-      id:
-        "physicalDemand",
-
-      title:
-        "Physical demand",
-
-      question:
-        "How physically demanding was the task?",
-
-      lowLabel:
-        "Very low",
-
-      highLabel:
-        "Very high",
-    },
-
-    {
-      id:
-        "temporalDemand",
-
-      title:
-        "Temporal demand",
-
-      question:
-        "How hurried or rushed did you feel while completing the task?",
-
-      lowLabel:
-        "Very low",
-
-      highLabel:
-        "Very high",
-    },
-
-    {
-      id:
-        "performance",
-
-      title:
-        "Performance",
-
-      question:
-        "How unsuccessful do you think you were in accomplishing the task?",
-
-      lowLabel:
-        "Perfect",
-
-      highLabel:
-        "Failure",
-    },
-
-    {
-      id:
-        "effort",
-
-      title:
-        "Effort",
-
-      question:
-        "How hard did you have to work to accomplish your level of performance?",
-
-      lowLabel:
-        "Very low",
-
-      highLabel:
-        "Very high",
-    },
-
-    {
-      id:
-        "frustration",
-
-      title:
-        "Frustration",
-
-      question:
-        "How insecure, discouraged, irritated, stressed, or annoyed did you feel?",
-
-      lowLabel:
-        "Very low",
-
-      highLabel:
-        "Very high",
-    },
-  ];
+function getParticipantTaskNumber(
+  trial:
+    StudyTrialProgress,
+): StudyTrialOrder {
+  return isStudyTrialNumber(
+    trial.trialOrder,
+  )
+    ? trial.trialOrder
+    : trial.trialNumber;
+}
 
 const EXPERIENCE_QUESTIONS:
   ExperienceQuestion[] = [
@@ -385,6 +222,65 @@ const PROBE_ROOM_OPTIONS: Array<{
   },
 ];
 
+const PROBE_RECOGNITION_OPTIONS: Array<{
+  value:
+    Exclude<
+      ProbeRecognitionChoice,
+      ""
+    >;
+
+  label:
+    string;
+}> = [
+  {
+    value:
+      "room_c_projector_failure",
+
+    label:
+      SEMANTIC_PROBE.message,
+  },
+
+  {
+    value:
+      "room_a_projector_failure",
+
+    label:
+      "The projector in Room A broke for the rest of the day",
+  },
+
+  {
+    value:
+      "room_b_unavailable",
+
+    label:
+      "Room B became unavailable for the rest of the day",
+  },
+
+  {
+    value:
+      "session_time_changed",
+
+    label:
+      "The time of one session changed",
+  },
+
+  {
+    value:
+      "no_update",
+
+    label:
+      "No facilities update was shown",
+  },
+
+  {
+    value:
+      "unsure",
+
+    label:
+      "Unsure",
+  },
+];
+
 function QuestionnaireSection({
   icon,
   title,
@@ -423,159 +319,6 @@ function QuestionnaireSection({
 
       {children}
     </section>
-  );
-}
-
-function NasaScale({
-  id,
-  title,
-  question,
-  lowLabel,
-  highLabel,
-  value,
-  onChange,
-}: NasaScaleProps) {
-  return (
-    <div className="nasa-scale-card">
-      <div className="nasa-scale-header">
-        <div>
-          <label
-            className="nasa-scale-title"
-            htmlFor={id}
-          >
-            {title}
-          </label>
-
-          <p>
-            {question}
-          </p>
-        </div>
-
-        <output
-          className="nasa-scale-value"
-          htmlFor={id}
-        >
-          {value}
-        </output>
-      </div>
-
-      <input
-        id={id}
-        className="nasa-scale-input"
-        type="range"
-        min="0"
-        max="100"
-        step="5"
-        value={value}
-        onChange={(event) => {
-          onChange(
-            Number(
-              event.target.value,
-            ),
-          );
-        }}
-      />
-
-      <div
-        className="nasa-scale-labels"
-        aria-hidden="true"
-      >
-        <span>
-          0
-
-          <small>
-            {lowLabel}
-          </small>
-        </span>
-
-        <span>
-          100
-
-          <small>
-            {highLabel}
-          </small>
-        </span>
-      </div>
-    </div>
-  );
-}
-
-function LikertScale({
-  name,
-  title,
-  description,
-  lowLabel,
-  highLabel,
-  value,
-  onChange,
-}: LikertScaleProps) {
-  return (
-    <fieldset className="likert-card">
-      <legend>
-        <strong>
-          {title}
-        </strong>
-
-        <span>
-          {description}
-        </span>
-      </legend>
-
-      <div className="likert-options">
-        {LIKERT_OPTIONS.map(
-          (option) => (
-            <label
-              key={option}
-              className={[
-                "likert-option",
-
-                value === option
-                  ? "likert-option-selected"
-                  : "",
-              ]
-                .filter(
-                  Boolean,
-                )
-                .join(
-                  " ",
-                )}
-            >
-              <input
-                type="radio"
-                name={name}
-                value={option}
-                checked={
-                  value ===
-                  option
-                }
-                onChange={() => {
-                  onChange(
-                    option,
-                  );
-                }}
-              />
-
-              <span>
-                {option}
-              </span>
-            </label>
-          ),
-        )}
-      </div>
-
-      <div
-        className="likert-labels"
-        aria-hidden="true"
-      >
-        <span>
-          {lowLabel}
-        </span>
-
-        <span>
-          {highLabel}
-        </span>
-      </div>
-    </fieldset>
   );
 }
 
@@ -691,17 +434,28 @@ function getManipulationQuestion(
   if (
     normalizedKey.includes(
       "action",
-    ) ||
+    )
+  ) {
+    return {
+      title:
+        "AI solution actionability",
+
+      description:
+        "The AI recommendation made the scheduling actions needed to use its solution clear.",
+    };
+  }
+
+  if (
     normalizedKey.includes(
       "usability",
     )
   ) {
     return {
       title:
-        "AI output actionability",
+        "AI output direct usability",
 
       description:
-        "The AI recommendation gave actions that could be applied directly to the schedule.",
+        "The AI recommendation could be applied directly without substantial additional interpretation.",
     };
   }
 
@@ -716,29 +470,6 @@ function getManipulationQuestion(
         key,
       ).toLowerCase()}.`,
   };
-}
-
-function getNasaValue(
-  values:
-    NasaTlxRatings,
-
-  dimension:
-    NasaDimension,
-): number {
-  const value =
-    values[
-      dimension
-    ];
-
-  return (
-    typeof value ===
-      "number" &&
-    Number.isFinite(
-      value,
-    )
-  )
-    ? value
-    : 50;
 }
 
 function getExperienceValue(
@@ -1106,8 +837,25 @@ export default function TrialQuestionnairePage() {
 
       trialNumber,
 
+      trialOrder:
+        getParticipantTaskNumber(
+          trial,
+        ),
+
       condition:
         trial.condition,
+
+      conditionOrder:
+        trial.conditionOrder,
+
+      isFirstTrial:
+        trial.isFirstTrial,
+
+      probeExposureNumber:
+        trial.probeExposureNumber,
+
+      probeNaive:
+        trial.probeNaive,
 
       phase:
         "questionnaire",
@@ -1118,6 +866,11 @@ export default function TrialQuestionnairePage() {
 
         taskNumber:
           trialNumber,
+
+        participantTaskNumber:
+          getParticipantTaskNumber(
+            trial,
+          ),
 
         totalTrials:
           TOTAL_TRIALS,
@@ -1227,8 +980,25 @@ export default function TrialQuestionnairePage() {
 
       trialNumber,
 
+      trialOrder:
+        getParticipantTaskNumber(
+          trial,
+        ),
+
       condition:
         trial.condition,
+
+      conditionOrder:
+        trial.conditionOrder,
+
+      isFirstTrial:
+        trial.isFirstTrial,
+
+      probeExposureNumber:
+        trial.probeExposureNumber,
+
+      probeNaive:
+        trial.probeNaive,
 
       phase:
         "questionnaire",
@@ -1242,6 +1012,11 @@ export default function TrialQuestionnairePage() {
 
         taskNumber:
           trialNumber,
+
+        participantTaskNumber:
+          getParticipantTaskNumber(
+            trial,
+          ),
 
         totalTrials:
           TOTAL_TRIALS,
@@ -1461,8 +1236,25 @@ export default function TrialQuestionnairePage() {
 
       trialNumber,
 
+      trialOrder:
+        getParticipantTaskNumber(
+          trial,
+        ),
+
       condition:
         trial.condition,
+
+      conditionOrder:
+        trial.conditionOrder,
+
+      isFirstTrial:
+        trial.isFirstTrial,
+
+      probeExposureNumber:
+        trial.probeExposureNumber,
+
+      probeNaive:
+        trial.probeNaive,
 
       phase:
         "questionnaire",
@@ -1473,6 +1265,11 @@ export default function TrialQuestionnairePage() {
 
         taskNumber:
           trialNumber,
+
+        participantTaskNumber:
+          getParticipantTaskNumber(
+            trial,
+          ),
 
         eventsFileName,
 
@@ -1530,6 +1327,11 @@ export default function TrialQuestionnairePage() {
     return null;
   }
 
+  const participantTaskNumber =
+    getParticipantTaskNumber(
+      trial,
+    );
+
   if (
     !response
   ) {
@@ -1551,7 +1353,7 @@ export default function TrialQuestionnairePage() {
           </div>
 
           <div className="study-progress-label">
-            Task {trialNumber} of{" "}
+            Task {participantTaskNumber} of{" "}
             {TOTAL_TRIALS}
           </div>
         </header>
@@ -1572,10 +1374,9 @@ export default function TrialQuestionnairePage() {
     );
   }
 
-  const manipulationDimensions =
-    Object.keys(
-      response.manipulationCheck,
-    ) as ManipulationDimension[];
+  const manipulationDimensions:
+    readonly ManipulationDimension[] =
+      MANIPULATION_CHECK_DIMENSIONS;
 
   return (
     <main className="study-page questionnaire-page">
@@ -1597,9 +1398,9 @@ export default function TrialQuestionnairePage() {
 
         <div
           className="study-progress-label"
-          aria-label={`Questionnaire for task ${trialNumber} of ${TOTAL_TRIALS}`}
+          aria-label={`Questionnaire for task ${participantTaskNumber} of ${TOTAL_TRIALS}`}
         >
-          Task {trialNumber} of{" "}
+          Task {participantTaskNumber} of{" "}
           {TOTAL_TRIALS}
         </div>
       </header>
@@ -1618,47 +1419,23 @@ export default function TrialQuestionnairePage() {
             />
           }
           title="Task workload"
-          description="Move each slider to reflect your experience during the task. Ratings range from 0 to 100."
+          description="Select one rating for each NASA TLX dimension. Ratings range from 0 to 7 in whole-number steps, where 0 is low and 7 is high."
         >
-          <div className="nasa-scale-list">
-            {NASA_QUESTIONS.map(
-              (question) => (
-                <NasaScale
-                  key={
-                    question.id
-                  }
-                  id={
-                    question.id
-                  }
-                  title={
-                    question.title
-                  }
-                  question={
-                    question.question
-                  }
-                  lowLabel={
-                    question.lowLabel
-                  }
-                  highLabel={
-                    question.highLabel
-                  }
-                  value={getNasaValue(
-                    response.nasaTlx,
-                    question.id,
-                  )}
-                  onChange={(
-                    value,
-                  ) => {
-                    setNasaTlxValue(
-                      trialNumber,
-                      question.id,
-                      value,
-                    );
-                  }}
-                />
-              ),
-            )}
-          </div>
+          <NasaTlxForm
+            values={
+              response.nasaTlx
+            }
+            onChange={(
+              dimension,
+              value,
+            ) => {
+              setNasaTlxValue(
+                trialNumber,
+                dimension,
+                value,
+              );
+            }}
+          />
         </QuestionnaireSection>
 
         <QuestionnaireSection
@@ -1669,7 +1446,7 @@ export default function TrialQuestionnairePage() {
             />
           }
           title="Task and AI ratings"
-          description="Select one response for each statement."
+          description="Select one response on each 0 to 5 agreement scale."
         >
           <div className="likert-list">
             {EXPERIENCE_QUESTIONS.map(
@@ -1696,13 +1473,16 @@ export default function TrialQuestionnairePage() {
                       .experienceRatings,
                     question.id,
                   )}
+                  min={0}
+                  max={5}
+                  required
                   onChange={(
                     value,
                   ) => {
                     setExperienceRating(
                       trialNumber,
                       question.id,
-                      value,
+                      value as LikertRating,
                     );
                   }}
                 />
@@ -1721,7 +1501,7 @@ export default function TrialQuestionnairePage() {
               />
             }
             title="AI presentation ratings"
-            description="Rate how the AI recommendation was presented during this task."
+            description="Rate the AI assistance on the required 0 to 5 manipulation check scales."
           >
             <div className="likert-list">
               {manipulationDimensions.map(
@@ -1755,13 +1535,16 @@ export default function TrialQuestionnairePage() {
                           dimension
                         ]
                       }
+                      min={0}
+                      max={5}
+                      required
                       onChange={(
                         value,
                       ) => {
                         setManipulationCheckValue(
                           trialNumber,
                           dimension,
-                          value,
+                          value as LikertRating,
                         );
                       }}
                     />
@@ -1783,7 +1566,7 @@ export default function TrialQuestionnairePage() {
           description="Please answer these questions from memory without returning to the task."
         >
           <div className="likert-list">
-            <fieldset className="likert-card">
+            <fieldset className="radio-question-card">
               <legend>
                 <strong>
                   Update detection
@@ -1795,7 +1578,7 @@ export default function TrialQuestionnairePage() {
                 </span>
               </legend>
 
-              <div className="likert-options">
+              <div className="radio-question-options">
                 {[
                   {
                     value:
@@ -1827,13 +1610,13 @@ export default function TrialQuestionnairePage() {
                         option.value
                       }
                       className={[
-                        "likert-option",
+                        "radio-question-option",
 
                         response
                           .probeRecall
                           .noticedUpdate ===
                         option.value
-                          ? "likert-option-selected"
+                          ? "radio-question-option-selected"
                           : "",
                       ]
                         .filter(
@@ -1846,6 +1629,7 @@ export default function TrialQuestionnairePage() {
                       <input
                         type="radio"
                         name={`noticed_update_${trialNumber}`}
+                        required
                         value={
                           option.value
                         }
@@ -1877,17 +1661,18 @@ export default function TrialQuestionnairePage() {
               .probeRecall
               .noticedUpdate ===
               "yes" && (
-              <div className="nasa-scale-card">
+              <div className="open-response-card">
                 <label
-                  className="nasa-scale-title"
                   htmlFor={`update-description-${trialNumber}`}
                 >
-                  Update recall
-                </label>
+                  <strong>
+                    Update recall
+                  </strong>
 
-                <p>
-                  Briefly describe the update you remember.
-                </p>
+                  <span>
+                    Briefly describe the update you remember.
+                  </span>
+                </label>
 
                 <textarea
                   id={`update-description-${trialNumber}`}
@@ -1904,11 +1689,12 @@ export default function TrialQuestionnairePage() {
                     );
                   }}
                   rows={4}
+                  required
                 />
               </div>
             )}
 
-            <fieldset className="likert-card">
+            <fieldset className="radio-question-card">
               <legend>
                 <strong>
                   Affected room
@@ -1920,7 +1706,7 @@ export default function TrialQuestionnairePage() {
                 </span>
               </legend>
 
-              <div className="likert-options">
+              <div className="radio-question-options">
                 {PROBE_ROOM_OPTIONS.map(
                   (option) => (
                     <label
@@ -1928,13 +1714,13 @@ export default function TrialQuestionnairePage() {
                         option.value
                       }
                       className={[
-                        "likert-option",
+                        "radio-question-option",
 
                         response
                           .probeRecall
                           .affectedRoom ===
                         option.value
-                          ? "likert-option-selected"
+                          ? "radio-question-option-selected"
                           : "",
                       ]
                         .filter(
@@ -1947,6 +1733,7 @@ export default function TrialQuestionnairePage() {
                       <input
                         type="radio"
                         name={`affected_room_${trialNumber}`}
+                        required
                         value={
                           option.value
                         }
@@ -1985,14 +1772,83 @@ export default function TrialQuestionnairePage() {
                   .probeRecall
                   .recallConfidence
               }
+              min={0}
+              max={5}
+              required
               onChange={(value) => {
                 setProbeRecallValue(
                   trialNumber,
                   "recallConfidence",
-                  value,
+                  value as LikertRating,
                 );
               }}
             />
+
+            <fieldset className="radio-question-card">
+              <legend>
+                <strong>
+                  Update recognition
+                </strong>
+
+                <span>
+                  Which facilities update was shown during the task?
+                </span>
+              </legend>
+
+              <div className="radio-question-options">
+                {PROBE_RECOGNITION_OPTIONS.map(
+                  (option) => (
+                    <label
+                      key={
+                        option.value
+                      }
+                      className={[
+                        "radio-question-option",
+
+                        response
+                          .probeRecall
+                          .recognitionChoice ===
+                        option.value
+                          ? "radio-question-option-selected"
+                          : "",
+                      ]
+                        .filter(
+                          Boolean,
+                        )
+                        .join(
+                          " ",
+                        )}
+                    >
+                      <input
+                        type="radio"
+                        name={`probe_recognition_${trialNumber}`}
+                        required
+                        value={
+                          option.value
+                        }
+                        checked={
+                          response
+                            .probeRecall
+                            .recognitionChoice ===
+                          option.value
+                        }
+                        onChange={() => {
+                          setProbeRecallValue(
+                            trialNumber,
+                            "recognitionChoice",
+                            option.value,
+                          );
+                        }}
+                      />
+
+                      <span>
+                        {option.label}
+                      </span>
+                    </label>
+                  ),
+                )}
+              </div>
+            </fieldset>
           </div>
         </QuestionnaireSection>
 

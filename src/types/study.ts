@@ -1,604 +1,359 @@
 import type {
   ConcretizationLevel,
+  ConditionOrder,
+  ProbeDisplayMode,
   Room,
   StudyTaskId,
   StudyTrialNumber,
+  StudyTrialOrder,
 } from "./scheduler";
 
+export const STUDY_SESSION_STAGES = [
+  "procedure",
+  "task_assignment",
+  "task",
+  "trial_questionnaire",
+  "post_experiment",
+  "disclosure",
+  "complete",
+] as const;
+
 export type StudySessionStage =
-  | "procedure"
-  | "task_assignment"
-  | "task"
-  | "trial_questionnaire"
-  | "post_experiment"
-  | "disclosure"
-  | "complete";
+  (typeof STUDY_SESSION_STAGES)[number];
+
+export const TRIAL_PROGRESS_STATUSES = [
+  "pending",
+  "active",
+  "submitted",
+  "questionnaire_complete",
+] as const;
 
 export type TrialProgressStatus =
-  | "pending"
-  | "active"
-  | "submitted"
-  | "questionnaire_complete";
+  (typeof TRIAL_PROGRESS_STATUSES)[number];
 
 export type StudyCompletionStatus =
   | "not_started"
   | "in_progress"
   | "completed";
 
+export const TRIAL_EXPORT_STATUSES = [
+  "not_ready",
+  "ready",
+  "exporting",
+  "exported",
+  "failed",
+] as const;
+
 export type TrialExportStatus =
-  | "not_ready"
-  | "ready"
-  | "exporting"
-  | "exported"
-  | "failed";
+  (typeof TRIAL_EXPORT_STATUSES)[number];
+
+export type StudyTrialEndReason =
+  | "submitted"
+  | "timeout";
 
 export interface StudyParticipant {
-  participantId:
-    string;
-
-  sessionId:
-    string;
-
-  createdAtIso:
-    string;
+  participantId: string;
+  participantToken?: string;
+  sessionId: string;
+  createdAtIso: string;
 }
 
 export interface StudyTrialAssignment {
-  trialNumber:
-    StudyTrialNumber;
-
-  trialOrder:
-    number;
-
-  taskId:
-    StudyTaskId;
-
-  condition:
-    ConcretizationLevel;
-
-  conditionOrder:
-    number;
-
-  participantLabel:
-    string;
-
-  isFirstTrial:
-    boolean;
-
-  probeExposureNumber:
-    number;
-
-  probeNaive:
-    boolean;
+  trialNumber: StudyTrialNumber;
+  trialOrder: StudyTrialOrder | number;
+  taskId: StudyTaskId;
+  condition: ConcretizationLevel;
+  conditionOrder: ConditionOrder | number;
+  participantLabel: string;
+  isFirstTrial: boolean;
+  probeExposureNumber: number;
+  probeNaive: boolean;
 }
 
 export interface StudyTrialProgress
   extends StudyTrialAssignment {
-  status:
-    TrialProgressStatus;
+  status: TrialProgressStatus;
 
-  startedAtIso:
-    string | null;
+  startedAtIso: string | null;
+  assistantAnalysisRequestedAtIso: string | null;
+  assistantAnalysisStartedAtIso: string | null;
+  assistantAnalysisCompletedAtIso?: string | null;
+  assistantRecommendationShownAtIso: string | null;
 
-  assistantAnalysisRequestedAtIso:
-    string | null;
+  timerStartedAtIso: string | null;
+  probeShownAtIso: string | null;
+  probeCollapsedAtIso?: string | null;
+  probeAcknowledgedAtIso: string | null;
 
-  assistantAnalysisStartedAtIso:
-    string | null;
+  submittedAtIso: string | null;
+  trialEndedAtIso?: string | null;
+  trialEndReason?: StudyTrialEndReason | null;
 
-  assistantRecommendationShownAtIso:
-    string | null;
+  questionnaireStartedAtIso: string | null;
+  questionnaireCompletedAtIso: string | null;
 
-  timerStartedAtIso:
-    string | null;
+  eventsCsvExportStatus: TrialExportStatus;
+  summaryCsvExportStatus: TrialExportStatus;
+  eventsCsvExportedAtIso: string | null;
+  summaryCsvExportedAtIso: string | null;
 
-  probeShownAtIso:
-    string | null;
-
-  probeAcknowledgedAtIso:
-    string | null;
-
-  submittedAtIso:
-    string | null;
-
-  questionnaireStartedAtIso:
-    string | null;
-
-  questionnaireCompletedAtIso:
-    string | null;
-
-  eventsCsvExportStatus:
-    TrialExportStatus;
-
-  summaryCsvExportStatus:
-    TrialExportStatus;
-
-  eventsCsvExportedAtIso:
-    string | null;
-
-  summaryCsvExportedAtIso:
-    string | null;
-
-  exportErrorMessage?:
-    string;
+  exportErrorMessage?: string;
 }
 
 export interface StudySession {
-  participantId:
-    string;
+  participantId: string;
+  participantToken?: string;
+  sessionId: string | null;
 
-  sessionId:
-    string | null;
+  stage: StudySessionStage;
+  assignments: StudyTrialAssignment[];
+  trials: StudyTrialProgress[];
+  currentTrialNumber: StudyTrialNumber | null;
 
-  stage:
-    StudySessionStage;
+  conditionOrder?: ConditionOrder;
 
-  assignments:
-    StudyTrialAssignment[];
+  procedureAccepted: boolean;
+  postExperimentCompleted: boolean;
+  disclosureViewed: boolean;
+  studyCompleted: boolean;
 
-  trials:
-    StudyTrialProgress[];
+  sessionCreatedAtIso: string | null;
+  sessionStartedAtIso: string | null;
+  procedureAcceptedAtIso: string | null;
 
-  currentTrialNumber:
-    StudyTrialNumber | null;
+  postExperimentStartedAtIso: string | null;
+  postExperimentCompletedAtIso: string | null;
+  postExperimentCsvExportStatus: TrialExportStatus;
+  postExperimentCsvExportedAtIso: string | null;
 
-  procedureAccepted:
-    boolean;
+  sessionCsvExportStatus?: TrialExportStatus;
+  sessionCsvExportedAtIso?: string | null;
+  sessionCsvExportErrorMessage?: string;
 
-  postExperimentCompleted:
-    boolean;
-
-  disclosureViewed:
-    boolean;
-
-  studyCompleted:
-    boolean;
-
-  sessionCreatedAtIso:
-    string | null;
-
-  sessionStartedAtIso:
-    string | null;
-
-  procedureAcceptedAtIso:
-    string | null;
-
-  postExperimentStartedAtIso:
-    string | null;
-
-  postExperimentCompletedAtIso:
-    string | null;
-
-  postExperimentCsvExportStatus:
-    TrialExportStatus;
-
-  postExperimentCsvExportedAtIso:
-    string | null;
-
-  disclosureViewedAtIso:
-    string | null;
-
-  studyCompletedAtIso:
-    string | null;
+  disclosureViewedAtIso: string | null;
+  studyCompletedAtIso: string | null;
 }
 
 export interface StudySessionSummary {
-  participantId:
-    string;
+  participantId: string;
+  participantToken?: string;
+  sessionId: string | null;
+  stage: StudySessionStage;
 
-  sessionId:
-    string | null;
+  completedTrialCount: number;
+  totalTrialCount: number;
+  currentTrialNumber: StudyTrialNumber | null;
 
-  stage:
-    StudySessionStage;
-
-  completedTrialCount:
-    number;
-
-  totalTrialCount:
-    number;
-
-  currentTrialNumber:
-    StudyTrialNumber | null;
-
-  completionStatus:
-    StudyCompletionStatus;
-
-  allTrialCsvFilesExported:
-    boolean;
-
-  postExperimentCsvExported:
-    boolean;
+  completionStatus: StudyCompletionStatus;
+  allTrialCsvFilesExported: boolean;
+  postExperimentCsvExported: boolean;
+  sessionCsvExported?: boolean;
 }
 
 export interface ActiveStudyTrial {
-  trialNumber:
-    StudyTrialNumber;
-
-  trialOrder:
-    number;
-
-  totalTrials:
-    number;
-
-  taskId:
-    StudyTaskId;
-
-  condition:
-    ConcretizationLevel;
-
-  conditionOrder:
-    number;
-
-  participantLabel:
-    string;
-
-  isFirstTrial:
-    boolean;
-
-  probeExposureNumber:
-    number;
-
-  probeNaive:
-    boolean;
-
-  status:
-    TrialProgressStatus;
+  trialNumber: StudyTrialNumber;
+  trialOrder: StudyTrialOrder | number;
+  totalTrials: number;
+  taskId: StudyTaskId;
+  condition: ConcretizationLevel;
+  conditionOrder: ConditionOrder | number;
+  participantLabel: string;
+  isFirstTrial: boolean;
+  probeExposureNumber: number;
+  probeNaive: boolean;
+  status: TrialProgressStatus;
 }
 
 export interface TaskRouteState {
-  trialNumber:
-    StudyTrialNumber;
-
-  trialOrder:
-    number;
-
-  totalTrials:
-    number;
-
-  taskId:
-    StudyTaskId;
-
-  condition:
-    ConcretizationLevel;
-
-  conditionOrder:
-    number;
-
-  isFirstTrial:
-    boolean;
-
-  probeExposureNumber:
-    number;
-
-  probeNaive:
-    boolean;
+  trialNumber: StudyTrialNumber;
+  trialOrder: StudyTrialOrder | number;
+  totalTrials: number;
+  taskId: StudyTaskId;
+  condition: ConcretizationLevel;
+  conditionOrder: ConditionOrder | number;
+  isFirstTrial: boolean;
+  probeExposureNumber: number;
+  probeNaive: boolean;
 }
 
 export interface TrialQuestionnaireRouteState {
-  trialNumber:
-    StudyTrialNumber;
-
-  trialOrder:
-    number;
-
-  totalTrials:
-    number;
-
-  taskId:
-    StudyTaskId;
-
-  condition:
-    ConcretizationLevel;
-
-  conditionOrder:
-    number;
-
-  isFirstTrial:
-    boolean;
-
-  probeExposureNumber:
-    number;
-
-  probeNaive:
-    boolean;
+  trialNumber: StudyTrialNumber;
+  trialOrder: StudyTrialOrder | number;
+  totalTrials: number;
+  taskId: StudyTaskId;
+  condition: ConcretizationLevel;
+  conditionOrder: ConditionOrder | number;
+  isFirstTrial: boolean;
+  probeExposureNumber: number;
+  probeNaive: boolean;
 }
 
 export interface StudyRedirectState {
-  redirectedFrom?:
-    string;
+  redirectedFrom?: string;
 }
 
 export interface StudyCompletionSummary {
-  participantId:
-    string;
+  participantId: string;
+  participantToken?: string;
+  sessionId: string | null;
 
-  sessionId:
-    string | null;
+  completedTrials: number;
+  totalTrials: number;
+  completedTrialNumbers: StudyTrialNumber[];
+  exportedTrialNumbers: StudyTrialNumber[];
 
-  completedTrials:
-    number;
-
-  totalTrials:
-    number;
-
-  completedTrialNumbers:
-    StudyTrialNumber[];
-
-  exportedTrialNumbers:
-    StudyTrialNumber[];
-
-  startedAtIso:
-    string | null;
-
-  completedAtIso:
-    string | null;
+  startedAtIso: string | null;
+  completedAtIso: string | null;
 }
 
 export interface TaskPresentationLabels {
-  itemSingular:
-    string;
-
-  itemPlural:
-    string;
-
-  locationSingular:
-    string;
-
-  locationPlural:
-    string;
-
-  periodSingular:
-    string;
-
-  periodPlural:
-    string;
+  itemSingular: string;
+  itemPlural: string;
+  locationSingular: string;
+  locationPlural: string;
+  periodSingular: string;
+  periodPlural: string;
 }
 
 export interface TaskAssistantRecommendation {
-  name:
-    string;
-
-  statusLabel:
-    string;
-
-  recommendationLabel:
-    string;
-
-  recommendation:
-    string;
+  name: string;
+  statusLabel: string;
+  recommendationLabel: string;
+  recommendation: string;
+  prefillAcknowledgment?: string | null;
+  contentVersion?: string;
 }
 
 export interface SemanticProbeUpdate {
-  id:
-    string;
-
-  version?:
-    string;
-
-  title:
-    string;
-
-  message:
-    string;
-
-  collapsedLabel:
-    string;
-
-  shownAfterSeconds:
-    number;
-
-  collapseAfterSeconds:
-    number;
-
-  affectedRoom?:
-    Room;
-
-  requiredProjectorRoom?:
-    Room;
-
-  requiredTalkIds?:
-    string[];
-
-  semanticOnly:
-    boolean;
+  id: string;
+  version?: string;
+  title: string;
+  message: string;
+  collapsedLabel: string;
+  shownAfterSeconds: number;
+  collapseAfterSeconds: number;
+  displayMode?: ProbeDisplayMode;
+  affectedRoom?: Room;
+  requiredProjectorRoom?: Room;
+  requiredTalkIds?: string[];
+  semanticOnly: boolean;
 }
 
 export function isStudySessionStage(
-  value:
-    unknown,
+  value: unknown,
 ): value is StudySessionStage {
-  return (
-    value ===
-      "procedure" ||
-    value ===
-      "task_assignment" ||
-    value ===
-      "task" ||
-    value ===
-      "trial_questionnaire" ||
-    value ===
-      "post_experiment" ||
-    value ===
-      "disclosure" ||
-    value ===
-      "complete"
+  return STUDY_SESSION_STAGES.includes(
+    value as StudySessionStage,
   );
 }
 
 export function isTrialProgressStatus(
-  value:
-    unknown,
+  value: unknown,
 ): value is TrialProgressStatus {
-  return (
-    value ===
-      "pending" ||
-    value ===
-      "active" ||
-    value ===
-      "submitted" ||
-    value ===
-      "questionnaire_complete"
+  return TRIAL_PROGRESS_STATUSES.includes(
+    value as TrialProgressStatus,
   );
 }
 
 export function isTrialExportStatus(
-  value:
-    unknown,
+  value: unknown,
 ): value is TrialExportStatus {
-  return (
-    value ===
-      "not_ready" ||
-    value ===
-      "ready" ||
-    value ===
-      "exporting" ||
-    value ===
-      "exported" ||
-    value ===
-      "failed"
+  return TRIAL_EXPORT_STATUSES.includes(
+    value as TrialExportStatus,
   );
 }
 
 export function isTrialComplete(
-  trial:
-    StudyTrialProgress,
+  trial: StudyTrialProgress,
 ): boolean {
-  return (
-    trial.status ===
-    "questionnaire_complete"
-  );
+  return trial.status === "questionnaire_complete";
 }
 
 export function isTrialCsvExportComplete(
-  trial:
-    StudyTrialProgress,
+  trial: StudyTrialProgress,
 ): boolean {
   return (
-    trial.eventsCsvExportStatus ===
-      "exported" &&
-    trial.summaryCsvExportStatus ===
-      "exported"
+    trial.eventsCsvExportStatus === "exported" &&
+    trial.summaryCsvExportStatus === "exported"
   );
 }
 
 export function getCompletedTrialCount(
-  trials:
-    StudyTrialProgress[],
+  trials: StudyTrialProgress[],
 ): number {
-  return trials.filter(
-    isTrialComplete,
-  ).length;
+  return trials.filter(isTrialComplete).length;
 }
 
 export function getCompletedTrialNumbers(
-  trials:
-    StudyTrialProgress[],
+  trials: StudyTrialProgress[],
 ): StudyTrialNumber[] {
   return trials
-    .filter(
-      isTrialComplete,
-    )
-    .map(
-      (trial) =>
-        trial.trialNumber,
-    );
+    .filter(isTrialComplete)
+    .map((trial) => trial.trialNumber);
 }
 
 export function getExportedTrialNumbers(
-  trials:
-    StudyTrialProgress[],
+  trials: StudyTrialProgress[],
 ): StudyTrialNumber[] {
   return trials
-    .filter(
-      isTrialCsvExportComplete,
-    )
-    .map(
-      (trial) =>
-        trial.trialNumber,
-    );
+    .filter(isTrialCsvExportComplete)
+    .map((trial) => trial.trialNumber);
 }
 
 export function getCurrentTrial(
-  trials:
-    StudyTrialProgress[],
+  trials: StudyTrialProgress[],
 ): StudyTrialProgress | undefined {
   return trials.find(
     (trial) =>
-      trial.status ===
-        "active" ||
-      trial.status ===
-        "submitted",
+      trial.status === "active" ||
+      trial.status === "submitted",
   );
 }
 
 export function getPendingTrials(
-  trials:
-    StudyTrialProgress[],
+  trials: StudyTrialProgress[],
 ): StudyTrialProgress[] {
   return trials.filter(
-    (trial) =>
-      trial.status ===
-      "pending",
+    (trial) => trial.status === "pending",
   );
 }
 
 export function getTrialByNumber(
-  trials:
-    StudyTrialProgress[],
-
-  trialNumber:
-    StudyTrialNumber,
+  trials: StudyTrialProgress[],
+  trialNumber: StudyTrialNumber,
 ): StudyTrialProgress | undefined {
   return trials.find(
-    (trial) =>
-      trial.trialNumber ===
-      trialNumber,
+    (trial) => trial.trialNumber === trialNumber,
   );
 }
 
 export function allTrialsComplete(
-  trials:
-    StudyTrialProgress[],
+  trials: StudyTrialProgress[],
 ): boolean {
   return (
-    trials.length ===
-      3 &&
-    trials.every(
-      isTrialComplete,
-    )
+    trials.length === 3 &&
+    trials.every(isTrialComplete)
   );
 }
 
 export function allTrialCsvFilesExported(
-  trials:
-    StudyTrialProgress[],
+  trials: StudyTrialProgress[],
 ): boolean {
   return (
-    trials.length ===
-      3 &&
-    trials.every(
-      isTrialCsvExportComplete,
-    )
+    trials.length === 3 &&
+    trials.every(isTrialCsvExportComplete)
   );
 }
 
 export function getStudyCompletionStatus(
-  procedureAccepted:
-    boolean,
-
-  studyCompleted:
-    boolean,
+  procedureAccepted: boolean,
+  studyCompleted: boolean,
 ): StudyCompletionStatus {
-  if (
-    studyCompleted
-  ) {
+  if (studyCompleted) {
     return "completed";
   }
 
-  if (
-    procedureAccepted
-  ) {
+  if (procedureAccepted) {
     return "in_progress";
   }
 
@@ -606,81 +361,46 @@ export function getStudyCompletionStatus(
 }
 
 export function createStudySessionSummary(
-  session:
-    StudySession,
+  session: StudySession,
 ): StudySessionSummary {
   return {
-    participantId:
-      session.participantId,
-
-    sessionId:
-      session.sessionId,
-
-    stage:
-      session.stage,
-
+    participantId: session.participantId,
+    participantToken: session.participantToken,
+    sessionId: session.sessionId,
+    stage: session.stage,
     completedTrialCount:
-      getCompletedTrialCount(
-        session.trials,
-      ),
-
-    totalTrialCount:
-      session.trials.length,
-
-    currentTrialNumber:
-      session.currentTrialNumber,
-
-    completionStatus:
-      getStudyCompletionStatus(
-        session.procedureAccepted,
-        session.studyCompleted,
-      ),
-
+      getCompletedTrialCount(session.trials),
+    totalTrialCount: session.trials.length,
+    currentTrialNumber: session.currentTrialNumber,
+    completionStatus: getStudyCompletionStatus(
+      session.procedureAccepted,
+      session.studyCompleted,
+    ),
     allTrialCsvFilesExported:
-      allTrialCsvFilesExported(
-        session.trials,
-      ),
-
+      allTrialCsvFilesExported(session.trials),
     postExperimentCsvExported:
-      session
-        .postExperimentCsvExportStatus ===
+      session.postExperimentCsvExportStatus ===
       "exported",
+    sessionCsvExported:
+      session.sessionCsvExportStatus === "exported",
   };
 }
 
 export function createStudyCompletionSummary(
-  session:
-    StudySession,
+  session: StudySession,
 ): StudyCompletionSummary {
   return {
-    participantId:
-      session.participantId,
-
-    sessionId:
-      session.sessionId,
-
+    participantId: session.participantId,
+    participantToken: session.participantToken,
+    sessionId: session.sessionId,
     completedTrials:
-      getCompletedTrialCount(
-        session.trials,
-      ),
-
-    totalTrials:
-      session.trials.length,
-
+      getCompletedTrialCount(session.trials),
+    totalTrials: session.trials.length,
     completedTrialNumbers:
-      getCompletedTrialNumbers(
-        session.trials,
-      ),
-
+      getCompletedTrialNumbers(session.trials),
     exportedTrialNumbers:
-      getExportedTrialNumbers(
-        session.trials,
-      ),
-
-    startedAtIso:
-      session.sessionStartedAtIso,
-
-    completedAtIso:
-      session.studyCompletedAtIso,
+      getExportedTrialNumbers(session.trials),
+    startedAtIso: session.sessionStartedAtIso,
+    completedAtIso: session.studyCompletedAtIso,
   };
 }

@@ -1,14 +1,29 @@
-import { useDraggable } from "@dnd-kit/core";
-import { TALKS } from "../../data/symposium";
-import { useSchedulerStore } from "../../store/schedulerStore";
-import type { Talk } from "../../types/scheduler";
+import {
+  useDraggable,
+  useDroppable,
+} from "@dnd-kit/core";
+import { useMemo } from "react";
+
+import {
+  getSpeakerDisplayLabel,
+  getTalkById,
+} from "../../data/symposium";
+import {
+  useSchedulerStore,
+} from "../../store/schedulerStore";
+
+import type {
+  Talk,
+} from "../../types/scheduler";
 
 interface UnassignedTalkProps {
   talk: Talk;
+  disabled: boolean;
 }
 
 function UnassignedTalk({
   talk,
+  disabled,
 }: UnassignedTalkProps) {
   const {
     attributes,
@@ -18,22 +33,28 @@ function UnassignedTalk({
     isDragging,
   } = useDraggable({
     id: `talk-${talk.id}`,
+    disabled,
     data: {
       type: "talk",
       talkId: talk.id,
-      source: "unassigned-tray",
+      origin: "tray",
+      source: "unassigned_tray",
     },
   });
 
   const style = transform
     ? {
-        transform: `translate3d(${transform.x}px, ${transform.y}px, 0)`,
+        transform:
+          `translate3d(${transform.x}px, ${transform.y}px, 0)`,
       }
     : undefined;
 
-  const speakerLabel = talk.speaker
-    ? `Dr. ${talk.speaker}`
-    : "Solo speaker";
+  const speakerLabel =
+    talk.speaker
+      ? getSpeakerDisplayLabel(
+          talk.speaker,
+        )
+      : "";
 
   const accessibilityLabel = [
     talk.id,
@@ -59,11 +80,20 @@ function UnassignedTalk({
         isDragging
           ? "unassigned-talk-dragging"
           : "",
+        disabled
+          ? "unassigned-talk-disabled"
+          : "",
       ]
         .filter(Boolean)
         .join(" ")}
       aria-label={accessibilityLabel}
-      title="Drag this talk to an available schedule cell"
+      aria-grabbed={isDragging}
+      aria-disabled={disabled}
+      title={
+        disabled
+          ? "The trial is locked"
+          : "Drag this talk to an empty legal schedule cell"
+      }
     >
       <div className="unassigned-talk-header">
         <strong>{talk.id}</strong>
@@ -82,9 +112,11 @@ function UnassignedTalk({
         {talk.title}
       </span>
 
-      <span className="unassigned-talk-speaker">
-        {speakerLabel}
-      </span>
+      {speakerLabel ? (
+        <span className="unassigned-talk-speaker">
+          {speakerLabel}
+        </span>
+      ) : null}
     </div>
   );
 }
@@ -93,24 +125,133 @@ export default function UnassignedTray() {
   const unassignedTalkIds = useSchedulerStore(
     (state) => state.unassignedTalkIds,
   );
-
-  const talks = TALKS.filter((talk) =>
-    unassignedTalkIds.includes(talk.id),
+  const activeTalkId = useSchedulerStore(
+    (state) => state.activeTalkId,
   );
+  const activeDragOrigin = useSchedulerStore(
+    (state) => state.activeDragOrigin,
+  );
+  const allowTrayUnplace = useSchedulerStore(
+    (state) => state.allowTrayUnplace,
+  );
+  const trialLocked = useSchedulerStore(
+    (state) => state.trialLocked,
+  );
+
+  const talks = useMemo(
+    () =>
+      unassignedTalkIds
+        .map((talkId) => getTalkById(talkId))
+        .filter(
+          (talk): talk is Talk =>
+            talk !== undefined,
+        ),
+    [unassignedTalkIds],
+  );
+
+  const scheduledTalkBeingDragged =
+    activeTalkId !== null &&
+    activeDragOrigin === "grid";
+
+  const trayDropCandidate =
+    scheduledTalkBeingDragged &&
+    !trialLocked;
+
+  const trayAcceptsDrop =
+    trayDropCandidate &&
+    allowTrayUnplace;
+
+  const trayIllegalReason =
+    trayDropCandidate &&
+    !allowTrayUnplace
+      ? "tray_unplace_disabled"
+      : null;
+
+  const {
+    setNodeRef,
+    isOver,
+  } = useDroppable({
+    id: "unassigned-tray-dropzone",
+
+    /*
+     * Keep the tray registered while a scheduled talk is dragged, even
+     * when unplacement is disabled. The parent DnD handler can then log
+     * the attempted illegal drop instead of losing the target entirely.
+     */
+    disabled:
+      !scheduledTalkBeingDragged ||
+      trialLocked,
+
+    data: {
+      type: "unassigned-tray",
+      acceptsScheduledTalk:
+        trayAcceptsDrop,
+      allowTrayUnplace,
+      dropIsLegal:
+        trayAcceptsDrop,
+      illegalReason:
+        trayIllegalReason,
+    },
+  });
+
+  const trayDescription = allowTrayUnplace
+    ? "Drag unassigned talks into empty legal cells. Scheduled talks may also be returned to this tray."
+    : "Drag unassigned talks into empty legal cells. Once assigned, talks may be moved or swapped but cannot be returned to this tray.";
+
+  const trayStatusMessage =
+    isOver &&
+    scheduledTalkBeingDragged
+      ? trayAcceptsDrop
+        ? "Return talk to the unassigned tray"
+        : "Returning talks to the tray is disabled"
+      : null;
 
   return (
     <section
-      className="unassigned-tray"
+      ref={setNodeRef}
+      className={[
+        "unassigned-tray",
+        trayAcceptsDrop
+          ? "unassigned-tray-drop-enabled"
+          : "",
+        isOver && trayAcceptsDrop
+          ? "unassigned-tray-over"
+          : "",
+        trialLocked
+          ? "unassigned-tray-locked"
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       aria-label="Unassigned talks"
+      aria-disabled={trialLocked}
+      data-allow-tray-unplace={allowTrayUnplace}
+      data-drop-enabled={trayAcceptsDrop}
+      data-drop-legal={
+        scheduledTalkBeingDragged
+          ? trayAcceptsDrop
+          : undefined
+      }
+      data-illegal-reason={
+        trayIllegalReason ?? undefined
+      }
     >
       <div className="unassigned-tray-title">
         Unassigned talks
       </div>
 
       <div className="unassigned-tray-description">
-        Drag each talk into an available room and slot.
-        Once assigned, move or swap it within the schedule.
+        {trayDescription}
       </div>
+
+      {trayStatusMessage ? (
+        <div
+          className="unassigned-tray-drop-message"
+          role="status"
+        >
+          {trayStatusMessage}
+        </div>
+      ) : null}
 
       {talks.length === 0 ? (
         <div
@@ -125,6 +266,7 @@ export default function UnassignedTray() {
             <UnassignedTalk
               key={talk.id}
               talk={talk}
+              disabled={trialLocked}
             />
           ))}
         </div>

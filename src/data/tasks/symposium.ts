@@ -7,6 +7,8 @@ import {
   ROOMS,
   SEMANTIC_PROBE,
   SLOTS,
+  SYMPOSIUM_CONSTRAINTS,
+  SYMPOSIUM_PREFERENCES,
   SYMPOSIUM_TASK,
   TALKS,
   formatAllowedRooms,
@@ -20,8 +22,14 @@ import {
 } from "../symposium";
 
 import type {
+  SymposiumConstraintDefinition,
+  SymposiumPreferenceDefinition,
+} from "../symposium";
+
+import type {
   ConcretizationLevel,
   Placement,
+  ProbeDisplayMode,
   Room,
   Slot,
   StudyTrialNumber,
@@ -29,28 +37,29 @@ import type {
 } from "../../types/scheduler";
 
 export interface SymposiumTaskConstraint {
-  id: string;
+  id: SymposiumConstraintDefinition["id"];
   title: string;
   description: string;
 }
 
 export interface SymposiumTaskPreference {
-  id: string;
+  id: SymposiumPreferenceDefinition["id"];
   title: string;
   description: string;
 }
 
 export interface SymposiumTaskUpdate {
   id: string;
+  version?: string;
   title: string;
   message: string;
   collapsedLabel: string;
-
   affectedRoom: Room;
-
+  requiredProjectorRoom?: Room;
+  requiredTalkIds?: string[];
   shownAfterSeconds: number;
   collapseAfterSeconds: number;
-
+  displayMode?: ProbeDisplayMode;
   semanticOnly: boolean;
 }
 
@@ -58,10 +67,10 @@ export interface SymposiumAssistantContent {
   name: string;
   statusLabel: string;
   recommendationLabel: string;
-
   heading: string;
   recommendation: string;
-
+  prefillAcknowledgment?: string | null;
+  contentVersion?: string;
   roomRecommendations?: {
     room: Room;
     topic: string;
@@ -73,430 +82,231 @@ export interface SymposiumTrialContent {
   participantLabel: string;
   condition: ConcretizationLevel;
   route: string;
-
   assistant: SymposiumAssistantContent;
-
   initialPlacements: Placement[];
 }
 
 export interface SymposiumTaskDefinition {
   id: "symposium";
-
   routePattern: "/task/:trialNumber";
-
   title: string;
   shortTitle: string;
   description: string;
   objective: string;
-
   itemSingular: string;
   itemPlural: string;
-
   locationSingular: string;
   locationPlural: string;
-
   periodSingular: string;
   periodPlural: string;
-
   durationSeconds: number;
-
   rooms: Room[];
   slots: Slot[];
   talks: Talk[];
-
   roomDetails: typeof ROOM_DETAILS;
-
   constraints: SymposiumTaskConstraint[];
   preferences: SymposiumTaskPreference[];
-
   assistantByCondition: Record<
     ConcretizationLevel,
     SymposiumAssistantContent
   >;
-
   initialPlacements: Record<
     ConcretizationLevel,
     Placement[]
   >;
-
   trials: SymposiumTrialContent[];
-
   update: SymposiumTaskUpdate;
 }
+
+const CONSTRAINT_TITLES: Record<
+  SymposiumConstraintDefinition["id"],
+  string
+> = {
+  projector_requirement:
+    "Demo projector requirement",
+  capacity_requirement:
+    "N3 capacity requirement",
+  speaker_availability:
+    "Speaker conflict rule",
+};
+
+const PREFERENCE_TITLES: Record<
+  SymposiumPreferenceDefinition["id"],
+  string
+> = {
+  topic_grouping: "Topic grouping",
+  keynote_opening: "Keynote placement",
+};
 
 function clonePlacements(
   placements: Placement[],
 ): Placement[] {
-  return placements.map(
-    (placement) => ({
-      ...placement,
-    }),
-  );
+  return placements.map((placement) => ({
+    ...placement,
+  }));
+}
+
+function cloneAssistantContent(
+  assistant: SymposiumAssistantContent,
+): SymposiumAssistantContent {
+  return {
+    ...assistant,
+    roomRecommendations:
+      assistant.roomRecommendations?.map(
+        (recommendation) => ({
+          ...recommendation,
+        }),
+      ),
+  };
 }
 
 function createAssistantContent(
   condition: ConcretizationLevel,
 ): SymposiumAssistantContent {
   const recommendation =
-    getAssistantRecommendation(
-      condition,
-    );
-
-  if (condition === "C") {
-    return {
-      name: "AI Scheduling Assistant",
-
-      statusLabel:
-        "Analysis complete",
-
-      recommendationLabel:
-        "Recommendation",
-
-      heading:
-        recommendation.heading,
-
-      recommendation:
-        recommendation.message,
-
-      roomRecommendations: [
-        {
-          room: "A",
-          topic: "NLP",
-        },
-
-        {
-          room: "B",
-          topic: "Health",
-        },
-
-        {
-          room: "C",
-          topic: "Robotics",
-        },
-      ],
-    };
-  }
+    getAssistantRecommendation(condition);
 
   return {
     name: "AI Scheduling Assistant",
-
-    statusLabel:
-      "Analysis complete",
-
-    recommendationLabel:
-      "Recommendation",
-
-    heading:
-      recommendation.heading,
-
-    recommendation:
-      recommendation.message,
+    statusLabel: "Analysis complete",
+    recommendationLabel: "Recommendation",
+    heading: recommendation.heading,
+    recommendation: recommendation.message,
+    prefillAcknowledgment:
+      recommendation.prefillAcknowledgment,
+    contentVersion: SYMPOSIUM_TASK.messageVersion,
   };
 }
 
+/*
+ * The recommendation content is identical across A, B, and C.
+ * Only the acknowledgement of the condition-specific prefill may differ.
+ */
 const assistantByCondition: Record<
   ConcretizationLevel,
   SymposiumAssistantContent
 > = {
-  A: createAssistantContent(
-    "A",
-  ),
-
-  B: createAssistantContent(
-    "B",
-  ),
-
-  C: createAssistantContent(
-    "C",
-  ),
+  A: createAssistantContent("A"),
+  B: createAssistantContent("B"),
+  C: createAssistantContent("C"),
 };
 
 const initialPlacements: Record<
   ConcretizationLevel,
   Placement[]
 > = {
-  A: clonePlacements(
-    AI_STRATEGY_ARTIFACT,
-  ),
-
-  B: clonePlacements(
-    AI_PARTIAL_ARTIFACT,
-  ),
-
-  C: clonePlacements(
-    AI_FULL_ARTIFACT,
-  ),
+  A: clonePlacements(AI_STRATEGY_ARTIFACT),
+  B: clonePlacements(AI_PARTIAL_ARTIFACT),
+  C: clonePlacements(AI_FULL_ARTIFACT),
 };
 
+/*
+ * trialNumber remains the stable internal condition identity:
+ * 1 = A, 2 = B, 3 = C. Participant-visible task order is supplied by
+ * the study session assignment when counterbalancing is active.
+ */
 const trials: SymposiumTrialContent[] = [
   {
     trialNumber: 1,
-
-    participantLabel:
-      "Task 1",
-
+    participantLabel: "Task 1",
     condition: "A",
-
     route: "/task/1",
-
-    assistant: {
-      ...assistantByCondition.A,
-    },
-
-    initialPlacements:
-      clonePlacements(
-        initialPlacements.A,
-      ),
+    assistant: cloneAssistantContent(
+      assistantByCondition.A,
+    ),
+    initialPlacements: clonePlacements(
+      initialPlacements.A,
+    ),
   },
-
   {
     trialNumber: 2,
-
-    participantLabel:
-      "Task 2",
-
+    participantLabel: "Task 2",
     condition: "B",
-
     route: "/task/2",
-
-    assistant: {
-      ...assistantByCondition.B,
-    },
-
-    initialPlacements:
-      clonePlacements(
-        initialPlacements.B,
-      ),
+    assistant: cloneAssistantContent(
+      assistantByCondition.B,
+    ),
+    initialPlacements: clonePlacements(
+      initialPlacements.B,
+    ),
   },
-
   {
     trialNumber: 3,
-
-    participantLabel:
-      "Task 3",
-
+    participantLabel: "Task 3",
     condition: "C",
-
     route: "/task/3",
-
-    assistant: {
-      ...assistantByCondition.C,
-
-      roomRecommendations:
-        assistantByCondition.C
-          .roomRecommendations?.map(
-            (recommendation) => ({
-              ...recommendation,
-            }),
-          ),
-    },
-
-    initialPlacements:
-      clonePlacements(
-        initialPlacements.C,
-      ),
+    assistant: cloneAssistantContent(
+      assistantByCondition.C,
+    ),
+    initialPlacements: clonePlacements(
+      initialPlacements.C,
+    ),
   },
 ];
 
 export const SYMPOSIUM_TASK_DATA:
   SymposiumTaskDefinition = {
     id: "symposium",
-
-    routePattern:
-      "/task/:trialNumber",
-
-    title:
-      SYMPOSIUM_TASK.title,
-
-    shortTitle:
-      SYMPOSIUM_TASK.shortTitle,
-
-    description:
-      SYMPOSIUM_TASK.description,
-
+    routePattern: "/task/:trialNumber",
+    title: SYMPOSIUM_TASK.title,
+    shortTitle: SYMPOSIUM_TASK.shortTitle,
+    description: SYMPOSIUM_TASK.description,
     objective:
-      "Create a complete symposium schedule that assigns every talk to a suitable room and time slot while satisfying the scheduling constraints.",
-
-    itemSingular:
-      "talk",
-
-    itemPlural:
-      "talks",
-
-    locationSingular:
-      "room",
-
-    locationPlural:
-      "rooms",
-
-    periodSingular:
-      "slot",
-
-    periodPlural:
-      "slots",
-
-    durationSeconds:
-      SYMPOSIUM_TASK.durationSeconds,
-
-    rooms: [
-      ...ROOMS,
-    ],
-
-    slots: [
-      ...SLOTS,
-    ],
-
-    talks:
-      TALKS.map(
-        (talk) => ({
-          ...talk,
-
-          allowedSlots: [
-            ...talk.allowedSlots,
-          ],
-
-          allowedRooms: [
-            ...talk.allowedRooms,
-          ],
-        }),
-      ),
-
+      "Create a complete symposium schedule that satisfies the scheduling constraints while considering the scheduling preferences.",
+    itemSingular: "talk",
+    itemPlural: "talks",
+    locationSingular: "room",
+    locationPlural: "rooms",
+    periodSingular: "slot",
+    periodPlural: "slots",
+    durationSeconds: SYMPOSIUM_TASK.durationSeconds,
+    rooms: [...ROOMS],
+    slots: [...SLOTS],
+    talks: TALKS.map((talk) => ({
+      ...talk,
+      allowedSlots: [...talk.allowedSlots],
+      allowedRooms: [...talk.allowedRooms],
+    })),
     roomDetails: {
-      A: {
-        ...ROOM_DETAILS.A,
-      },
-
-      B: {
-        ...ROOM_DETAILS.B,
-      },
-
-      C: {
-        ...ROOM_DETAILS.C,
-      },
+      A: { ...ROOM_DETAILS.A },
+      B: { ...ROOM_DETAILS.B },
+      C: { ...ROOM_DETAILS.C },
     },
-
-    constraints: [
-      {
-        id:
-          "assign-every-talk",
-
-        title:
-          "Complete assignment",
-
-        description:
-          "Schedule every talk exactly once.",
-      },
-
-      {
-        id:
-          "one-talk-per-cell",
-
-        title:
-          "One talk per cell",
-
-        description:
-          "Each room and slot may contain only one talk.",
-      },
-
-      {
-        id:
-          "availability",
-
-        title:
-          "Availability",
-
-        description:
-          "Each talk may only use its allowed rooms and available slots.",
-      },
-
-      {
-        id:
-          "projector",
-
-        title:
-          "Projector requirement",
-
-        description:
-          "Demo talks N1, R1, R2, and R3 require a projector and may only use Room A or Room C.",
-      },
-
-      {
-        id:
-          "capacity",
-
-        title:
-          "Capacity requirement",
-
-        description:
-          "Talk N3 requires at least 80 seats and may only use Room A or Room B.",
-      },
-
-      {
-        id:
-          "speaker-conflict",
-
-        title:
-          "Speaker availability",
-
-        description:
-          "A speaker cannot present more than one talk during the same slot.",
-      },
-    ],
-
-    preferences: [
-      {
-        id:
-          "group-topics",
-
-        title:
-          "Group topics",
-
-        description:
-          "Keep talks from the same topic grouped in the same room where possible.",
-      },
-
-      {
-        id:
-          "keynote-opening",
-
-        title:
-          "Keynote placement",
-
-        description:
-          "Place keynote N1 in Room A during Slot 1.",
-      },
-    ],
-
+    constraints: SYMPOSIUM_CONSTRAINTS.map(
+      (constraint) => ({
+        id: constraint.id,
+        title: CONSTRAINT_TITLES[constraint.id],
+        description: constraint.text,
+      }),
+    ),
+    preferences: SYMPOSIUM_PREFERENCES.map(
+      (preference) => ({
+        id: preference.id,
+        title: PREFERENCE_TITLES[preference.id],
+        description: preference.text,
+      }),
+    ),
     assistantByCondition,
-
     initialPlacements,
-
     trials,
-
     update: {
-      id:
-        SEMANTIC_PROBE.id,
-
-      title:
-        SEMANTIC_PROBE.title,
-
-      message:
-        `${SEMANTIC_PROBE.message} Continue scheduling using this updated information.`,
-
-      collapsedLabel:
-        SEMANTIC_PROBE.collapsedLabel,
-
-      affectedRoom:
-        "C",
-
+      id: SEMANTIC_PROBE.id,
+      version: SEMANTIC_PROBE.version,
+      title: SEMANTIC_PROBE.title,
+      message: SEMANTIC_PROBE.message,
+      collapsedLabel: SEMANTIC_PROBE.collapsedLabel,
+      affectedRoom: SEMANTIC_PROBE.affectedRoom,
+      requiredProjectorRoom:
+        SEMANTIC_PROBE.requiredProjectorRoom,
+      requiredTalkIds: [
+        ...SEMANTIC_PROBE.requiredTalkIds,
+      ],
       shownAfterSeconds:
         SEMANTIC_PROBE.shownAfterSeconds,
-
       collapseAfterSeconds:
         SEMANTIC_PROBE.collapseAfterSeconds,
-
-      semanticOnly:
-        SEMANTIC_PROBE.semanticOnly,
+      displayMode: SEMANTIC_PROBE.displayMode,
+      semanticOnly: SEMANTIC_PROBE.semanticOnly,
     },
   };
 
@@ -505,9 +315,7 @@ export function getSymposiumInitialPlacements(
 ): Placement[] {
   return clonePlacements(
     SYMPOSIUM_TASK_DATA
-      .initialPlacements[
-        condition
-      ],
+      .initialPlacements[condition],
   );
 }
 
@@ -515,13 +323,10 @@ export function getSymposiumTrialContent(
   trialNumber: StudyTrialNumber,
 ): SymposiumTrialContent {
   const trial =
-    SYMPOSIUM_TASK_DATA
-      .trials
-      .find(
-        (item) =>
-          item.trialNumber ===
-          trialNumber,
-      );
+    SYMPOSIUM_TASK_DATA.trials.find(
+      (item) =>
+        item.trialNumber === trialNumber,
+    );
 
   if (!trial) {
     throw new Error(
@@ -531,24 +336,12 @@ export function getSymposiumTrialContent(
 
   return {
     ...trial,
-
-    assistant: {
-      ...trial.assistant,
-
-      roomRecommendations:
-        trial.assistant
-          .roomRecommendations
-          ?.map(
-            (recommendation) => ({
-              ...recommendation,
-            }),
-          ),
-    },
-
-    initialPlacements:
-      clonePlacements(
-        trial.initialPlacements,
-      ),
+    assistant: cloneAssistantContent(
+      trial.assistant,
+    ),
+    initialPlacements: clonePlacements(
+      trial.initialPlacements,
+    ),
   };
 }
 
@@ -567,6 +360,8 @@ export {
   ROOMS,
   SEMANTIC_PROBE,
   SLOTS,
+  SYMPOSIUM_CONSTRAINTS,
+  SYMPOSIUM_PREFERENCES,
   SYMPOSIUM_TASK,
   TALKS,
   formatAllowedRooms,

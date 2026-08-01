@@ -30,6 +30,14 @@ import {
   useStudySessionStore,
 } from "../store/studySessionStore";
 
+import {
+  isConditionOrder,
+} from "../types/scheduler";
+
+import type {
+  StudyTrialOrder,
+} from "../types/scheduler";
+
 import type {
   StudyTrialProgress,
 } from "../types/study";
@@ -37,24 +45,49 @@ import type {
 const TOTAL_TRIALS =
   3;
 
+function isStudyTrialOrder(
+  value: unknown,
+): value is StudyTrialOrder {
+  return (
+    value === 1 ||
+    value === 2 ||
+    value === 3
+  );
+}
+
+function getParticipantTaskNumber(
+  trial: StudyTrialProgress,
+): StudyTrialOrder {
+  return isStudyTrialOrder(
+    trial.trialOrder,
+  )
+    ? trial.trialOrder
+    : trial.trialNumber;
+}
+
 function getTrialButtonLabel(
   trial:
     StudyTrialProgress,
 ): string {
+  const participantTaskNumber =
+    getParticipantTaskNumber(
+      trial,
+    );
+
   switch (
     trial.status
   ) {
     case "pending":
-      return `Begin Task ${trial.trialNumber}`;
+      return `Begin Task ${participantTaskNumber}`;
 
     case "active":
-      return `Continue Task ${trial.trialNumber}`;
+      return `Continue Task ${participantTaskNumber}`;
 
     case "submitted":
-      return `Continue Task ${trial.trialNumber} questionnaire`;
+      return `Continue Task ${participantTaskNumber} questionnaire`;
 
     case "questionnaire_complete":
-      return `Task ${trial.trialNumber} completed`;
+      return `Task ${participantTaskNumber} completed`;
   }
 }
 
@@ -72,6 +105,12 @@ export default function TaskSelectionPage() {
     useStudySessionStore(
       (state) =>
         state.sessionId,
+    );
+
+  const conditionOrder =
+    useStudySessionStore(
+      (state) =>
+        state.conditionOrder,
     );
 
   const procedureAccepted =
@@ -128,6 +167,12 @@ export default function TaskSelectionPage() {
         state.setSessionId,
     );
 
+  const setEventConditionOrder =
+    useEventLogStore(
+      (state) =>
+        state.setConditionOrder,
+    );
+
   const addEvent =
     useEventLogStore(
       (state) =>
@@ -142,8 +187,12 @@ export default function TaskSelectionPage() {
             firstTrial,
             secondTrial,
           ) =>
-            firstTrial.trialNumber -
-            secondTrial.trialNumber,
+            getParticipantTaskNumber(
+              firstTrial,
+            ) -
+            getParticipantTaskNumber(
+              secondTrial,
+            ),
         ),
       [
         trials,
@@ -208,12 +257,18 @@ export default function TaskSelectionPage() {
     setEventSessionId(
       sessionId,
     );
+
+    setEventConditionOrder(
+      conditionOrder,
+    );
   }, [
+    conditionOrder,
     navigate,
     participantId,
     postExperimentCompleted,
     procedureAccepted,
     sessionId,
+    setEventConditionOrder,
     setEventParticipantId,
     setEventSessionId,
   ]);
@@ -277,8 +332,26 @@ export default function TaskSelectionPage() {
     if (
       wasPending
     ) {
+      const assignmentTrialOrder =
+        isStudyTrialOrder(
+          assignment.trialOrder,
+        )
+          ? assignment.trialOrder
+          : getParticipantTaskNumber(
+              trial,
+            );
+
+      const assignmentConditionOrder =
+        isConditionOrder(
+          assignment.conditionOrder,
+        )
+          ? assignment.conditionOrder
+          : conditionOrder;
+
       initializeTrial(
-        trial.trialNumber,
+        assignment.trialNumber,
+        assignmentConditionOrder,
+        assignmentTrialOrder,
       );
 
       addEvent({
@@ -321,6 +394,9 @@ export default function TaskSelectionPage() {
 
           participantLabel:
             assignment.participantLabel,
+
+          participantTaskNumber:
+            assignmentTrialOrder,
 
           totalTrials:
             TOTAL_TRIALS,
@@ -680,14 +756,18 @@ export default function TaskSelectionPage() {
                           aria-hidden="true"
                         />
                       ) : (
-                        trial.trialNumber
+                        getParticipantTaskNumber(
+                          trial,
+                        )
                       )}
                     </div>
 
                     <span>
                       Task{" "}
                       {
-                        trial.trialNumber
+                        getParticipantTaskNumber(
+                          trial,
+                        )
                       }
                     </span>
                   </div>

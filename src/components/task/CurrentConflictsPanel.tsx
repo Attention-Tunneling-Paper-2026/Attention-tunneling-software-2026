@@ -2,15 +2,25 @@ import {
   AlertTriangle,
   CheckCircle2,
 } from "lucide-react";
-import { TALKS } from "../../data/symposium";
-import { useSchedulerStore } from "../../store/schedulerStore";
-import { getSpeakerViolations } from "../../metrics/schedulerMetrics";
+
+import {
+  getSpeakerDisplayLabel,
+  getTalkById,
+} from "../../data/symposium";
+
+import {
+  getSpeakerViolations,
+} from "../../metrics/schedulerMetrics";
+
+import {
+  useSchedulerStore,
+} from "../../store/schedulerStore";
 
 function getTalkTitle(
   talkId: string,
 ): string {
-  const talk = TALKS.find(
-    (item) => item.id === talkId,
+  const talk = getTalkById(
+    talkId,
   );
 
   return talk
@@ -23,42 +33,24 @@ export default function CurrentConflictsPanel() {
     (state) => state.placements,
   );
 
-  const conflicts =
-    getSpeakerViolations(
-      placements,
-    );
+  const conflicts = getSpeakerViolations(
+    placements,
+  );
 
-  if (conflicts.length === 0) {
-    return (
-      <section
-        className="current-conflicts-panel current-conflicts-panel-clear"
-        role="status"
-        aria-live="polite"
-        aria-atomic="true"
-      >
-        <div className="current-conflicts-header">
-          <div className="current-conflicts-title">
-            <CheckCircle2
-              size={19}
-              aria-hidden="true"
-            />
-
-            <span>
-              No current speaker conflicts
-            </span>
-          </div>
-
-          <span className="current-conflicts-count">
-            0 conflicts
-          </span>
-        </div>
-      </section>
-    );
-  }
+  const allSpeakerConflictsResolved =
+    conflicts.length === 0;
 
   return (
     <section
-      className="current-conflicts-panel"
+      className={[
+        "current-conflicts-panel",
+
+        allSpeakerConflictsResolved
+          ? "current-conflicts-panel-clear"
+          : "",
+      ]
+        .filter(Boolean)
+        .join(" ")}
       role="status"
       aria-live="polite"
       aria-atomic="true"
@@ -69,13 +61,22 @@ export default function CurrentConflictsPanel() {
           id="current-conflicts-title"
           className="current-conflicts-title"
         >
-          <AlertTriangle
-            size={19}
-            aria-hidden="true"
-          />
+          {allSpeakerConflictsResolved ? (
+            <CheckCircle2
+              size={19}
+              aria-hidden="true"
+            />
+          ) : (
+            <AlertTriangle
+              size={19}
+              aria-hidden="true"
+            />
+          )}
 
           <span>
-            Current speaker conflicts
+            {allSpeakerConflictsResolved
+              ? "No current speaker conflicts"
+              : "Current speaker conflicts"}
           </span>
         </div>
 
@@ -87,36 +88,56 @@ export default function CurrentConflictsPanel() {
         </span>
       </div>
 
-      <div className="current-conflicts-list">
-        {conflicts.map((conflict) => {
-          const talkLabels =
-            conflict.talkIds.map(
-              getTalkTitle,
+      {allSpeakerConflictsResolved ? (
+        <div className="current-conflicts-list">
+          <div className="current-conflict-item">
+            <CheckCircle2
+              size={16}
+              aria-hidden="true"
+            />
+
+            <span>
+              The visible speaker conflicts are resolved.
+              Continue considering both scheduling
+              preferences before submitting the schedule.
+            </span>
+          </div>
+        </div>
+      ) : (
+        <div className="current-conflicts-list">
+          {conflicts.map((conflict) => {
+            const talkLabels =
+              conflict.talkIds.map(
+                getTalkTitle,
+              );
+
+            return (
+              <div
+                key={[
+                  conflict.speaker,
+                  conflict.slot,
+                  ...conflict.talkIds,
+                ].join(":")}
+                className="current-conflict-item"
+              >
+                <AlertTriangle
+                  size={16}
+                  aria-hidden="true"
+                />
+
+                <span>
+                  {getSpeakerDisplayLabel(
+                    conflict.speaker,
+                  )}{" "}
+                  is assigned to{" "}
+                  {talkLabels.join(" and ")}{" "}
+                  during Slot {conflict.slot}.
+                </span>
+              </div>
             );
-
-          return (
-            <div
-              key={[
-                conflict.speaker,
-                conflict.slot,
-                ...conflict.talkIds,
-              ].join(":")}
-              className="current-conflict-item"
-            >
-              <AlertTriangle
-                size={16}
-                aria-hidden="true"
-              />
-
-              <span>
-                Dr. {conflict.speaker} is assigned to{" "}
-                {talkLabels.join(" and ")} during Slot{" "}
-                {conflict.slot}.
-              </span>
-            </div>
-          );
-        })}
-      </div>
+          })}
+        </div>
+      )}
     </section>
   );
 }

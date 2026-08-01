@@ -9,9 +9,19 @@ import {
   TALKS,
   VERIFIED_BEST_POST_PROBE_SOLUTION,
   VERIFIED_PRE_PROBE_OPTIMUM,
+  getPostProbeConstraintState,
+  getPostProbeIntegrationTalkIds,
   getTalkById,
   isDemoTalk,
 } from "../data/symposium";
+
+import type {
+  PostProbeRequiredTalkId,
+} from "../data/symposium";
+
+import type {
+  TheoreticalEditCategory,
+} from "../types/events";
 
 import type {
   Placement,
@@ -61,6 +71,11 @@ export interface ScheduleSnapshot {
 
   structuralSignature: string;
 
+  macroStructureSignature: string;
+
+  macroStructureDefinition:
+    "room_majority_topic_mapping_ignoring_slot_order";
+
   roomCompositionSignature: string;
 
   hammingDistanceFromAI: number;
@@ -79,7 +94,14 @@ export interface ScheduleSnapshot {
 
   completeAssignment: boolean;
 
+  preProbeFeasible: boolean;
+
+  semanticProbeCompliant: boolean;
+
   postProbeFeasible: boolean;
+
+  unresolvedDemoTalkIds:
+    PostProbeRequiredTalkId[];
 
   resultingViolations: SpeakerViolation[];
 
@@ -97,6 +119,8 @@ export interface SchedulerMetrics
   previousStateHash: string;
 
   previousStructuralSignature: string;
+
+  previousMacroStructureSignature: string;
 
   previousRoomCompositionSignature: string;
 
@@ -122,13 +146,27 @@ export interface SchedulerMetrics
 
   structuralDeparture: boolean;
 
+  theoreticalEditCategory:
+    TheoreticalEditCategory | null;
+
   probeIntegrationDetected: boolean;
 
   integrationConsistentEdit: boolean;
 
-  postProbeFeasibleBefore: boolean;
+  integrationTalkIds:
+    string[];
 
-  postProbeFeasibleAfter: boolean;
+  postProbeFeasibleBefore:
+    boolean | null;
+
+  postProbeFeasibleAfter:
+    boolean | null;
+
+  unresolvedDemoTalkIdsBefore:
+    PostProbeRequiredTalkId[] | null;
+
+  unresolvedDemoTalkIdsAfter:
+    PostProbeRequiredTalkId[] | null;
 
   isSalvageAttempt: boolean;
 
@@ -155,6 +193,12 @@ const TOPIC_CODES: Record<
 
   Robotics: "R",
 };
+
+const TOPIC_ORDER: Topic[] = [
+  "NLP",
+  "Health",
+  "Robotics",
+];
 
 function getPlacementForTalk(
   placements: Placement[],
@@ -604,27 +648,72 @@ export function getRoomCompositionSignature(
   ).join("|");
 }
 
+function getDominantTopicForRoom(
+  placements: Placement[],
+  room: Room,
+): Topic | "Mixed" | "Empty" {
+  const counts = new Map<Topic, number>(
+    TOPIC_ORDER.map((topic) => [topic, 0]),
+  );
+
+  for (const placement of placements) {
+    if (placement.room !== room) {
+      continue;
+    }
+
+    const topic = getTalkById(
+      placement.talkId,
+    )?.topic;
+
+    if (topic) {
+      counts.set(
+        topic,
+        (counts.get(topic) ?? 0) + 1,
+      );
+    }
+  }
+
+  const highestCount = Math.max(
+    ...TOPIC_ORDER.map(
+      (topic) => counts.get(topic) ?? 0,
+    ),
+  );
+
+  if (highestCount === 0) {
+    return "Empty";
+  }
+
+  const dominantTopics = TOPIC_ORDER.filter(
+    (topic) =>
+      (counts.get(topic) ?? 0) === highestCount,
+  );
+
+  return dominantTopics.length === 1
+    ? dominantTopics[0]
+    : "Mixed";
+}
+
+export function getMacroStructureSignature(
+  placements: Placement[],
+): string {
+  return ROOMS.map(
+    (room) =>
+      `${room}=${getDominantTopicForRoom(
+        placements,
+        room,
+      )}`,
+  ).join("|");
+}
+
 export function isInsideAIFamily(
   placements: Placement[],
 ): boolean {
-  return placements.every(
-    (placement) => {
-      const talk =
-        getTalkById(
-          placement.talkId,
-        );
-
-      if (!talk) {
-        return false;
-      }
-
-      return (
-        AI_ROOM_TRACK_TOPICS[
-          placement.room
-        ] ===
-        talk.topic
-      );
-    },
+  return ROOMS.every(
+    (room) =>
+      getDominantTopicForRoom(
+        placements,
+        room,
+      ) === AI_ROOM_TRACK_TOPICS[room],
   );
 }
 
@@ -706,8 +795,8 @@ export function calculateScheduleScore(
 
   const keynoteBonusEarned =
     keynotePlacement?.room ===
-    SYMPOSIUM_SCORING
-      .keynoteRequiredRoom;
+      SYMPOSIUM_SCORING.keynoteRequiredRoom &&
+    keynotePlacement.slot === 1;
 
   const speakerScore =
     speakerChecks.satisfied *
@@ -923,19 +1012,16 @@ export function roomAContainsExactDemoSet(
 export function isPostProbeFeasible(
   placements: Placement[],
 ): boolean {
+  const speakerChecks =
+    getSpeakerPairCheckCounts(placements);
+
   return (
-    hasCompleteAssignment(
+    hasCompleteAssignment(placements) &&
+    isStructurallyLegalSchedule(placements) &&
+    speakerChecks.violated === 0 &&
+    getPostProbeConstraintState(
       placements,
-    ) &&
-    isStructurallyLegalSchedule(
-      placements,
-    ) &&
-    roomAContainsExactDemoSet(
-      placements,
-    ) &&
-    getViolatedSpeakerPairCount(
-      placements,
-    ) === 0
+    ).postProbeFeasible
   );
 }
 
@@ -984,6 +1070,60 @@ export function getChangedTalkIds(
     .sort();
 }
 
+/**
+ * The theoretical edit taxonomy used for edit sequence entropy.
+ *
+ * A first exit from the AI family is structure breaking.
+ * Any other change to room level topic composition is cross cluster.
+ * A change that preserves room level topic composition is within cluster.
+ */
+export function getTheoreticalEditCategory(
+  previousPlacements: Placement[],
+  nextPlacements: Placement[],
+): TheoreticalEditCategory | null {
+  const changedTalkIds =
+    getChangedTalkIds(
+      previousPlacements,
+      nextPlacements,
+    );
+
+  if (
+    changedTalkIds.length ===
+    0
+  ) {
+    return null;
+  }
+
+  const structuralDeparture =
+    isInsideAIFamily(
+      previousPlacements,
+    ) &&
+    !isInsideAIFamily(
+      nextPlacements,
+    );
+
+  if (
+    structuralDeparture
+  ) {
+    return "structure_breaking";
+  }
+
+  const previousMacroStructure =
+    getMacroStructureSignature(
+      previousPlacements,
+    );
+
+  const nextMacroStructure =
+    getMacroStructureSignature(
+      nextPlacements,
+    );
+
+  return previousMacroStructure ===
+    nextMacroStructure
+    ? "within_cluster"
+    : "cross_cluster";
+}
+
 export function getTransitionId(
   previousPlacements: Placement[],
   nextPlacements: Placement[],
@@ -1025,55 +1165,33 @@ export function getTransitionId(
     .join(";");
 }
 
+export function getProbeIntegrationTalkIds(
+  previousPlacements: Placement[],
+  nextPlacements: Placement[],
+  probeActive: boolean,
+): string[] {
+  if (!probeActive) {
+    return [];
+  }
+
+  return getPostProbeIntegrationTalkIds(
+    previousPlacements,
+    nextPlacements,
+  );
+}
+
 export function hasProbeIntegration(
   previousPlacements: Placement[],
   nextPlacements: Placement[],
   probeActive: boolean,
 ): boolean {
-  if (!probeActive) {
-    return false;
-  }
-
-  const changedTalkIds =
-    getChangedTalkIds(
+  return (
+    getProbeIntegrationTalkIds(
       previousPlacements,
       nextPlacements,
-    );
-
-  return changedTalkIds.some(
-    (talkId) => {
-      const previousPlacement =
-        getPlacementForTalk(
-          previousPlacements,
-          talkId,
-        );
-
-      const nextPlacement =
-        getPlacementForTalk(
-          nextPlacements,
-          talkId,
-        );
-
-      if (
-        isDemoTalk(
-          talkId,
-        )
-      ) {
-        return (
-          previousPlacement?.room !==
-            "A" &&
-          nextPlacement?.room ===
-            "A"
-        );
-      }
-
-      return (
-        previousPlacement?.room ===
-          "A" &&
-        nextPlacement?.room !==
-          "A"
-      );
-    },
+      probeActive,
+    ).length >
+    0
   );
 }
 
@@ -1236,6 +1354,23 @@ export function createScheduleSnapshot(
       placements,
     );
 
+  const postProbeConstraintState =
+    getPostProbeConstraintState(
+      placements,
+    );
+
+  const preProbeFeasible =
+    completeAssignment &&
+    structurallyLegal &&
+    score.violatedSpeakerPairChecks === 0;
+
+  const semanticProbeCompliant =
+    exactDemoSet;
+
+  const postProbeFeasible =
+    preProbeFeasible &&
+    semanticProbeCompliant;
+
   return {
     canonicalSchedule:
       serializePlacements(
@@ -1251,6 +1386,14 @@ export function createScheduleSnapshot(
       getStructuralSignature(
         placements,
       ),
+
+    macroStructureSignature:
+      getMacroStructureSignature(
+        placements,
+      ),
+
+    macroStructureDefinition:
+      "room_majority_topic_mapping_ignoring_slot_order",
 
     roomCompositionSignature:
       getRoomCompositionSignature(
@@ -1283,12 +1426,16 @@ export function createScheduleSnapshot(
 
     completeAssignment,
 
-    postProbeFeasible:
-      completeAssignment &&
-      structurallyLegal &&
-      exactDemoSet &&
-      score.violatedSpeakerPairChecks ===
-        0,
+    preProbeFeasible,
+
+    semanticProbeCompliant,
+
+    postProbeFeasible,
+
+    unresolvedDemoTalkIds: [
+      ...postProbeConstraintState
+        .unresolvedDemoTalkIds,
+    ],
 
     resultingViolations,
 
@@ -1343,18 +1490,31 @@ export function calculateSchedulerMetrics(
       .hammingDistanceFromAI >
       TALKS.length / 2;
 
-  const integrationConsistentEdit =
-    hasProbeIntegration(
+  const integrationTalkIds =
+    getProbeIntegrationTalkIds(
       previousPlacements,
       nextPlacements,
       probeActive,
     );
+
+  const integrationConsistentEdit =
+    stateChanged &&
+    integrationTalkIds.length >
+      0;
 
   const structuralDeparture =
     previousSnapshot
       .insideAIFamily &&
     !nextSnapshot
       .insideAIFamily;
+
+  const theoreticalEditCategory =
+    stateChanged
+      ? getTheoreticalEditCategory(
+          previousPlacements,
+          nextPlacements,
+        )
+      : null;
 
   const destructiveEditMagnitude =
     Math.max(
@@ -1379,6 +1539,10 @@ export function calculateSchedulerMetrics(
     previousStructuralSignature:
       previousSnapshot
         .structuralSignature,
+
+    previousMacroStructureSignature:
+      previousSnapshot
+        .macroStructureSignature,
 
     previousRoomCompositionSignature:
       previousSnapshot
@@ -1419,18 +1583,44 @@ export function calculateSchedulerMetrics(
 
     structuralDeparture,
 
+    theoreticalEditCategory,
+
     probeIntegrationDetected:
       integrationConsistentEdit,
 
     integrationConsistentEdit,
 
+    integrationTalkIds: [
+      ...integrationTalkIds,
+    ],
+
     postProbeFeasibleBefore:
-      previousSnapshot
-        .postProbeFeasible,
+      probeActive
+        ? previousSnapshot
+            .postProbeFeasible
+        : null,
 
     postProbeFeasibleAfter:
-      nextSnapshot
-        .postProbeFeasible,
+      probeActive
+        ? nextSnapshot
+            .postProbeFeasible
+        : null,
+
+    unresolvedDemoTalkIdsBefore:
+      probeActive
+        ? [
+            ...previousSnapshot
+              .unresolvedDemoTalkIds,
+          ]
+        : null,
+
+    unresolvedDemoTalkIdsAfter:
+      probeActive
+        ? [
+            ...nextSnapshot
+              .unresolvedDemoTalkIds,
+          ]
+        : null,
 
     isSalvageAttempt:
       stateChanged &&

@@ -74,6 +74,7 @@ interface RadioQuestionProps<
     value: TValue,
   ) => void;
 
+  required?: boolean;
   disabled?: boolean;
 }
 
@@ -108,7 +109,7 @@ const influenceOptions: ResponseOption<Exclude<
   },
   {
     value: "task_rules",
-    label: "The task constraints and preferences",
+    label: "The task constraints",
   },
   {
     value: "task_update",
@@ -123,6 +124,28 @@ const influenceOptions: ResponseOption<Exclude<
     label: "A combination of these factors",
   },
 ];
+
+const POST_EXPERIMENT_LIKERT_MIN =
+  0;
+
+const POST_EXPERIMENT_LIKERT_MAX =
+  10;
+
+function isValidPostExperimentLikertValue(
+  value: number | null,
+): value is number {
+  return (
+    value !==
+      null &&
+    Number.isInteger(
+      value,
+    ) &&
+    value >=
+      POST_EXPERIMENT_LIKERT_MIN &&
+    value <=
+      POST_EXPERIMENT_LIKERT_MAX
+  );
+}
 
 const yesNoUnsureOptions: ResponseOption<Exclude<
   YesNoUnsure,
@@ -174,12 +197,20 @@ export function getDebriefValidationMessage(
 ): string {
   if (
     values.primaryInfluence === "" ||
-    values.aiInfluence === null ||
-    values.aiReliance === null ||
-    values.decisionConfidence === null ||
-    values.perceivedAiCompetence === null
+    !isValidPostExperimentLikertValue(
+      values.aiInfluence,
+    ) ||
+    !isValidPostExperimentLikertValue(
+      values.aiReliance,
+    ) ||
+    !isValidPostExperimentLikertValue(
+      values.decisionConfidence,
+    ) ||
+    !isValidPostExperimentLikertValue(
+      values.perceivedAiCompetence,
+    )
   ) {
-    return "Please answer all decision attribution questions.";
+    return "Please answer all decision attribution questions using the 0 to 10 response scale.";
   }
 
   if (
@@ -262,6 +293,7 @@ function RadioQuestion<
   options,
   value,
   onChange,
+  required = true,
   disabled = false,
 }: RadioQuestionProps<TValue>) {
   return (
@@ -297,6 +329,7 @@ function RadioQuestion<
                 name={name}
                 value={option.value}
                 checked={selected}
+                required={required}
                 disabled={disabled}
                 onChange={() =>
                   onChange(
@@ -420,6 +453,7 @@ export default function DebriefForm({
             description="Which factor had the greatest influence on your final schedules overall?"
             options={influenceOptions}
             value={values.primaryInfluence}
+            required
             disabled={disabled}
             onChange={(value) =>
               updateValue(
@@ -436,6 +470,10 @@ export default function DebriefForm({
             lowLabel="Strongly disagree"
             highLabel="Strongly agree"
             value={values.aiInfluence}
+            min={POST_EXPERIMENT_LIKERT_MIN}
+            max={POST_EXPERIMENT_LIKERT_MAX}
+            required
+            ariaLabel="AI influence, rated from 0 strongly disagree to 10 strongly agree"
             disabled={disabled}
             onChange={(value) =>
               updateValue(
@@ -452,6 +490,10 @@ export default function DebriefForm({
             lowLabel="Strongly disagree"
             highLabel="Strongly agree"
             value={values.aiReliance}
+            min={POST_EXPERIMENT_LIKERT_MIN}
+            max={POST_EXPERIMENT_LIKERT_MAX}
+            required
+            ariaLabel="Reliance on the AI, rated from 0 strongly disagree to 10 strongly agree"
             disabled={disabled}
             onChange={(value) =>
               updateValue(
@@ -468,6 +510,10 @@ export default function DebriefForm({
             lowLabel="Strongly disagree"
             highLabel="Strongly agree"
             value={values.decisionConfidence}
+            min={POST_EXPERIMENT_LIKERT_MIN}
+            max={POST_EXPERIMENT_LIKERT_MAX}
+            required
+            ariaLabel="Decision confidence, rated from 0 strongly disagree to 10 strongly agree"
             disabled={disabled}
             onChange={(value) =>
               updateValue(
@@ -486,6 +532,10 @@ export default function DebriefForm({
             value={
               values.perceivedAiCompetence
             }
+            min={POST_EXPERIMENT_LIKERT_MIN}
+            max={POST_EXPERIMENT_LIKERT_MAX}
+            required
+            ariaLabel="Overall AI competence, rated from 0 strongly disagree to 10 strongly agree"
             disabled={disabled}
             onChange={(value) =>
               updateValue(
@@ -548,6 +598,7 @@ export default function DebriefForm({
             value={
               values.noticedAiDifferences
             }
+            required
             disabled={disabled}
             onChange={(value) =>
               updateValue(
@@ -605,6 +656,7 @@ export default function DebriefForm({
             value={
               values.taskUpdateImpact
             }
+            required
             disabled={disabled}
             onChange={(value) =>
               updateValue(
@@ -662,6 +714,7 @@ export default function DebriefForm({
             value={
               values.noticedAnythingUnusual
             }
+            required
             disabled={disabled}
             onChange={(value) =>
               updateValue(
@@ -703,6 +756,7 @@ export default function DebriefForm({
             value={
               values.priorStudyKnowledge
             }
+            required
             disabled={disabled}
             onChange={(value) =>
               updateValue(

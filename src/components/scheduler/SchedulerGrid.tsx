@@ -1,42 +1,32 @@
-import { TALKS } from "../../data/symposium";
-import { useSchedulerStore } from "../../store/schedulerStore";
+import {
+  ROOM_DETAILS,
+  ROOMS,
+  SLOTS,
+  getTalkById,
+} from "../../data/symposium";
+
+import {
+  useSchedulerStore,
+} from "../../store/schedulerStore";
+
 import type {
   Room,
   Slot,
   Talk,
 } from "../../types/scheduler";
+
 import ScheduleCell from "./ScheduleCell";
-
-const rooms: Room[] = ["A", "B", "C"];
-const slots: Slot[] = [1, 2, 3, 4];
-
-const roomDetails: Record<
-  Room,
-  {
-    capacity: number;
-    hasProjector: boolean;
-  }
-> = {
-  A: {
-    capacity: 120,
-    hasProjector: true,
-  },
-  B: {
-    capacity: 80,
-    hasProjector: false,
-  },
-  C: {
-    capacity: 60,
-    hasProjector: true,
-  },
-};
 
 export default function SchedulerGrid() {
   const placements = useSchedulerStore(
     (state) => state.placements,
   );
 
-  function getTalkAt(
+  const trialLocked = useSchedulerStore(
+    (state) => state.trialLocked,
+  );
+
+  function getTalkAtCell(
     room: Room,
     slot: Slot,
   ): Talk | undefined {
@@ -50,53 +40,49 @@ export default function SchedulerGrid() {
       return undefined;
     }
 
-    return TALKS.find(
-      (talk) =>
-        talk.id === placement.talkId,
-    );
+    return getTalkById(placement.talkId);
   }
 
+  /*
+   * Speaker identity remains internal here. ScheduleCell converts it to
+   * the participant-facing label, such as Kim to Dr. Chaky.
+   */
   function hasSpeakerConflict(
     talkId: string,
     slot: Slot,
   ): boolean {
-    const talk = TALKS.find(
-      (item) => item.id === talkId,
-    );
+    const talk = getTalkById(talkId);
 
     if (!talk?.speaker) {
       return false;
     }
 
-    return placements
-      .filter(
-        (placement) =>
-          placement.slot === slot,
-      )
-      .map((placement) =>
-        TALKS.find(
-          (item) =>
-            item.id === placement.talkId,
-        ),
-      )
-      .filter(
-        (
-          item,
-        ): item is Talk =>
-          item !== undefined,
-      )
-      .some(
-        (otherTalk) =>
-          otherTalk.id !== talk.id &&
-          otherTalk.speaker ===
-            talk.speaker,
+    return placements.some((placement) => {
+      if (
+        placement.slot !== slot ||
+        placement.talkId === talk.id
+      ) {
+        return false;
+      }
+
+      const otherTalk = getTalkById(
+        placement.talkId,
       );
+
+      return otherTalk?.speaker === talk.speaker;
+    });
   }
 
   return (
     <section
       className="scheduler-grid"
-      aria-label="Symposium schedule"
+      aria-label={
+        trialLocked
+          ? "Symposium schedule, locked"
+          : "Symposium schedule"
+      }
+      aria-disabled={trialLocked}
+      data-trial-locked={trialLocked}
     >
       <div
         className="grid-header"
@@ -109,7 +95,7 @@ export default function SchedulerGrid() {
           Room
         </div>
 
-        {slots.map((slot) => (
+        {SLOTS.map((slot) => (
           <div
             key={slot}
             className="slot-label"
@@ -120,10 +106,14 @@ export default function SchedulerGrid() {
         ))}
       </div>
 
-      <div role="grid">
-        {rooms.map((room) => {
-          const details =
-            roomDetails[room];
+      <div
+        role="grid"
+        aria-colcount={SLOTS.length + 1}
+        aria-rowcount={ROOMS.length}
+        aria-readonly={trialLocked}
+      >
+        {ROOMS.map((room) => {
+          const details = ROOM_DETAILS[room];
 
           return (
             <div
@@ -150,12 +140,11 @@ export default function SchedulerGrid() {
                 </span>
               </div>
 
-              {slots.map((slot) => {
-                const talk =
-                  getTalkAt(
-                    room,
-                    slot,
-                  );
+              {SLOTS.map((slot) => {
+                const talk = getTalkAtCell(
+                  room,
+                  slot,
+                );
 
                 return (
                   <ScheduleCell
@@ -181,9 +170,9 @@ export default function SchedulerGrid() {
 
       <div className="grid-hint">
         Demo talks require a projector room.
-        Availability windows, equipment requirements,
-        and room capacity restrictions are enforced
-        while dragging.
+        Availability windows, room restrictions,
+        and capacity requirements are enforced while
+        dragging. Speaker conflicts remain visible.
       </div>
     </section>
   );
