@@ -23,19 +23,42 @@ import {
 } from "../types/scheduler";
 
 import type {
+  StudyTaskId,
   StudyTrialNumber,
 } from "../types/scheduler";
 
-function InvalidTaskPage() {
+function isStudyTaskId(
+  value: unknown,
+): value is StudyTaskId {
+  return (
+    value === "symposium" ||
+    value === "delivery" ||
+    value === "clinic"
+  );
+}
+
+interface InvalidTaskPageProps {
+  taskId:
+    StudyTaskId | null;
+}
+
+function InvalidTaskPage({
+  taskId,
+}: InvalidTaskPageProps) {
   const navigate =
     useNavigate();
+
+  const returnPath =
+    taskId
+      ? `/tasks/${taskId}`
+      : "/tasks";
 
   return (
     <main className="study-page">
       <header className="study-page-header">
         <div className="study-page-header-content">
           <div className="study-page-eyebrow">
-            AI Assisted Scheduling Study
+            AI Assisted Constraint-Solving Study
           </div>
 
           <h1>
@@ -43,8 +66,7 @@ function InvalidTaskPage() {
           </h1>
 
           <p>
-            The requested Symposium Scheduler task could not
-            be identified.
+            The requested task could not be identified.
           </p>
         </div>
       </header>
@@ -62,12 +84,12 @@ function InvalidTaskPage() {
 
             <div>
               <h2>
-                Invalid task number
+                Invalid task
               </h2>
 
               <p>
                 Return to the task selection page and choose
-                the task assigned to you.
+                an available task.
               </p>
             </div>
           </div>
@@ -79,7 +101,7 @@ function InvalidTaskPage() {
             className="study-primary-button"
             onClick={() =>
               navigate(
-                "/tasks",
+                returnPath,
               )
             }
           >
@@ -101,9 +123,12 @@ export default function TaskPage() {
     useNavigate();
 
   const {
+    taskId:
+      taskIdParam,
     trialNumber:
       trialNumberParam,
   } = useParams<{
+    taskId: string;
     trialNumber: string;
   }>();
 
@@ -119,6 +144,14 @@ export default function TaskPage() {
         state.trials,
     );
 
+  const taskId:
+    StudyTaskId | null =
+      isStudyTaskId(
+        taskIdParam,
+      )
+        ? taskIdParam
+        : null;
+
   const parsedTrialNumber =
     Number(
       trialNumberParam,
@@ -133,12 +166,15 @@ export default function TaskPage() {
         : null;
 
   const trial =
+    taskId === null ||
     trialNumber === null
       ? undefined
       : trials.find(
           (item) =>
+            item.taskId ===
+              taskId &&
             item.trialNumber ===
-            trialNumber,
+              trialNumber,
         );
 
   useEffect(() => {
@@ -156,6 +192,7 @@ export default function TaskPage() {
     }
 
     if (
+      !taskId ||
       !trialNumber ||
       !trial
     ) {
@@ -167,7 +204,7 @@ export default function TaskPage() {
       "pending"
     ) {
       navigate(
-        "/tasks",
+        `/tasks/${taskId}`,
         {
           replace: true,
         },
@@ -181,7 +218,7 @@ export default function TaskPage() {
       "submitted"
     ) {
       navigate(
-        `/trial-questionnaire/${trialNumber}`,
+        `/trial-questionnaire/${taskId}/${trialNumber}`,
         {
           replace: true,
         },
@@ -195,7 +232,7 @@ export default function TaskPage() {
       "questionnaire_complete"
     ) {
       navigate(
-        "/tasks",
+        `/tasks/${taskId}`,
         {
           replace: true,
         },
@@ -204,16 +241,22 @@ export default function TaskPage() {
   }, [
     navigate,
     procedureAccepted,
+    taskId,
     trial,
     trialNumber,
   ]);
 
   if (
+    taskId === null ||
     trialNumber === null ||
     !trial
   ) {
     return (
-      <InvalidTaskPage />
+      <InvalidTaskPage
+        taskId={
+          taskId
+        }
+      />
     );
   }
 
@@ -227,6 +270,9 @@ export default function TaskPage() {
 
   return (
     <SymposiumScheduler
+      taskId={
+        taskId
+      }
       taskNumber={
         trialNumber
       }

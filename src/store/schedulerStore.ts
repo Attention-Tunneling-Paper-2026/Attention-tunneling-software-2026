@@ -1,10 +1,15 @@
 import { create } from "zustand";
 
 import {
-  ROOM_DETAILS,
-  TALKS,
   getInitialPlacements,
   getTalkById,
+  getTaskItems,
+  getTaskResourceDetails,
+  isSupportedStudyTaskId,
+} from "../data/symposium";
+
+import type {
+  SupportedStudyTaskId,
 } from "../data/symposium";
 
 import {
@@ -19,17 +24,17 @@ import type {
   IllegalMoveReason,
   MoveValidationResult,
   Placement,
-  ScheduleMoveAction,
   Room,
+  ScheduleMoveAction,
   Slot,
   StudyTrialNumber,
-  StudyTrialOrder,
 } from "../types/scheduler";
 
 interface ScheduleState {
+  taskId: SupportedStudyTaskId;
   level: ConcretizationLevel;
   trialNumber: StudyTrialNumber;
-  trialOrder: StudyTrialOrder;
+  trialOrder: StudyTrialNumber;
   conditionOrder: ConditionOrder;
   placements: Placement[];
   unassignedTalkIds: string[];
@@ -49,14 +54,16 @@ interface SchedulerStore extends ScheduleState {
   initializeTrial: (
     trialNumber: StudyTrialNumber,
     conditionOrder?: ConditionOrder,
-    trialOrder?: StudyTrialOrder,
+    trialOrder?: StudyTrialNumber,
+    taskId?: SupportedStudyTaskId,
   ) => void;
 
   initializeSchedule: (
     level: ConcretizationLevel,
     trialNumber?: StudyTrialNumber,
-    trialOrder?: StudyTrialOrder,
+    trialOrder?: StudyTrialNumber,
     conditionOrder?: ConditionOrder,
+    taskId?: SupportedStudyTaskId,
   ) => void;
 
   setLevel: (level: ConcretizationLevel) => void;
@@ -85,8 +92,9 @@ interface SchedulerStore extends ScheduleState {
   unassignTalk: (talkId: string) => boolean;
 }
 
+const INITIAL_TASK_ID: SupportedStudyTaskId = "symposium";
 const INITIAL_TRIAL_NUMBER: StudyTrialNumber = 1;
-const INITIAL_TRIAL_ORDER: StudyTrialOrder = 1;
+const INITIAL_TRIAL_ORDER: StudyTrialNumber = 1;
 
 /*
  * Keeping this false preserves the verified swap neighborhood for the
@@ -96,7 +104,7 @@ const INITIAL_TRIAL_ORDER: StudyTrialOrder = 1;
 const DEFAULT_ALLOW_TRAY_UNPLACE = false;
 
 function clonePlacements(
-  placements: Placement[],
+  placements: readonly Placement[],
 ): Placement[] {
   return placements.map((placement) => ({
     ...placement,
@@ -104,7 +112,7 @@ function clonePlacements(
 }
 
 function sortPlacements(
-  placements: Placement[],
+  placements: readonly Placement[],
 ): Placement[] {
   return [...placements].sort((first, second) => {
     const roomComparison =
@@ -124,8 +132,37 @@ function sortPlacements(
   });
 }
 
+function getRouteTaskId(): SupportedStudyTaskId | undefined {
+  if (
+    typeof window === "undefined" ||
+    typeof window.location?.pathname !== "string"
+  ) {
+    return undefined;
+  }
+
+  const routeSegments = window.location.pathname
+    .split("/")
+    .filter(Boolean);
+
+  return routeSegments.find(
+    isSupportedStudyTaskId,
+  );
+}
+
+function resolveTaskId(
+  requestedTaskId: SupportedStudyTaskId | undefined,
+  fallbackTaskId: SupportedStudyTaskId,
+): SupportedStudyTaskId {
+  if (isSupportedStudyTaskId(requestedTaskId)) {
+    return requestedTaskId;
+  }
+
+  return getRouteTaskId() ?? fallbackTaskId;
+}
+
 function getUnassignedTalkIds(
-  placements: Placement[],
+  placements: readonly Placement[],
+  taskId: SupportedStudyTaskId,
 ): string[] {
   const assignedTalkIds = new Set(
     placements.map(
@@ -133,15 +170,17 @@ function getUnassignedTalkIds(
     ),
   );
 
-  return TALKS.filter(
-    (talk) => !assignedTalkIds.has(talk.id),
-  ).map((talk) => talk.id);
+  return getTaskItems(taskId)
+    .filter(
+      (talk) => !assignedTalkIds.has(talk.id),
+    )
+    .map((talk) => talk.id);
 }
 
 function getTrialOrderForCondition(
   level: ConcretizationLevel,
   conditionOrder: ConditionOrder,
-): StudyTrialOrder {
+): StudyTrialNumber {
   const index = conditionOrder.indexOf(level);
 
   if (index < 0) {
@@ -150,31 +189,33 @@ function getTrialOrderForCondition(
     );
   }
 
-  return (index + 1) as StudyTrialOrder;
+  return (index + 1) as StudyTrialNumber;
 }
 
 function createScheduleState(
+  taskId: SupportedStudyTaskId,
   level: ConcretizationLevel,
   trialNumber: StudyTrialNumber,
-  trialOrder: StudyTrialOrder,
+  trialOrder: StudyTrialNumber,
   conditionOrder: ConditionOrder,
   scheduleRevision = 0,
   allowTrayUnplace = DEFAULT_ALLOW_TRAY_UNPLACE,
 ): ScheduleState {
   const placements = sortPlacements(
     clonePlacements(
-      getInitialPlacements(level),
+      getInitialPlacements(level, taskId),
     ),
   );
 
   return {
+    taskId,
     level,
     trialNumber,
     trialOrder,
     conditionOrder,
     placements,
     unassignedTalkIds:
-      getUnassignedTalkIds(placements),
+      getUnassignedTalkIds(placements, taskId),
     activeTalkId: null,
     activeDragOrigin: null,
     scheduleRevision,
@@ -184,10 +225,11 @@ function createScheduleState(
 }
 
 function createTrialScheduleState(
+  taskId: SupportedStudyTaskId,
   trialNumber: StudyTrialNumber,
   conditionOrder: ConditionOrder =
     DEFAULT_CONDITION_ORDER,
-  trialOrder?: StudyTrialOrder,
+  trialOrder?: StudyTrialNumber,
   scheduleRevision = 0,
   allowTrayUnplace = DEFAULT_ALLOW_TRAY_UNPLACE,
 ): ScheduleState {
@@ -200,6 +242,7 @@ function createTrialScheduleState(
     );
 
   return createScheduleState(
+    taskId,
     level,
     trialNumber,
     resolvedTrialOrder,
@@ -210,7 +253,7 @@ function createTrialScheduleState(
 }
 
 function getPlacementForTalk(
-  placements: Placement[],
+  placements: readonly Placement[],
   talkId: string,
 ): Placement | undefined {
   return placements.find(
@@ -219,7 +262,7 @@ function getPlacementForTalk(
 }
 
 function getPlacementAtCell(
-  placements: Placement[],
+  placements: readonly Placement[],
   room: Room,
   slot: Slot,
 ): Placement | undefined {
@@ -234,18 +277,22 @@ function getIllegalPlacementReason(
   talkId: string,
   room: Room,
   slot: Slot,
+  taskId: SupportedStudyTaskId,
   displaced = false,
 ): IllegalMoveReason | undefined {
-  const talk = getTalkById(talkId);
+  const talk = getTalkById(talkId, taskId);
 
   if (!talk) {
     return "talk_not_found";
   }
 
   if (!talk.allowedRooms.includes(room)) {
+    const resourceDetails =
+      getTaskResourceDetails(taskId)[room];
+
     if (
       talk.demo &&
-      !ROOM_DETAILS[room].hasProjector
+      !resourceDetails.hasProjector
     ) {
       return displaced
         ? "displaced_talk_projector_required"
@@ -254,7 +301,7 @@ function getIllegalPlacementReason(
 
     if (
       talk.id === "N3" &&
-      ROOM_DETAILS[room].capacity < 80
+      resourceDetails.capacity < 80
     ) {
       return displaced
         ? "displaced_talk_capacity_insufficient"
@@ -276,8 +323,8 @@ function getIllegalPlacementReason(
 }
 
 function placementsAreEqual(
-  first: Placement[],
-  second: Placement[],
+  first: readonly Placement[],
+  second: readonly Placement[],
 ): boolean {
   if (first.length !== second.length) {
     return false;
@@ -309,6 +356,7 @@ function clearDragState(): Pick<
 }
 
 const initialState = createTrialScheduleState(
+  INITIAL_TASK_ID,
   INITIAL_TRIAL_NUMBER,
   DEFAULT_CONDITION_ORDER,
   INITIAL_TRIAL_ORDER,
@@ -319,9 +367,11 @@ export const useSchedulerStore =
     ...initialState,
 
     setActiveTalkId: (talkId) => {
+      const state = get();
+
       if (
         talkId !== null &&
-        !getTalkById(talkId)
+        !getTalkById(talkId, state.taskId)
       ) {
         return;
       }
@@ -333,7 +383,7 @@ export const useSchedulerStore =
 
       const origin: DragOrigin =
         getPlacementForTalk(
-          get().placements,
+          state.placements,
           talkId,
         )
           ? "grid"
@@ -364,11 +414,17 @@ export const useSchedulerStore =
       trialNumber,
       conditionOrder = DEFAULT_CONDITION_ORDER,
       trialOrder,
+      taskId,
     ) => {
       const state = get();
+      const resolvedTaskId = resolveTaskId(
+        taskId,
+        state.taskId,
+      );
 
       set(
         createTrialScheduleState(
+          resolvedTaskId,
           trialNumber,
           conditionOrder,
           trialOrder,
@@ -383,8 +439,13 @@ export const useSchedulerStore =
       trialNumber,
       trialOrder,
       conditionOrder,
+      taskId,
     ) => {
       const state = get();
+      const resolvedTaskId = resolveTaskId(
+        taskId,
+        state.taskId,
+      );
       const resolvedConditionOrder =
         conditionOrder ?? state.conditionOrder;
       const resolvedTrialNumber =
@@ -398,6 +459,7 @@ export const useSchedulerStore =
 
       set(
         createScheduleState(
+          resolvedTaskId,
           level,
           resolvedTrialNumber,
           resolvedTrialOrder,
@@ -413,6 +475,7 @@ export const useSchedulerStore =
 
       set(
         createScheduleState(
+          state.taskId,
           level,
           state.trialNumber,
           getTrialOrderForCondition(
@@ -431,6 +494,7 @@ export const useSchedulerStore =
 
       set(
         createTrialScheduleState(
+          state.taskId,
           state.trialNumber,
           state.conditionOrder,
           state.trialOrder,
@@ -443,6 +507,7 @@ export const useSchedulerStore =
     resetForNewParticipant: () => {
       set(
         createTrialScheduleState(
+          INITIAL_TASK_ID,
           INITIAL_TRIAL_NUMBER,
           DEFAULT_CONDITION_ORDER,
           INITIAL_TRIAL_ORDER,
@@ -502,7 +567,7 @@ export const useSchedulerStore =
         };
       }
 
-      if (!getTalkById(talkId)) {
+      if (!getTalkById(talkId, state.taskId)) {
         return {
           ...resultBase,
           valid: false,
@@ -526,6 +591,7 @@ export const useSchedulerStore =
           talkId,
           targetRoom,
           targetSlot,
+          state.taskId,
         );
 
       if (targetReason) {
@@ -566,6 +632,7 @@ export const useSchedulerStore =
           targetPlacement.talkId,
           sourcePlacement.room,
           sourcePlacement.slot,
+          state.taskId,
           true,
         );
 
@@ -699,6 +766,7 @@ export const useSchedulerStore =
         unassignedTalkIds:
           getUnassignedTalkIds(
             normalizedPlacements,
+            state.taskId,
           ),
         ...clearDragState(),
         scheduleRevision:
@@ -744,7 +812,10 @@ export const useSchedulerStore =
       set({
         placements: nextPlacements,
         unassignedTalkIds:
-          getUnassignedTalkIds(nextPlacements),
+          getUnassignedTalkIds(
+            nextPlacements,
+            state.taskId,
+          ),
         ...clearDragState(),
         scheduleRevision:
           state.scheduleRevision + 1,

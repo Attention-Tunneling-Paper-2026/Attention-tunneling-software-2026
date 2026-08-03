@@ -163,10 +163,26 @@ export type ProbeRecallRoom =
 
 export type ProbeRecognitionChoice =
   | ""
+  /*
+   * Symposium values retained for compatibility with existing UI and
+   * previously exported datasets.
+   */
   | "room_c_projector_failure"
   | "room_a_projector_failure"
   | "room_b_unavailable"
   | "session_time_changed"
+  /*
+   * Domain-specific values allow the delivery and clinic questionnaires to
+   * use semantically accurate identifiers when their UI is migrated.
+   */
+  | "van_c_refrigeration_failure"
+  | "van_a_refrigeration_failure"
+  | "van_b_unavailable"
+  | "shipment_route_window_changed"
+  | "ward_c_icu_certification_loss"
+  | "ward_a_icu_certification_loss"
+  | "ward_b_unavailable"
+  | "duty_shift_changed"
   | "no_update"
   | "unsure";
 
@@ -176,9 +192,107 @@ export const PROBE_RECOGNITION_CHOICES:
     "room_a_projector_failure",
     "room_b_unavailable",
     "session_time_changed",
+    "van_c_refrigeration_failure",
+    "van_a_refrigeration_failure",
+    "van_b_unavailable",
+    "shipment_route_window_changed",
+    "ward_c_icu_certification_loss",
+    "ward_a_icu_certification_loss",
+    "ward_b_unavailable",
+    "duty_shift_changed",
     "no_update",
     "unsure",
   ];
+
+interface ProbeQuestionnaireCopy {
+  updateLabel:
+    string;
+
+  locationSingular:
+    string;
+
+  correctLocation:
+    Exclude<
+      ProbeRecallRoom,
+      "" | "none" | "unsure"
+    >;
+
+  correctRecognitionChoices:
+    readonly Exclude<
+      ProbeRecognitionChoice,
+      ""
+    >[];
+}
+
+function getProbeQuestionnaireCopy(
+  taskId:
+    StudyTaskId,
+): ProbeQuestionnaireCopy {
+  switch (
+    taskId as string
+  ) {
+    case "delivery":
+      return {
+        updateLabel:
+          "vehicle update",
+
+        locationSingular:
+          "van",
+
+        correctLocation:
+          "C",
+
+        /*
+         * The Symposium identifier is accepted as a compatibility alias
+         * because the current questionnaire UI uses a shared option value
+         * while rendering delivery-specific text.
+         */
+        correctRecognitionChoices: [
+          "van_c_refrigeration_failure",
+          "room_c_projector_failure",
+        ],
+      };
+
+    case "clinic":
+      return {
+        updateLabel:
+          "staffing update",
+
+        locationSingular:
+          "ward",
+
+        correctLocation:
+          "C",
+
+        /*
+         * The Symposium identifier is accepted as a compatibility alias
+         * because the current questionnaire UI uses a shared option value
+         * while rendering clinic-specific text.
+         */
+        correctRecognitionChoices: [
+          "ward_c_icu_certification_loss",
+          "room_c_projector_failure",
+        ],
+      };
+
+    case "symposium":
+    default:
+      return {
+        updateLabel:
+          "facilities update",
+
+        locationSingular:
+          "room",
+
+        correctLocation:
+          "C",
+
+        correctRecognitionChoices: [
+          "room_c_projector_failure",
+        ],
+      };
+  }
+}
 
 export interface ProbeRecallResponses {
   noticedUpdate:
@@ -591,18 +705,13 @@ export function isProbeRecognitionChoice(
   ""
 > {
   return (
-    value ===
-      "room_c_projector_failure" ||
-    value ===
-      "room_a_projector_failure" ||
-    value ===
-      "room_b_unavailable" ||
-    value ===
-      "session_time_changed" ||
-    value ===
-      "no_update" ||
-    value ===
-      "unsure"
+    typeof value ===
+      "string" &&
+    value !==
+      "" &&
+    PROBE_RECOGNITION_CHOICES.includes(
+      value as ProbeRecognitionChoice,
+    )
   );
 }
 
@@ -687,22 +796,54 @@ export function isProbeRecallComplete(
 export function getProbeRecallCorrect(
   values:
     ProbeRecallResponses,
+
+  taskId?:
+    StudyTaskId,
 ): boolean {
+  const taskCopy =
+    getProbeQuestionnaireCopy(
+      taskId ??
+        "symposium",
+    );
+
   return (
     values.noticedUpdate ===
       "yes" &&
     values.affectedRoom ===
-      "C"
+      taskCopy.correctLocation
   );
 }
 
 export function getProbeRecognitionCorrect(
   values:
     ProbeRecallResponses,
+
+  taskId?:
+    StudyTaskId,
 ): boolean {
-  return (
-    values.recognitionChoice ===
-      "room_c_projector_failure"
+  const recognitionChoice =
+    values.recognitionChoice as Exclude<
+      ProbeRecognitionChoice,
+      ""
+    >;
+
+  if (
+    taskId ===
+    undefined
+  ) {
+    return [
+      "room_c_projector_failure",
+      "van_c_refrigeration_failure",
+      "ward_c_icu_certification_loss",
+    ].includes(
+      recognitionChoice,
+    );
+  }
+
+  return getProbeQuestionnaireCopy(
+    taskId,
+  ).correctRecognitionChoices.includes(
+    recognitionChoice,
   );
 }
 
@@ -710,6 +851,11 @@ export function getTrialQuestionnaireValidationMessage(
   response:
     TrialQuestionnaireResponse,
 ): string {
+  const probeCopy =
+    getProbeQuestionnaireCopy(
+      response.taskId,
+    );
+
   const workloadComplete =
     NASA_TLX_DIMENSIONS.every(
       (dimension) =>
@@ -748,7 +894,7 @@ export function getTrialQuestionnaireValidationMessage(
         .noticedUpdate,
     )
   ) {
-    return "Please indicate whether you noticed the facilities update.";
+    return `Please indicate whether you noticed the ${probeCopy.updateLabel}.`;
   }
 
   if (
@@ -761,7 +907,7 @@ export function getTrialQuestionnaireValidationMessage(
       .length ===
       0
   ) {
-    return "Please briefly describe the facilities update you remember.";
+    return `Please briefly describe the ${probeCopy.updateLabel} you remember.`;
   }
 
   if (
@@ -770,7 +916,7 @@ export function getTrialQuestionnaireValidationMessage(
         .affectedRoom,
     )
   ) {
-    return "Please select which room was affected by the facilities update.";
+    return `Please select which ${probeCopy.locationSingular} was affected by the ${probeCopy.updateLabel}.`;
   }
 
   if (
@@ -788,7 +934,7 @@ export function getTrialQuestionnaireValidationMessage(
         .recognitionChoice,
     )
   ) {
-    return "Please select the facilities update you recognize from the options.";
+    return `Please select the ${probeCopy.updateLabel} you recognize from the options.`;
   }
 
   return "";

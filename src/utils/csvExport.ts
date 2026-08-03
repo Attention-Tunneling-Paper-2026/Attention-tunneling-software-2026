@@ -1,6 +1,12 @@
+import {
+  createCompositeTrialId,
+  getGlobalTrialNumber,
+} from "../types/scheduler";
+
 import type {
   ConditionOrder,
   ConcretizationLevel,
+  StudyTaskId,
   StudyTrialNumber,
 } from "../types/scheduler";
 
@@ -24,6 +30,10 @@ export interface CsvExportOptions {
   preferredHeaders?: string[];
   includeUtf8Bom?: boolean;
 }
+
+export type TrialCsvExportKind =
+  | "events"
+  | "summary";
 
 const CSV_MIME_TYPE = "text/csv;charset=utf-8";
 const UTF8_BYTE_ORDER_MARK = "\uFEFF";
@@ -368,39 +378,100 @@ export function downloadSessionEventsCsv(
   );
 }
 
+function getTrialCsvFileStem(
+  participantToken: string,
+  trialNumber: StudyTrialNumber,
+  condition: ConcretizationLevel,
+  taskId?: StudyTaskId,
+): string {
+  const safeParticipantToken =
+    sanitizeFilePart(participantToken);
+
+  /*
+   * The task ID is optional to preserve the exact legacy Symposium-only
+   * file-name format. Passing it creates an unambiguous file name for any
+   * of the nine task/trial combinations.
+   */
+  if (!taskId) {
+    return `${safeParticipantToken}_T${trialNumber}_${condition}`;
+  }
+
+  const safeTaskId = sanitizeFilePart(taskId);
+  const safeCompositeTrialId = sanitizeFilePart(
+    createCompositeTrialId(
+      taskId,
+      trialNumber,
+    ),
+  );
+  const globalTrialNumber = getGlobalTrialNumber(
+    taskId,
+    trialNumber,
+  );
+
+  return `${safeParticipantToken}_G${globalTrialNumber}_${safeTaskId}_T${trialNumber}_${condition}_${safeCompositeTrialId}`;
+}
+
+export function getTrialCsvFileName(
+  participantToken: string,
+  trialNumber: StudyTrialNumber,
+  condition: ConcretizationLevel,
+  exportKind: TrialCsvExportKind,
+  taskId?: StudyTaskId,
+): string {
+  return `${getTrialCsvFileStem(
+    participantToken,
+    trialNumber,
+    condition,
+    taskId,
+  )}_${exportKind}.csv`;
+}
+
 /*
- * Legacy per-trial exports are retained while the existing pages are
- * migrated to the single-session CSV.
+ * Legacy per-trial exports remain available. Supplying taskId produces a
+ * collision-free name for Symposium, Delivery, or Clinic while existing
+ * three-argument calls retain their original output exactly.
  */
 export function getTrialEventsCsvFileName(
   participantToken: string,
   trialNumber: StudyTrialNumber,
   condition: ConcretizationLevel,
+  taskId?: StudyTaskId,
 ): string {
-  const safeParticipantToken =
-    sanitizeFilePart(participantToken);
-
-  return `${safeParticipantToken}_T${trialNumber}_${condition}_events.csv`;
+  return getTrialCsvFileName(
+    participantToken,
+    trialNumber,
+    condition,
+    "events",
+    taskId,
+  );
 }
 
 export function getTrialSummaryCsvFileName(
   participantToken: string,
   trialNumber: StudyTrialNumber,
   condition: ConcretizationLevel,
+  taskId?: StudyTaskId,
 ): string {
-  const safeParticipantToken =
-    sanitizeFilePart(participantToken);
-
-  return `${safeParticipantToken}_T${trialNumber}_${condition}_summary.csv`;
+  return getTrialCsvFileName(
+    participantToken,
+    trialNumber,
+    condition,
+    "summary",
+    taskId,
+  );
 }
 
 export function getPostExperimentQuestionnaireCsvFileName(
   participantToken: string,
+  sessionId?: string,
 ): string {
   const safeParticipantToken =
     sanitizeFilePart(participantToken);
+  const sessionSuffix = sessionId
+    ? `_${sanitizeFilePart(sessionId)}`
+    : "";
 
-  return `${safeParticipantToken}_post_experiment_questionnaire.csv`;
+  return `${safeParticipantToken}${sessionSuffix}_post_experiment_questionnaire.csv`;
 }
 
 /*
@@ -408,8 +479,10 @@ export function getPostExperimentQuestionnaireCsvFileName(
  */
 export function getPostTaskQuestionnaireCsvFileName(
   participantToken: string,
+  sessionId?: string,
 ): string {
   return getPostExperimentQuestionnaireCsvFileName(
     participantToken,
+    sessionId,
   );
 }

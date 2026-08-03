@@ -4,11 +4,18 @@ import {
   Sparkles,
 } from "lucide-react";
 
+import type {
+  StudyTaskId,
+} from "../../types/scheduler";
+
 export type TaskStartStatus =
   | "idle"
   | "thinking";
 
 interface TaskStartPanelProps {
+  taskId?:
+    StudyTaskId;
+
   status:
     TaskStartStatus;
 
@@ -19,7 +26,69 @@ interface TaskStartPanelProps {
     boolean;
 }
 
+interface TaskStartPresentation {
+  assistantLabel:
+    string;
+
+  taskTitle:
+    string;
+
+  idleDescription:
+    string;
+
+  thinkingDescription:
+    string;
+}
+
+const TASK_PRESENTATIONS: Record<
+  StudyTaskId,
+  TaskStartPresentation
+> = {
+  symposium: {
+    assistantLabel:
+      "AI Scheduling Assistant",
+
+    taskTitle:
+      "Symposium Scheduler",
+
+    idleDescription:
+      "Ask the assistant to analyze the scheduling requirements and provide a recommendation for completing the task.",
+
+    thinkingDescription:
+      "The assistant is reviewing the Symposium Scheduler requirements and preparing its recommendation.",
+  },
+
+  delivery: {
+    assistantLabel:
+      "AI Dispatch Assistant",
+
+    taskTitle:
+      "Delivery Dispatch",
+
+    idleDescription:
+      "Ask the assistant to analyze the dispatch requirements and provide a recommendation for completing the task.",
+
+    thinkingDescription:
+      "The assistant is reviewing the Delivery Dispatch requirements and preparing its recommendation.",
+  },
+
+  clinic: {
+    assistantLabel:
+      "AI Roster Assistant",
+
+    taskTitle:
+      "Clinic Roster",
+
+    idleDescription:
+      "Ask the assistant to analyze the roster requirements and provide a recommendation for completing the task.",
+
+    thinkingDescription:
+      "The assistant is reviewing the Clinic Roster requirements and preparing its recommendation.",
+  },
+};
+
 export default function TaskStartPanel({
+  taskId = "symposium",
   status,
   onRequestAnalysis,
   disabled = false,
@@ -27,6 +96,9 @@ export default function TaskStartPanel({
   const isThinking =
     status ===
     "thinking";
+
+  const presentation =
+    TASK_PRESENTATIONS[taskId];
 
   return (
     <section
@@ -36,6 +108,7 @@ export default function TaskStartPanel({
       aria-busy={
         isThinking
       }
+      data-task-id={taskId}
     >
       <div
         className={[
@@ -67,7 +140,7 @@ export default function TaskStartPanel({
 
       <div className="ai-launch-content">
         <div className="ai-launch-label">
-          AI Scheduling Assistant
+          {presentation.assistantLabel}
         </div>
 
         <h2 id="task-start-panel-title">
@@ -78,8 +151,8 @@ export default function TaskStartPanel({
 
         <p>
           {isThinking
-            ? "The assistant is reviewing the Symposium Scheduler requirements and preparing its recommendation."
-            : "Ask the assistant to analyze the scheduling requirements and provide a recommendation for completing the task."}
+            ? presentation.thinkingDescription
+            : presentation.idleDescription}
         </p>
       </div>
 
@@ -92,6 +165,11 @@ export default function TaskStartPanel({
         disabled={
           disabled ||
           isThinking
+        }
+        aria-label={
+          isThinking
+            ? `Analyzing ${presentation.taskTitle}`
+            : `Analyze ${presentation.taskTitle}`
         }
       >
         {isThinking ? (

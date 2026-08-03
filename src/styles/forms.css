@@ -4,14 +4,12 @@
 }
 
 .questionnaire-section {
-  padding: 28px;
+  padding: 30px;
   border: 1px solid var(--study-border, #dce3ed);
   border-radius: var(--study-radius-large, 20px);
   background: var(--study-surface, #ffffff);
-  box-shadow: var(
-    --study-shadow,
-    0 12px 34px rgba(15, 23, 42, 0.08)
-  );
+  box-shadow:
+    0 14px 38px rgba(15, 23, 42, 0.08);
 }
 
 .questionnaire-section + .questionnaire-section {
@@ -60,10 +58,17 @@
 .nasa-scale-card {
   min-width: 0;
   margin: 0;
-  padding: 19px;
+  padding: 22px;
   border: 1px solid var(--study-border, #dce3ed);
   border-radius: var(--study-radius-medium, 14px);
-  background: var(--study-surface-soft, #f8fafc);
+  background:
+    linear-gradient(
+      180deg,
+      #ffffff 0%,
+      var(--study-surface-soft, #f8fafc) 100%
+    );
+  box-shadow:
+    0 5px 16px rgba(15, 23, 42, 0.045);
 }
 
 .nasa-scale-card > legend {
@@ -72,9 +77,9 @@
 }
 
 .nasa-scale-header {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
   gap: 20px;
 }
 
@@ -97,14 +102,15 @@
 .nasa-scale-value {
   display: grid;
   flex-shrink: 0;
-  min-width: 108px;
-  height: 40px;
-  padding: 0 11px;
+  min-width: 118px;
+  min-height: 40px;
+  padding: 8px 12px;
   place-items: center;
   border: 1px solid #bfdbfe;
-  border-radius: 10px;
-  font-size: 0.95rem;
+  border-radius: 999px;
+  font-size: 0.9rem;
   font-weight: 850;
+  line-height: 1.2;
   color: var(--study-primary-dark, #1d4ed8);
   background: var(--study-primary-soft, #eff6ff);
   white-space: nowrap;
@@ -112,45 +118,53 @@
 
 .nasa-likert-scale {
   display: grid;
-  grid-template-columns: repeat(21, minmax(36px, 1fr));
+  grid-template-columns: repeat(8, minmax(0, 1fr));
   width: 100%;
   min-width: 0;
-  gap: 4px;
-  margin-top: 18px;
-  padding: 6px 2px 8px;
-  overflow-x: auto;
-  scrollbar-width: thin;
+  gap: 10px;
+  margin-top: 20px;
+  padding: 0;
+  overflow: visible;
 }
 
 .nasa-likert-option {
   position: relative;
   display: grid;
-  min-width: 36px;
-  min-height: 58px;
+  min-width: 0;
+  min-height: 66px;
   place-items: center;
   align-content: center;
   gap: 7px;
-  padding: 6px 2px;
-  border: 0;
-  border-radius: 8px;
+  padding: 9px 6px;
+  border: 1px solid var(--study-border-strong, #c6d0df);
+  border-radius: 12px;
   color: var(--study-text-soft, #5e6b7d);
-  background: transparent;
+  background: var(--study-surface, #ffffff);
   cursor: pointer;
   transition:
+    border-color 150ms ease,
     color 150ms ease,
     background 150ms ease,
-    transform 150ms ease;
+    transform 150ms ease,
+    box-shadow 150ms ease;
 }
 
 .nasa-likert-option:hover {
+  border-color: #93c5fd;
   color: var(--study-primary-dark, #1d4ed8);
-  background: rgba(37, 99, 235, 0.06);
+  background: #f8fbff;
   transform: translateY(-1px);
+  box-shadow:
+    0 5px 13px rgba(37, 99, 235, 0.08);
 }
 
 .nasa-likert-option-selected {
+  border-color: var(--study-primary, #2563eb);
   color: var(--study-primary-dark, #1d4ed8);
   background: var(--study-primary-soft, #eff6ff);
+  box-shadow:
+    inset 0 0 0 1px rgba(37, 99, 235, 0.08),
+    0 5px 14px rgba(37, 99, 235, 0.12);
 }
 
 .nasa-likert-input {
@@ -193,8 +207,8 @@
 
 .nasa-likert-number {
   min-height: 1em;
-  font-size: 0.68rem;
-  font-weight: 800;
+  font-size: 0.88rem;
+  font-weight: 850;
   font-variant-numeric: tabular-nums;
   line-height: 1;
   white-space: nowrap;
@@ -205,7 +219,8 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  margin-top: 4px;
+  margin-top: 10px;
+  padding: 0 2px;
   font-size: 0.82rem;
   font-weight: 700;
   color: var(--study-text-soft, #5e6b7d);
@@ -219,10 +234,17 @@
 .radio-question-card {
   min-width: 0;
   margin: 0;
-  padding: 19px;
+  padding: 22px;
   border: 1px solid var(--study-border, #dce3ed);
   border-radius: var(--study-radius-medium, 14px);
-  background: var(--study-surface-soft, #f8fafc);
+  background:
+    linear-gradient(
+      180deg,
+      #ffffff 0%,
+      var(--study-surface-soft, #f8fafc) 100%
+    );
+  box-shadow:
+    0 5px 16px rgba(15, 23, 42, 0.045);
 }
 
 .likert-card > legend,
@@ -255,26 +277,65 @@
   color: var(--study-text-soft, #5e6b7d);
 }
 
+
+.likert-header,
+.questionnaire-rating-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: start;
+  gap: 20px;
+}
+
+.likert-header {
+  margin-top: 6px;
+}
+
+.likert-description {
+  margin: 0;
+}
+
+.likert-description-spacer {
+  min-height: 1px;
+}
+
+.likert-value,
+.questionnaire-rating-value {
+  display: grid;
+  min-width: 118px;
+  min-height: 40px;
+  padding: 8px 12px;
+  place-items: center;
+  border: 1px solid #bfdbfe;
+  border-radius: 999px;
+  font-size: 0.9rem;
+  font-weight: 850;
+  line-height: 1.2;
+  color: var(--study-primary-dark, #1d4ed8);
+  background: var(--study-primary-soft, #eff6ff);
+  white-space: nowrap;
+}
+
 .likert-options {
   display: grid;
-  grid-template-columns: repeat(11, minmax(52px, 1fr));
-  gap: 7px;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 12px;
   width: 100%;
-  margin-top: 18px;
+  margin-top: 20px;
+  overflow: visible;
 }
 
 .likert-option {
   position: relative;
   display: grid;
   min-width: 0;
-  min-height: 62px;
+  min-height: 72px;
   place-items: center;
   align-content: center;
-  gap: 6px;
+  gap: 7px;
   overflow: hidden;
-  padding: 8px 4px;
+  padding: 10px 6px;
   border: 1px solid var(--study-border-strong, #c6d0df);
-  border-radius: 10px;
+  border-radius: 12px;
   font-weight: 800;
   color: var(--study-text-soft, #5e6b7d);
   background: var(--study-surface, #ffffff);
@@ -289,7 +350,8 @@
 
 .likert-number {
   display: block;
-  font-size: 0.9rem;
+  font-size: 0.95rem;
+  font-weight: 850;
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -306,7 +368,10 @@
 .likert-option:hover {
   border-color: #93c5fd;
   color: var(--study-primary-dark, #1d4ed8);
+  background: #f8fbff;
   transform: translateY(-1px);
+  box-shadow:
+    0 5px 13px rgba(37, 99, 235, 0.08);
 }
 
 .likert-option-selected {
@@ -353,7 +418,8 @@
   align-items: flex-start;
   justify-content: space-between;
   gap: 24px;
-  margin-top: 11px;
+  margin-top: 12px;
+  padding: 0 2px;
   color: var(--study-text-soft, #5e6b7d);
 }
 
@@ -376,6 +442,14 @@
   font-size: 0.72rem;
   line-height: 1.35;
   color: var(--study-text-muted, #7b8798);
+}
+
+.questionnaire-rating-options-eight {
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+}
+
+.questionnaire-rating-options-6 {
+  grid-template-columns: repeat(6, minmax(0, 1fr));
 }
 
 .radio-question-options {
@@ -619,30 +693,29 @@ fieldset:disabled .radio-question-option {
   }
 
   .nasa-likert-scale {
-    grid-template-columns: repeat(21, 38px);
-    width: max-content;
-    min-width: 100%;
-    gap: 4px;
-    padding-bottom: 10px;
+    grid-template-columns: repeat(8, minmax(44px, 1fr));
+    gap: 8px;
+    overflow-x: auto;
+    padding-bottom: 8px;
+    scrollbar-width: thin;
   }
 
   .nasa-likert-option {
-    min-width: 38px;
-    min-height: 58px;
+    min-width: 44px;
+    min-height: 62px;
   }
 
   .likert-options {
-    grid-template-columns: repeat(11, 54px);
-    width: max-content;
-    min-width: 100%;
-    gap: 7px;
+    grid-template-columns: repeat(6, minmax(58px, 1fr));
+    gap: 9px;
     overflow-x: auto;
     padding-bottom: 8px;
     scrollbar-width: thin;
   }
 
   .likert-option {
-    min-height: 60px;
+    min-width: 58px;
+    min-height: 66px;
   }
 
   .radio-question-options {
@@ -651,28 +724,39 @@ fieldset:disabled .radio-question-option {
 }
 
 @media (max-width: 520px) {
-  .nasa-scale-header {
-    flex-direction: column;
+  .nasa-scale-header,
+  .likert-header,
+  .questionnaire-rating-header {
+    grid-template-columns: 1fr;
     gap: 12px;
   }
 
-  .nasa-scale-value {
-    min-width: 58px;
+  .nasa-scale-value,
+  .likert-value,
+  .questionnaire-rating-value {
+    justify-self: start;
+    min-width: 112px;
   }
 
   .nasa-likert-scale {
+    grid-template-columns: repeat(8, 46px);
+    width: max-content;
+    min-width: 100%;
+    gap: 7px;
     margin-top: 16px;
+    overflow-x: auto;
+    padding-bottom: 8px;
   }
 
   .nasa-scale-labels {
-    margin-top: 7px;
+    margin-top: 9px;
   }
 
   .likert-options {
-    grid-template-columns: repeat(11, 50px);
+    grid-template-columns: repeat(6, 58px);
     width: max-content;
     min-width: 100%;
-    gap: 6px;
+    gap: 8px;
     overflow-x: auto;
     padding-bottom: 8px;
   }

@@ -70,6 +70,7 @@ import {
 } from "../types/scheduler";
 
 import type {
+  StudyTaskId,
   StudyTrialNumber,
   StudyTrialOrder,
 } from "../types/scheduler";
@@ -103,8 +104,255 @@ interface ExperienceQuestion {
     string;
 }
 
+interface TaskQuestionnaireCopy {
+  taskTitle:
+    string;
+
+  solutionNoun:
+    string;
+
+  updateLabel:
+    string;
+
+  affectedLocationTitle:
+    string;
+
+  affectedLocationQuestion:
+    string;
+
+  recallConfidenceDescription:
+    string;
+
+  locationLabels:
+    readonly [
+      string,
+      string,
+      string
+    ];
+
+  noLocationAffectedLabel:
+    string;
+
+  recognitionLabels: {
+    correct:
+      string;
+
+    alternativeA:
+      string;
+
+    alternativeB:
+      string;
+
+    timeChanged:
+      string;
+
+    noUpdate:
+      string;
+  };
+}
+
 const TOTAL_TRIALS =
   3;
+
+const TOTAL_STUDY_TRIALS =
+  9;
+
+const TASK_QUESTIONNAIRE_COPY: Record<
+  string,
+  TaskQuestionnaireCopy
+> = {
+  symposium: {
+    taskTitle:
+      "Symposium Scheduler",
+
+    solutionNoun:
+      "schedule",
+
+    updateLabel:
+      "facilities update",
+
+    affectedLocationTitle:
+      "Affected room",
+
+    affectedLocationQuestion:
+      "Which room was affected by the facilities update?",
+
+    recallConfidenceDescription:
+      "How confident are you that your answer about the affected room is correct?",
+
+    locationLabels: [
+      "Room A",
+      "Room B",
+      "Room C",
+    ],
+
+    noLocationAffectedLabel:
+      "No room was affected",
+
+    recognitionLabels: {
+      correct:
+        SEMANTIC_PROBE.message,
+
+      alternativeA:
+        "The projector in Room A broke for the rest of the day",
+
+      alternativeB:
+        "Room B became unavailable for the rest of the day",
+
+      timeChanged:
+        "The time of one session changed",
+
+      noUpdate:
+        "No facilities update was shown",
+    },
+  },
+
+  delivery: {
+    taskTitle:
+      "Delivery Dispatch",
+
+    solutionNoun:
+      "dispatch plan",
+
+    updateLabel:
+      "vehicle update",
+
+    affectedLocationTitle:
+      "Affected van",
+
+    affectedLocationQuestion:
+      "Which van was affected by the vehicle update?",
+
+    recallConfidenceDescription:
+      "How confident are you that your answer about the affected van is correct?",
+
+    locationLabels: [
+      "Van A",
+      "Van B",
+      "Van C",
+    ],
+
+    noLocationAffectedLabel:
+      "No van was affected",
+
+    recognitionLabels: {
+      correct:
+        "The refrigeration unit in Van C failed for the rest of the day",
+
+      alternativeA:
+        "The refrigeration unit in Van A failed for the rest of the day",
+
+      alternativeB:
+        "Van B became unavailable for the rest of the day",
+
+      timeChanged:
+        "The route window of one shipment changed",
+
+      noUpdate:
+        "No vehicle update was shown",
+    },
+  },
+
+  clinic: {
+    taskTitle:
+      "Clinic Roster",
+
+    solutionNoun:
+      "roster",
+
+    updateLabel:
+      "staffing update",
+
+    affectedLocationTitle:
+      "Affected ward",
+
+    affectedLocationQuestion:
+      "Which ward was affected by the staffing update?",
+
+    recallConfidenceDescription:
+      "How confident are you that your answer about the affected ward is correct?",
+
+    locationLabels: [
+      "Ward A",
+      "Ward B",
+      "Ward C",
+    ],
+
+    noLocationAffectedLabel:
+      "No ward was affected",
+
+    recognitionLabels: {
+      correct:
+        "Ward C lost ICU certification for the rest of the day",
+
+      alternativeA:
+        "Ward A lost ICU certification for the rest of the day",
+
+      alternativeB:
+        "Ward B became unavailable for the rest of the day",
+
+      timeChanged:
+        "The shift time of one duty changed",
+
+      noUpdate:
+        "No staffing update was shown",
+    },
+  },
+};
+
+function isStudyTaskId(
+  value:
+    unknown,
+): value is StudyTaskId {
+  return (
+    value ===
+      "symposium" ||
+    value ===
+      "delivery" ||
+    value ===
+      "clinic"
+  );
+}
+
+function getTaskQuestionnaireCopy(
+  taskId:
+    StudyTaskId,
+): TaskQuestionnaireCopy {
+  return (
+    TASK_QUESTIONNAIRE_COPY[
+      taskId as string
+    ] ??
+    TASK_QUESTIONNAIRE_COPY
+      .symposium
+  );
+}
+
+function getGlobalTrialNumber(
+  taskId:
+    StudyTaskId,
+
+  trialNumber:
+    StudyTrialNumber,
+): number {
+  const normalizedTaskId =
+    String(
+      taskId,
+    );
+
+  const taskOffset =
+    normalizedTaskId ===
+      "delivery"
+      ? 3
+      : normalizedTaskId ===
+          "clinic"
+        ? 6
+        : 0;
+
+  return (
+    taskOffset +
+    trialNumber
+  );
+}
 
 function getParticipantTaskNumber(
   trial:
@@ -117,17 +365,20 @@ function getParticipantTaskNumber(
     : trial.trialNumber;
 }
 
-const EXPERIENCE_QUESTIONS:
-  ExperienceQuestion[] = [
+function getExperienceQuestions(
+  taskCopy:
+    TaskQuestionnaireCopy,
+): ExperienceQuestion[] {
+  return [
     {
       id:
         "scheduleCompleteness",
 
       title:
-        "Schedule completeness",
+        "Solution completeness",
 
       description:
-        "My final schedule was complete and ready to submit.",
+        `My final ${taskCopy.solutionNoun} was complete and ready to submit.`,
 
       lowLabel:
         "Strongly disagree",
@@ -161,7 +412,7 @@ const EXPERIENCE_QUESTIONS:
         "AI competence",
 
       description:
-        "The AI assistant appeared competent at solving this scheduling task.",
+        "The AI assistant appeared competent at solving this task.",
 
       lowLabel:
         "Strongly disagree",
@@ -170,8 +421,12 @@ const EXPERIENCE_QUESTIONS:
         "Strongly agree",
     },
   ];
+}
 
-const PROBE_ROOM_OPTIONS: Array<{
+function getProbeLocationOptions(
+  taskCopy:
+    TaskQuestionnaireCopy,
+): Array<{
   value:
     Exclude<
       ProbeRecallRoom,
@@ -180,49 +435,60 @@ const PROBE_ROOM_OPTIONS: Array<{
 
   label:
     string;
-}> = [
-  {
-    value:
-      "A",
+}> {
+  return [
+    {
+      value:
+        "A",
 
-    label:
-      "Room A",
-  },
+      label:
+        taskCopy.locationLabels[
+          0
+        ],
+    },
 
-  {
-    value:
-      "B",
+    {
+      value:
+        "B",
 
-    label:
-      "Room B",
-  },
+      label:
+        taskCopy.locationLabels[
+          1
+        ],
+    },
 
-  {
-    value:
-      "C",
+    {
+      value:
+        "C",
 
-    label:
-      "Room C",
-  },
+      label:
+        taskCopy.locationLabels[
+          2
+        ],
+    },
 
-  {
-    value:
-      "none",
+    {
+      value:
+        "none",
 
-    label:
-      "No room was affected",
-  },
+      label:
+        taskCopy.noLocationAffectedLabel,
+    },
 
-  {
-    value:
-      "unsure",
+    {
+      value:
+        "unsure",
 
-    label:
-      "Unsure",
-  },
-];
+      label:
+        "Unsure",
+    },
+  ];
+}
 
-const PROBE_RECOGNITION_OPTIONS: Array<{
+function getProbeRecognitionOptions(
+  taskCopy:
+    TaskQuestionnaireCopy,
+): Array<{
   value:
     Exclude<
       ProbeRecognitionChoice,
@@ -231,55 +497,67 @@ const PROBE_RECOGNITION_OPTIONS: Array<{
 
   label:
     string;
-}> = [
-  {
-    value:
-      "room_c_projector_failure",
+}> {
+  return [
+    {
+      value:
+        "room_c_projector_failure",
 
-    label:
-      SEMANTIC_PROBE.message,
-  },
+      label:
+        taskCopy
+          .recognitionLabels
+          .correct,
+    },
 
-  {
-    value:
-      "room_a_projector_failure",
+    {
+      value:
+        "room_a_projector_failure",
 
-    label:
-      "The projector in Room A broke for the rest of the day",
-  },
+      label:
+        taskCopy
+          .recognitionLabels
+          .alternativeA,
+    },
 
-  {
-    value:
-      "room_b_unavailable",
+    {
+      value:
+        "room_b_unavailable",
 
-    label:
-      "Room B became unavailable for the rest of the day",
-  },
+      label:
+        taskCopy
+          .recognitionLabels
+          .alternativeB,
+    },
 
-  {
-    value:
-      "session_time_changed",
+    {
+      value:
+        "session_time_changed",
 
-    label:
-      "The time of one session changed",
-  },
+      label:
+        taskCopy
+          .recognitionLabels
+          .timeChanged,
+    },
 
-  {
-    value:
-      "no_update",
+    {
+      value:
+        "no_update",
 
-    label:
-      "No facilities update was shown",
-  },
+      label:
+        taskCopy
+          .recognitionLabels
+          .noUpdate,
+    },
 
-  {
-    value:
-      "unsure",
+    {
+      value:
+        "unsure",
 
-    label:
-      "Unsure",
-  },
-];
+      label:
+        "Unsure",
+    },
+  ];
+}
 
 function QuestionnaireSection({
   icon,
@@ -385,7 +663,7 @@ function getManipulationQuestion(
         "AI output concreteness",
 
       description:
-        "The AI recommendation presented a concrete scheduling solution.",
+        "The AI recommendation presented a concrete solution.",
     };
   }
 
@@ -399,7 +677,7 @@ function getManipulationQuestion(
         "AI output completeness",
 
       description:
-        "The AI recommendation presented a complete scheduling solution.",
+        "The AI recommendation presented a complete solution.",
     };
   }
 
@@ -413,7 +691,7 @@ function getManipulationQuestion(
         "AI output detail",
 
       description:
-        "The AI recommendation included detailed scheduling information.",
+        "The AI recommendation included detailed task information.",
     };
   }
 
@@ -427,7 +705,7 @@ function getManipulationQuestion(
         "AI output specificity",
 
       description:
-        "The AI recommendation was specific about how talks should be scheduled.",
+        "The AI recommendation was specific about how the task should be completed.",
     };
   }
 
@@ -441,7 +719,7 @@ function getManipulationQuestion(
         "AI solution actionability",
 
       description:
-        "The AI recommendation made the scheduling actions needed to use its solution clear.",
+        "The AI recommendation made the actions needed to use its solution clear.",
     };
   }
 
@@ -507,12 +785,26 @@ export default function TrialQuestionnairePage() {
     useNavigate();
 
   const {
+    taskId:
+      taskIdParam,
+
     trialNumber:
       trialNumberParam,
   } = useParams<{
+    taskId:
+      string;
+
     trialNumber:
       string;
   }>();
+
+  const taskId:
+    StudyTaskId | null =
+      isStudyTaskId(
+        taskIdParam,
+      )
+        ? taskIdParam
+        : null;
 
   const parsedTrialNumber =
     Number(
@@ -526,6 +818,33 @@ export default function TrialQuestionnairePage() {
       )
         ? parsedTrialNumber
         : null;
+
+  const taskKey =
+    taskId !==
+      null &&
+    trialNumber !==
+      null
+      ? `${taskId}:${trialNumber}`
+      : null;
+
+  const taskCopy =
+    taskId ===
+      null
+      ? null
+      : getTaskQuestionnaireCopy(
+          taskId,
+        );
+
+  const globalTrialNumber =
+    taskId ===
+      null ||
+    trialNumber ===
+      null
+      ? null
+      : getGlobalTrialNumber(
+          taskId,
+          trialNumber,
+        );
 
   const participantId =
     useStudySessionStore(
@@ -657,14 +976,14 @@ export default function TrialQuestionnairePage() {
 
   const pageInitializedRef =
     useRef<
-      StudyTrialNumber | null
+      string | null
     >(
       null,
     );
 
   const questionnaireStartedRef =
     useRef<
-      StudyTrialNumber | null
+      string | null
     >(
       null,
     );
@@ -675,23 +994,31 @@ export default function TrialQuestionnairePage() {
     );
 
   const trial =
+    taskId ===
+      null ||
     trialNumber ===
-    null
+      null
       ? undefined
       : trials.find(
           (item) =>
+            item.taskId ===
+              taskId &&
             item.trialNumber ===
-            trialNumber,
+              trialNumber,
         );
 
   const response =
+    taskId ===
+      null ||
     trialNumber ===
-    null
+      null
       ? undefined
       : trialResponses.find(
           (item) =>
+            item.taskId ===
+              taskId &&
             item.trialNumber ===
-            trialNumber,
+              trialNumber,
         );
 
   const trialStatus =
@@ -716,8 +1043,13 @@ export default function TrialQuestionnairePage() {
     }
 
     if (
+      taskId ===
+        null ||
       trialNumber ===
         null ||
+      taskKey ===
+        null ||
+      !taskCopy ||
       !trialStatus ||
       !trialCondition
     ) {
@@ -737,7 +1069,7 @@ export default function TrialQuestionnairePage() {
       "questionnaire_complete"
     ) {
       navigate(
-        "/tasks",
+        `/tasks/${taskId}`,
         {
           replace:
             true,
@@ -752,7 +1084,7 @@ export default function TrialQuestionnairePage() {
       "submitted"
     ) {
       navigate(
-        "/tasks",
+        `/tasks/${taskId}`,
         {
           replace:
             true,
@@ -764,21 +1096,30 @@ export default function TrialQuestionnairePage() {
 
     if (
       pageInitializedRef.current ===
-      trialNumber
+      taskKey
     ) {
       return;
     }
 
     pageInitializedRef.current =
-      trialNumber;
+      taskKey;
 
-    openTrialQuestionnaire(
+    (
+      openTrialQuestionnaire as unknown as (
+        trialNumber:
+          StudyTrialNumber,
+
+        taskId:
+          StudyTaskId,
+      ) => boolean
+    )(
       trialNumber,
+      taskId,
     );
 
     initializeTrialResponse(
       trialNumber,
-      "symposium",
+      taskId,
       trialCondition,
     );
   }, [
@@ -786,6 +1127,9 @@ export default function TrialQuestionnairePage() {
     navigate,
     openTrialQuestionnaire,
     procedureAccepted,
+    taskCopy,
+    taskId,
+    taskKey,
     trialCondition,
     trialNumber,
     trialStatus,
@@ -793,6 +1137,8 @@ export default function TrialQuestionnairePage() {
 
   useEffect(() => {
     if (
+      taskId ===
+        null ||
       trialNumber ===
         null ||
       !trialCondition ||
@@ -805,12 +1151,13 @@ export default function TrialQuestionnairePage() {
 
     initializeTrialResponse(
       trialNumber,
-      "symposium",
+      taskId,
       trialCondition,
     );
   }, [
     initializeTrialResponse,
     response,
+    taskId,
     trialCondition,
     trialNumber,
     trialStatus,
@@ -818,18 +1165,25 @@ export default function TrialQuestionnairePage() {
 
   useEffect(() => {
     if (
+      taskId ===
+        null ||
+      taskKey ===
+        null ||
+      globalTrialNumber ===
+        null ||
       trialNumber ===
         null ||
+      !taskCopy ||
       !trial ||
       !response ||
       questionnaireStartedRef.current ===
-        trialNumber
+        taskKey
     ) {
       return;
     }
 
     questionnaireStartedRef.current =
-      trialNumber;
+      taskKey;
 
     addEvent({
       eventType:
@@ -861,11 +1215,18 @@ export default function TrialQuestionnairePage() {
         "questionnaire",
 
       metadata: {
-        taskId:
-          "symposium",
+        taskId,
+
+        taskTitle:
+          taskCopy.taskTitle,
 
         taskNumber:
           trialNumber,
+
+        innerTaskNumber:
+          trialNumber,
+
+        globalTrialNumber,
 
         participantTaskNumber:
           getParticipantTaskNumber(
@@ -874,6 +1235,9 @@ export default function TrialQuestionnairePage() {
 
         totalTrials:
           TOTAL_TRIALS,
+
+        totalStudyTrials:
+          TOTAL_STUDY_TRIALS,
 
         page:
           "trial_questionnaire",
@@ -896,7 +1260,11 @@ export default function TrialQuestionnairePage() {
     });
   }, [
     addEvent,
+    globalTrialNumber,
     response,
+    taskCopy,
+    taskId,
+    taskKey,
     trial,
     trialNumber,
   ]);
@@ -908,8 +1276,13 @@ export default function TrialQuestionnairePage() {
     event.preventDefault();
 
     if (
+      taskId ===
+        null ||
+      globalTrialNumber ===
+        null ||
       trialNumber ===
         null ||
+      !taskCopy ||
       !trial ||
       !response ||
       submitting ||
@@ -924,8 +1297,10 @@ export default function TrialQuestionnairePage() {
         .trialResponses
         .find(
           (item) =>
+            item.taskId ===
+              taskId &&
             item.trialNumber ===
-            trialNumber,
+              trialNumber,
         );
 
     if (
@@ -953,8 +1328,19 @@ export default function TrialQuestionnairePage() {
       true;
 
     const submittedResponse =
-      submitTrialQuestionnaire(
+      (
+        submitTrialQuestionnaire as unknown as (
+          trialNumber:
+            StudyTrialNumber,
+
+          taskId:
+            StudyTaskId,
+        ) => ReturnType<
+          typeof submitTrialQuestionnaire
+        >
+      )(
         trialNumber,
+        taskId,
       );
 
     if (
@@ -1004,14 +1390,18 @@ export default function TrialQuestionnairePage() {
         "questionnaire",
 
       metadata: {
-        taskId:
-          "symposium",
+        taskId,
 
         taskTitle:
-          "Symposium Scheduler",
+          taskCopy.taskTitle,
 
         taskNumber:
           trialNumber,
+
+        innerTaskNumber:
+          trialNumber,
+
+        globalTrialNumber,
 
         participantTaskNumber:
           getParticipantTaskNumber(
@@ -1020,6 +1410,9 @@ export default function TrialQuestionnairePage() {
 
         totalTrials:
           TOTAL_TRIALS,
+
+        totalStudyTrials:
+          TOTAL_STUDY_TRIALS,
 
         trialOrder:
           trial.trialOrder,
@@ -1067,8 +1460,17 @@ export default function TrialQuestionnairePage() {
     });
 
     const sessionUpdated =
-      completeTrialQuestionnaire(
+      (
+        completeTrialQuestionnaire as unknown as (
+          trialNumber:
+            StudyTrialNumber,
+
+          taskId:
+            StudyTaskId,
+        ) => boolean
+      )(
         trialNumber,
+        taskId,
       );
 
     if (
@@ -1089,26 +1491,37 @@ export default function TrialQuestionnairePage() {
     }
 
     const completedTrial =
-      useStudySessionStore
-        .getState()
-        .getTrialProgress(
-          trialNumber,
-        ) ??
+      (
+        useStudySessionStore
+          .getState()
+          .getTrialProgress as unknown as (
+            trialNumber:
+              StudyTrialNumber,
+
+            taskId:
+              StudyTaskId,
+          ) =>
+            | StudyTrialProgress
+            | undefined
+      )(
+        trialNumber,
+        taskId,
+      ) ??
       trial;
 
     const eventsFileName =
-      getTrialEventsCsvFileName(
+      `${taskId}_${getTrialEventsCsvFileName(
         participantId,
         trialNumber,
         trial.condition,
-      );
+      )}`;
 
     const summaryFileName =
-      getTrialSummaryCsvFileName(
+      `${taskId}_${getTrialSummaryCsvFileName(
         participantId,
         trialNumber,
         trial.condition,
-      );
+      )}`;
 
     const exportErrors:
       string[] = [];
@@ -1119,21 +1532,70 @@ export default function TrialQuestionnairePage() {
     let summaryExported =
       false;
 
-    setTrialCsvExportStatus(
+    (
+      setTrialCsvExportStatus as unknown as (
+        trialNumber:
+          StudyTrialNumber,
+
+        exportType:
+          "events" | "summary",
+
+        status:
+          "exporting" | "exported" | "failed",
+
+        errorMessage?:
+          string,
+
+        taskId?:
+          StudyTaskId,
+      ) => boolean
+    )(
       trialNumber,
       "events",
       "exporting",
+      undefined,
+      taskId,
     );
 
-    setTrialCsvExportStatus(
+    (
+      setTrialCsvExportStatus as unknown as (
+        trialNumber:
+          StudyTrialNumber,
+
+        exportType:
+          "events" | "summary",
+
+        status:
+          "exporting" | "exported" | "failed",
+
+        errorMessage?:
+          string,
+
+        taskId?:
+          StudyTaskId,
+      ) => boolean
+    )(
       trialNumber,
       "summary",
       "exporting",
+      undefined,
+      taskId,
     );
 
     const trialEvents =
-      getEventsForTrial(
+      (
+        getEventsForTrial as unknown as (
+          trialNumber:
+            StudyTrialNumber,
+
+          taskId:
+            StudyTaskId,
+        ) => ReturnType<
+          typeof getEventsForTrial
+        >
+      )(
         trialNumber,
+        taskId,
       );
 
     try {
@@ -1147,8 +1609,17 @@ export default function TrialQuestionnairePage() {
         eventRows,
       );
 
-      markTrialEventsCsvExported(
+      (
+        markTrialEventsCsvExported as unknown as (
+          trialNumber:
+            StudyTrialNumber,
+
+          taskId:
+            StudyTaskId,
+        ) => boolean
+      )(
         trialNumber,
+        taskId,
       );
 
       eventsExported =
@@ -1165,11 +1636,29 @@ export default function TrialQuestionnairePage() {
         `Events CSV: ${errorMessage}`,
       );
 
-      setTrialCsvExportStatus(
+      (
+        setTrialCsvExportStatus as unknown as (
+          trialNumber:
+            StudyTrialNumber,
+
+          exportType:
+            "events" | "summary",
+
+          status:
+            "exporting" | "exported" | "failed",
+
+          errorMessage?:
+            string,
+
+          taskId?:
+            StudyTaskId,
+        ) => boolean
+      )(
         trialNumber,
         "events",
         "failed",
         errorMessage,
+        taskId,
       );
     }
 
@@ -1195,8 +1684,17 @@ export default function TrialQuestionnairePage() {
         summaryRows,
       );
 
-      markTrialSummaryCsvExported(
+      (
+        markTrialSummaryCsvExported as unknown as (
+          trialNumber:
+            StudyTrialNumber,
+
+          taskId:
+            StudyTaskId,
+        ) => boolean
+      )(
         trialNumber,
+        taskId,
       );
 
       summaryExported =
@@ -1213,11 +1711,29 @@ export default function TrialQuestionnairePage() {
         `Summary CSV: ${errorMessage}`,
       );
 
-      setTrialCsvExportStatus(
+      (
+        setTrialCsvExportStatus as unknown as (
+          trialNumber:
+            StudyTrialNumber,
+
+          exportType:
+            "events" | "summary",
+
+          status:
+            "exporting" | "exported" | "failed",
+
+          errorMessage?:
+            string,
+
+          taskId?:
+            StudyTaskId,
+        ) => boolean
+      )(
         trialNumber,
         "summary",
         "failed",
         errorMessage,
+        taskId,
       );
     }
 
@@ -1225,8 +1741,19 @@ export default function TrialQuestionnairePage() {
       eventsExported &&
       summaryExported
     ) {
-      markTrialQuestionnaireExported(
+      (
+        markTrialQuestionnaireExported as unknown as (
+          trialNumber:
+            StudyTrialNumber,
+
+          taskId:
+            StudyTaskId,
+        ) => ReturnType<
+          typeof markTrialQuestionnaireExported
+        >
+      )(
         trialNumber,
+        taskId,
       );
     }
 
@@ -1260,16 +1787,29 @@ export default function TrialQuestionnairePage() {
         "questionnaire",
 
       metadata: {
-        taskId:
-          "symposium",
+        taskId,
+
+        taskTitle:
+          taskCopy.taskTitle,
 
         taskNumber:
           trialNumber,
+
+        innerTaskNumber:
+          trialNumber,
+
+        globalTrialNumber,
 
         participantTaskNumber:
           getParticipantTaskNumber(
             trial,
           ),
+
+        totalTrials:
+          TOTAL_TRIALS,
+
+        totalStudyTrials:
+          TOTAL_STUDY_TRIALS,
 
         eventsFileName,
 
@@ -1307,7 +1847,7 @@ export default function TrialQuestionnairePage() {
     window.setTimeout(
       () => {
         navigate(
-          "/tasks",
+          `/tasks/${taskId}`,
           {
             replace:
               true,
@@ -1320,8 +1860,11 @@ export default function TrialQuestionnairePage() {
 
   if (
     !procedureAccepted ||
+    taskId ===
+      null ||
     trialNumber ===
       null ||
+    !taskCopy ||
     !trial
   ) {
     return null;
@@ -1332,15 +1875,36 @@ export default function TrialQuestionnairePage() {
       trial,
     );
 
+  const experienceQuestions =
+    getExperienceQuestions(
+      taskCopy,
+    );
+
+  const probeLocationOptions =
+    getProbeLocationOptions(
+      taskCopy,
+    );
+
+  const probeRecognitionOptions =
+    getProbeRecognitionOptions(
+      taskCopy,
+    );
+
+  const formScope =
+    `${taskId}_${trialNumber}`;
+
   if (
     !response
   ) {
     return (
-      <main className="study-page questionnaire-page">
+      <main
+      className={`study-page questionnaire-page questionnaire-page-${taskId}`}
+      data-task-id={taskId}
+    >
         <header className="study-page-header">
           <div className="study-page-header-content">
             <div className="study-page-eyebrow">
-              AI Assisted Scheduling Study
+              AI Assisted Constraint-Solving Study
             </div>
 
             <h1>
@@ -1348,7 +1912,7 @@ export default function TrialQuestionnairePage() {
             </h1>
 
             <p>
-              Preparing the questionnaire.
+              Preparing the {taskCopy.taskTitle} questionnaire.
             </p>
           </div>
 
@@ -1379,11 +1943,14 @@ export default function TrialQuestionnairePage() {
       MANIPULATION_CHECK_DIMENSIONS;
 
   return (
-    <main className="study-page questionnaire-page">
+    <main
+      className={`study-page questionnaire-page questionnaire-page-${taskId}`}
+      data-task-id={taskId}
+    >
       <header className="study-page-header">
         <div className="study-page-header-content">
           <div className="study-page-eyebrow">
-            AI Assisted Scheduling Study
+            AI Assisted Constraint-Solving Study
           </div>
 
           <h1>
@@ -1391,8 +1958,8 @@ export default function TrialQuestionnairePage() {
           </h1>
 
           <p>
-            Please rate your experience completing the
-            Symposium Scheduler task.
+            Please rate your experience completing the{" "}
+            {taskCopy.taskTitle} task.
           </p>
         </div>
 
@@ -1429,10 +1996,25 @@ export default function TrialQuestionnairePage() {
               dimension,
               value,
             ) => {
-              setNasaTlxValue(
+              (
+                setNasaTlxValue as unknown as (
+                  trialNumber:
+                    StudyTrialNumber,
+
+                  dimension:
+                    typeof dimension,
+
+                  value:
+                    typeof value,
+
+                  taskId:
+                    StudyTaskId,
+                ) => void
+              )(
                 trialNumber,
                 dimension,
                 value,
+                taskId,
               );
             }}
           />
@@ -1449,13 +2031,13 @@ export default function TrialQuestionnairePage() {
           description="Select one response on each 0 to 5 agreement scale."
         >
           <div className="likert-list">
-            {EXPERIENCE_QUESTIONS.map(
+            {experienceQuestions.map(
               (question) => (
                 <LikertScale
                   key={
                     question.id
                   }
-                  name={`${question.id}_${trialNumber}`}
+                  name={`${question.id}_${formScope}`}
                   title={
                     question.title
                   }
@@ -1479,10 +2061,25 @@ export default function TrialQuestionnairePage() {
                   onChange={(
                     value,
                   ) => {
-                    setExperienceRating(
+                    (
+                      setExperienceRating as unknown as (
+                        trialNumber:
+                          StudyTrialNumber,
+
+                        dimension:
+                          ExperienceDimension,
+
+                        value:
+                          LikertRating,
+
+                        taskId:
+                          StudyTaskId,
+                      ) => void
+                    )(
                       trialNumber,
                       question.id,
                       value as LikertRating,
+                      taskId,
                     );
                   }}
                 />
@@ -1520,7 +2117,7 @@ export default function TrialQuestionnairePage() {
                       }
                       name={`${String(
                         dimension,
-                      )}_${trialNumber}`}
+                      )}_${formScope}`}
                       title={
                         question.title
                       }
@@ -1541,10 +2138,25 @@ export default function TrialQuestionnairePage() {
                       onChange={(
                         value,
                       ) => {
-                        setManipulationCheckValue(
+                        (
+                          setManipulationCheckValue as unknown as (
+                            trialNumber:
+                              StudyTrialNumber,
+
+                            dimension:
+                              ManipulationDimension,
+
+                            value:
+                              LikertRating,
+
+                            taskId:
+                              StudyTaskId,
+                          ) => void
+                        )(
                           trialNumber,
                           dimension,
                           value as LikertRating,
+                          taskId,
                         );
                       }}
                     />
@@ -1573,7 +2185,7 @@ export default function TrialQuestionnairePage() {
                 </strong>
 
                 <span>
-                  Did you notice a new facilities update while
+                  Did you notice a new {taskCopy.updateLabel} while
                   completing the task?
                 </span>
               </legend>
@@ -1628,7 +2240,7 @@ export default function TrialQuestionnairePage() {
                     >
                       <input
                         type="radio"
-                        name={`noticed_update_${trialNumber}`}
+                        name={`noticed_update_${formScope}`}
                         required
                         value={
                           option.value
@@ -1640,10 +2252,11 @@ export default function TrialQuestionnairePage() {
                           option.value
                         }
                         onChange={() => {
-                          setProbeRecallValue(
+                          (setProbeRecallValue as unknown as (...args: unknown[]) => void)(
                             trialNumber,
                             "noticedUpdate",
                             option.value,
+                            taskId,
                           );
                         }}
                       />
@@ -1663,7 +2276,7 @@ export default function TrialQuestionnairePage() {
               "yes" && (
               <div className="open-response-card">
                 <label
-                  htmlFor={`update-description-${trialNumber}`}
+                  htmlFor={`update-description-${formScope}`}
                 >
                   <strong>
                     Update recall
@@ -1675,17 +2288,18 @@ export default function TrialQuestionnairePage() {
                 </label>
 
                 <textarea
-                  id={`update-description-${trialNumber}`}
+                  id={`update-description-${formScope}`}
                   value={
                     response
                       .probeRecall
                       .updateDescription
                   }
                   onChange={(event) => {
-                    setProbeRecallValue(
+                    (setProbeRecallValue as unknown as (...args: unknown[]) => void)(
                       trialNumber,
                       "updateDescription",
                       event.target.value,
+                      taskId,
                     );
                   }}
                   rows={4}
@@ -1697,17 +2311,16 @@ export default function TrialQuestionnairePage() {
             <fieldset className="radio-question-card">
               <legend>
                 <strong>
-                  Affected room
+                  {taskCopy.affectedLocationTitle}
                 </strong>
 
                 <span>
-                  Which room was affected by the facilities
-                  update?
+                  {taskCopy.affectedLocationQuestion}
                 </span>
               </legend>
 
               <div className="radio-question-options">
-                {PROBE_ROOM_OPTIONS.map(
+                {probeLocationOptions.map(
                   (option) => (
                     <label
                       key={
@@ -1732,7 +2345,7 @@ export default function TrialQuestionnairePage() {
                     >
                       <input
                         type="radio"
-                        name={`affected_room_${trialNumber}`}
+                        name={`affected_location_${formScope}`}
                         required
                         value={
                           option.value
@@ -1744,10 +2357,11 @@ export default function TrialQuestionnairePage() {
                           option.value
                         }
                         onChange={() => {
-                          setProbeRecallValue(
+                          (setProbeRecallValue as unknown as (...args: unknown[]) => void)(
                             trialNumber,
                             "affectedRoom",
                             option.value,
+                            taskId,
                           );
                         }}
                       />
@@ -1762,9 +2376,11 @@ export default function TrialQuestionnairePage() {
             </fieldset>
 
             <LikertScale
-              name={`recall_confidence_${trialNumber}`}
+              name={`recall_confidence_${formScope}`}
               title="Recall confidence"
-              description="How confident are you that your answer about the affected room is correct?"
+              description={
+                taskCopy.recallConfidenceDescription
+              }
               lowLabel="Not at all confident"
               highLabel="Extremely confident"
               value={
@@ -1776,10 +2392,11 @@ export default function TrialQuestionnairePage() {
               max={5}
               required
               onChange={(value) => {
-                setProbeRecallValue(
+                (setProbeRecallValue as unknown as (...args: unknown[]) => void)(
                   trialNumber,
                   "recallConfidence",
                   value as LikertRating,
+                  taskId,
                 );
               }}
             />
@@ -1791,12 +2408,12 @@ export default function TrialQuestionnairePage() {
                 </strong>
 
                 <span>
-                  Which facilities update was shown during the task?
+                  Which {taskCopy.updateLabel} was shown during the task?
                 </span>
               </legend>
 
               <div className="radio-question-options">
-                {PROBE_RECOGNITION_OPTIONS.map(
+                {probeRecognitionOptions.map(
                   (option) => (
                     <label
                       key={
@@ -1821,7 +2438,7 @@ export default function TrialQuestionnairePage() {
                     >
                       <input
                         type="radio"
-                        name={`probe_recognition_${trialNumber}`}
+                        name={`probe_recognition_${formScope}`}
                         required
                         value={
                           option.value
@@ -1833,10 +2450,11 @@ export default function TrialQuestionnairePage() {
                           option.value
                         }
                         onChange={() => {
-                          setProbeRecallValue(
+                          (setProbeRecallValue as unknown as (...args: unknown[]) => void)(
                             trialNumber,
                             "recognitionChoice",
                             option.value,
+                            taskId,
                           );
                         }}
                       />

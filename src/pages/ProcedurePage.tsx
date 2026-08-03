@@ -27,6 +27,16 @@ import {
   useStudySessionStore,
 } from "../store/studySessionStore";
 
+const PARTICIPANT_VISIBLE_TASK_COUNT =
+  3;
+
+const TRIALS_PER_TASK =
+  3;
+
+const TOTAL_STUDY_TRIALS =
+  PARTICIPANT_VISIBLE_TASK_COUNT *
+  TRIALS_PER_TASK;
+
 export default function ProcedurePage() {
   const navigate =
     useNavigate();
@@ -155,11 +165,14 @@ export default function ProcedurePage() {
         page:
           "procedure",
 
-        totalTrials:
-          3,
+        participantVisibleTaskCount:
+          PARTICIPANT_VISIBLE_TASK_COUNT,
 
-        taskId:
-          "symposium",
+        trialsPerTask:
+          TRIALS_PER_TASK,
+
+        totalTrials:
+          TOTAL_STUDY_TRIALS,
 
         procedureAccepted,
       },
@@ -207,11 +220,14 @@ export default function ProcedurePage() {
           page:
             "procedure",
 
-          totalTrials:
-            3,
+          participantVisibleTaskCount:
+            PARTICIPANT_VISIBLE_TASK_COUNT,
 
-          taskId:
-            "symposium",
+          trialsPerTask:
+            TRIALS_PER_TASK,
+
+          totalTrials:
+            TOTAL_STUDY_TRIALS,
 
           participantId,
 
@@ -230,7 +246,7 @@ export default function ProcedurePage() {
       <header className="study-page-header">
         <div className="study-page-header-content">
           <div className="study-page-eyebrow">
-            AI Assisted Scheduling Study
+            AI-Assisted Problem-Solving Study
           </div>
 
           <h1>
@@ -239,7 +255,7 @@ export default function ProcedurePage() {
 
           <p>
             Please review the following instructions before
-            beginning the scheduling tasks.
+            beginning the tasks.
           </p>
         </div>
 
@@ -268,10 +284,10 @@ export default function ProcedurePage() {
               </h2>
 
               <p>
-                You will complete three Symposium Scheduler
-                tasks with assistance from an AI scheduling
-                assistant. Each task involves arranging talks
-                while following the scheduling requirements.
+                You will complete three tasks with assistance
+                from an AI assistant. In each task, arrange the
+                provided items while following the stated
+                constraints and requirements.
               </p>
             </div>
           </div>
@@ -291,9 +307,8 @@ export default function ProcedurePage() {
                 </strong>
 
                 <span>
-                  Complete three assigned scheduling tasks.
-                  Return to task selection after finishing each
-                  task questionnaire.
+                  Complete the three assigned tasks in the
+                  order presented by the study interface.
                 </span>
               </div>
             </div>
@@ -308,13 +323,13 @@ export default function ProcedurePage() {
 
               <div>
                 <strong>
-                  Timed tasks
+                  Fifteen minutes
                 </strong>
 
                 <span>
-                  Each task provides fifteen minutes after the
-                  AI analysis is displayed to review, revise,
-                  and submit your schedule.
+                  Each timed task provides fifteen minutes
+                  after the AI analysis is displayed to review,
+                  revise, and submit your solution.
                 </span>
               </div>
             </div>
@@ -333,8 +348,8 @@ export default function ProcedurePage() {
                 </strong>
 
                 <span>
-                  Complete a short experience questionnaire
-                  after every task and one final questionnaire
+                  Complete the short questionnaires shown at
+                  designated points and one final questionnaire
                   after all three tasks are completed.
                 </span>
               </div>
@@ -358,8 +373,7 @@ export default function ProcedurePage() {
               </h2>
 
               <p>
-                Follow these steps during every scheduling
-                task.
+                Follow these steps during each task.
               </p>
             </div>
           </div>
@@ -384,9 +398,9 @@ export default function ProcedurePage() {
                   </strong>
 
                   <p>
-                    Read the task description, talk details,
-                    constraints, preferences, available rooms,
-                    and available time slots.
+                    Read the task description, item details,
+                    available positions, constraints, and any
+                    additional requirements before starting.
                   </p>
                 </div>
               </div>
@@ -412,8 +426,8 @@ export default function ProcedurePage() {
 
                   <p>
                     Select the AI assistant to receive its
-                    scheduling recommendation. The task timer
-                    begins after the analysis is displayed.
+                    recommendation. The task timer begins after
+                    the analysis is displayed.
                   </p>
                 </div>
               </div>
@@ -434,13 +448,14 @@ export default function ProcedurePage() {
 
                 <div>
                   <strong>
-                    Create or revise the schedule
+                    Arrange or revise the solution
                   </strong>
 
                   <p>
-                    Drag talks into available cells. You may
-                    move or swap scheduled talks while
-                    reviewing the AI recommendation.
+                    Drag and drop items into available cells.
+                    You may move or swap placed items while
+                    reviewing the requirements and the AI
+                    recommendation.
                   </p>
                 </div>
               </div>
@@ -461,13 +476,13 @@ export default function ProcedurePage() {
 
                 <div>
                   <strong>
-                    Submit your final schedule
+                    Submit your final solution
                   </strong>
 
                   <p>
-                    Submit the schedule that you believe best
-                    satisfies the task requirements, then
-                    complete the questionnaire.
+                    Submit the arrangement that you believe
+                    best satisfies the task constraints and
+                    requirements, then continue as instructed.
                   </p>
                 </div>
               </div>
@@ -494,6 +509,18 @@ export default function ProcedurePage() {
                 The AI output is a recommendation. Review it
                 carefully and make any changes you consider
                 appropriate.
+              </span>
+            </div>
+
+            <div className="study-guidance-item">
+              <CheckCircle2
+                size={18}
+                aria-hidden="true"
+              />
+
+              <span>
+                Pay attention to all task constraints and
+                requirements while arranging the items.
               </span>
             </div>
 

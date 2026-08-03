@@ -41,12 +41,53 @@ import type {
   YesNoUnsure,
 } from "../types/questionnaire";
 
+import type {
+  StudyTrialProgress,
+} from "../types/study";
+
 import {
   downloadCsv,
 } from "../utils/csvExport";
 
-const TOTAL_TRIALS =
+const TOTAL_TASKS =
   3;
+
+const TRIALS_PER_TASK =
+  3;
+
+const TOTAL_STUDY_TRIALS =
+  TOTAL_TASKS *
+  TRIALS_PER_TASK;
+
+type SupportedStudyTaskId =
+  | "symposium"
+  | "delivery"
+  | "clinic";
+
+const STUDY_TASK_IDS:
+  readonly SupportedStudyTaskId[] = [
+    "symposium",
+    "delivery",
+    "clinic",
+  ];
+
+type StudyTrialWithIdentity =
+  StudyTrialProgress & {
+    taskId?:
+      SupportedStudyTaskId;
+
+    globalTrialNumber?:
+      number;
+
+    outerTaskNumber?:
+      number;
+
+    innerTaskNumber?:
+      number;
+
+    trialId?:
+      string;
+  };
 
 function sanitizeFilePart(
   value:
@@ -82,6 +123,156 @@ function getErrorMessage(
   }
 
   return "Unknown CSV export error.";
+}
+
+function isStudyTaskId(
+  value:
+    unknown,
+): value is SupportedStudyTaskId {
+  return (
+    value ===
+      "symposium" ||
+    value ===
+      "delivery" ||
+    value ===
+      "clinic"
+  );
+}
+
+function getTrialTaskId(
+  trial:
+    StudyTrialProgress,
+): SupportedStudyTaskId {
+  const taskId =
+    (
+      trial as
+        StudyTrialWithIdentity
+    ).taskId;
+
+  return isStudyTaskId(
+    taskId,
+  )
+    ? taskId
+    : "symposium";
+}
+
+function getOuterTaskNumber(
+  trial:
+    StudyTrialProgress,
+): number {
+  const explicitTaskNumber =
+    (
+      trial as
+        StudyTrialWithIdentity
+    ).outerTaskNumber;
+
+  if (
+    explicitTaskNumber ===
+      1 ||
+    explicitTaskNumber ===
+      2 ||
+    explicitTaskNumber ===
+      3
+  ) {
+    return explicitTaskNumber;
+  }
+
+  const taskId =
+    getTrialTaskId(
+      trial,
+    );
+
+  return taskId ===
+    "delivery"
+    ? 2
+    : taskId ===
+        "clinic"
+      ? 3
+      : 1;
+}
+
+function getInnerTaskNumber(
+  trial:
+    StudyTrialProgress,
+): number {
+  const explicitTaskNumber =
+    (
+      trial as
+        StudyTrialWithIdentity
+    ).innerTaskNumber;
+
+  return explicitTaskNumber ===
+      1 ||
+    explicitTaskNumber ===
+      2 ||
+    explicitTaskNumber ===
+      3
+    ? explicitTaskNumber
+    : trial.trialNumber;
+}
+
+function getGlobalTrialNumber(
+  trial:
+    StudyTrialProgress,
+): number {
+  const explicitGlobalTrialNumber =
+    (
+      trial as
+        StudyTrialWithIdentity
+    ).globalTrialNumber;
+
+  if (
+    typeof explicitGlobalTrialNumber ===
+      "number" &&
+    Number.isInteger(
+      explicitGlobalTrialNumber,
+    ) &&
+    explicitGlobalTrialNumber >=
+      1 &&
+    explicitGlobalTrialNumber <=
+      TOTAL_STUDY_TRIALS
+  ) {
+    return explicitGlobalTrialNumber;
+  }
+
+  return (
+    (
+      getOuterTaskNumber(
+        trial,
+      ) -
+      1
+    ) *
+      TRIALS_PER_TASK +
+    getInnerTaskNumber(
+      trial,
+    )
+  );
+}
+
+function getCompositeTrialId(
+  trial:
+    StudyTrialProgress,
+): string {
+  const explicitTrialId =
+    (
+      trial as
+        StudyTrialWithIdentity
+    ).trialId;
+
+  if (
+    typeof explicitTrialId ===
+      "string" &&
+    explicitTrialId
+      .trim()
+      .length >
+      0
+  ) {
+    return explicitTrialId;
+  }
+
+  return `${getTrialTaskId(
+    trial,
+  )}-${trial.condition}`;
 }
 
 export default function PostExperimentPage() {
@@ -234,33 +425,50 @@ export default function PostExperimentPage() {
         "questionnaire_complete",
     ).length;
 
+  const completedTaskCount =
+    STUDY_TASK_IDS.filter(
+      (taskId) => {
+        const taskTrials =
+          trials.filter(
+            (trial) =>
+              getTrialTaskId(
+                trial,
+              ) ===
+              taskId,
+          );
+
+        return (
+          taskTrials.length ===
+            TRIALS_PER_TASK &&
+          taskTrials.every(
+            (trial) =>
+              trial.status ===
+              "questionnaire_complete",
+          )
+        );
+      },
+    ).length;
+
   const allTrialsComplete =
+    trials.length ===
+      TOTAL_STUDY_TRIALS &&
     completedTrialCount ===
-    TOTAL_TRIALS;
+      TOTAL_STUDY_TRIALS &&
+    completedTaskCount ===
+      TOTAL_TASKS;
 
   const orderedTrials =
     [...trials].sort(
       (
         first,
         second,
-      ) => {
-        const firstOrder =
-          first.trialOrder >
-          0
-            ? first.trialOrder
-            : first.trialNumber;
-
-        const secondOrder =
-          second.trialOrder >
-          0
-            ? second.trialOrder
-            : second.trialNumber;
-
-        return (
-          firstOrder -
-          secondOrder
-        );
-      },
+      ) =>
+        getGlobalTrialNumber(
+          first,
+        ) -
+        getGlobalTrialNumber(
+          second,
+        ),
     );
 
   const finalTrial =
@@ -268,6 +476,20 @@ export default function PostExperimentPage() {
       orderedTrials.length -
         1
     ];
+
+  const finalTaskId =
+    finalTrial
+      ? getTrialTaskId(
+          finalTrial,
+        )
+      : null;
+
+  const finalGlobalTrialNumber =
+    finalTrial
+      ? getGlobalTrialNumber(
+          finalTrial,
+        )
+      : null;
 
   const {
     attributionCheck,
@@ -658,15 +880,38 @@ export default function PostExperimentPage() {
         page:
           "post_experiment",
 
+        completedTaskCount,
+
+        totalTasks:
+          TOTAL_TASKS,
+
         completedTrialCount,
 
         totalTrials:
-          TOTAL_TRIALS,
+          TOTAL_STUDY_TRIALS,
 
-        selectedTrialOrder:
+        finalTaskId,
+
+        finalGlobalTrialNumber,
+
+        compositeTrialOrder:
           orderedTrials.map(
-            (trial) =>
-              trial.trialNumber,
+            getCompositeTrialId,
+          ),
+
+        globalTrialOrder:
+          orderedTrials.map(
+            getGlobalTrialNumber,
+          ),
+
+        taskOrder:
+          orderedTrials.map(
+            getTrialTaskId,
+          ),
+
+        innerTaskOrder:
+          orderedTrials.map(
+            getInnerTaskNumber,
           ),
 
         conditionOrder:
@@ -679,8 +924,11 @@ export default function PostExperimentPage() {
   }, [
     addEvent,
     allTrialsComplete,
+    completedTaskCount,
     completedTrialCount,
     events,
+    finalGlobalTrialNumber,
+    finalTaskId,
     finalTrial,
     orderedTrials,
     postExperimentCompleted,
@@ -771,10 +1019,45 @@ export default function PostExperimentPage() {
         page:
           "post_experiment",
 
+        completedTaskCount,
+
+        totalTasks:
+          TOTAL_TASKS,
+
         completedTrialCount,
 
         totalTrials:
-          TOTAL_TRIALS,
+          TOTAL_STUDY_TRIALS,
+
+        finalTaskId,
+
+        finalGlobalTrialNumber,
+
+        compositeTrialOrder:
+          orderedTrials.map(
+            getCompositeTrialId,
+          ),
+
+        globalTrialOrder:
+          orderedTrials.map(
+            getGlobalTrialNumber,
+          ),
+
+        taskOrder:
+          orderedTrials.map(
+            getTrialTaskId,
+          ),
+
+        innerTaskOrder:
+          orderedTrials.map(
+            getInnerTaskNumber,
+          ),
+
+        conditionOrder:
+          orderedTrials.map(
+            (trial) =>
+              trial.condition,
+          ),
 
         attributionCheck: {
           ...submittedResponse
@@ -806,18 +1089,53 @@ export default function PostExperimentPage() {
       );
 
     const fileName =
-      `${safeParticipantId}_post_task_questionnaire.csv`;
+      `${safeParticipantId}_post_experiment_questionnaire.csv`;
 
     setPostExperimentCsvExportStatus(
       "exporting",
     );
 
     try {
-      const selectedTrialOrder =
+      const compositeTrialOrder =
         orderedTrials
           .map(
-            (trial) =>
-              trial.trialNumber,
+            getCompositeTrialId,
+          )
+          .join(
+            "|",
+          );
+
+      const globalTrialOrder =
+        orderedTrials
+          .map(
+            getGlobalTrialNumber,
+          )
+          .join(
+            "|",
+          );
+
+      const taskOrder =
+        orderedTrials
+          .map(
+            getTrialTaskId,
+          )
+          .join(
+            "|",
+          );
+
+      const outerTaskOrder =
+        orderedTrials
+          .map(
+            getOuterTaskNumber,
+          )
+          .join(
+            "|",
+          );
+
+      const innerTaskOrder =
+        orderedTrials
+          .map(
+            getInnerTaskNumber,
           )
           .join(
             "|",
@@ -852,14 +1170,38 @@ export default function PostExperimentPage() {
           exported_at_iso:
             exportedAtIso,
 
+          completed_task_count:
+            completedTaskCount,
+
+          total_task_count:
+            TOTAL_TASKS,
+
           completed_trial_count:
             completedTrialCount,
 
           total_trial_count:
-            TOTAL_TRIALS,
+            TOTAL_STUDY_TRIALS,
 
-          selected_trial_order:
-            selectedTrialOrder,
+          final_task_id:
+            finalTaskId,
+
+          final_global_trial_number:
+            finalGlobalTrialNumber,
+
+          composite_trial_order:
+            compositeTrialOrder,
+
+          global_trial_order:
+            globalTrialOrder,
+
+          task_order:
+            taskOrder,
+
+          outer_task_order:
+            outerTaskOrder,
+
+          inner_task_order:
+            innerTaskOrder,
 
           condition_order:
             conditionOrder,
@@ -984,6 +1326,20 @@ export default function PostExperimentPage() {
 
           fileName,
 
+          completedTaskCount,
+
+          totalTasks:
+            TOTAL_TASKS,
+
+          completedTrialCount,
+
+          totalTrials:
+            TOTAL_STUDY_TRIALS,
+
+          finalTaskId,
+
+          finalGlobalTrialNumber,
+
           rowCount:
             rows.length,
 
@@ -1052,16 +1408,16 @@ export default function PostExperimentPage() {
       <header className="study-page-header">
         <div className="study-page-header-content">
           <div className="study-page-eyebrow">
-            AI Assisted Scheduling Study
+            AI-Assisted Constraint-Solving Study
           </div>
 
           <h1>
-            Post Task Questionnaire
+            Post-Experiment Questionnaire
           </h1>
 
           <p>
-            Please reflect on your experience across all
-            three Symposium Scheduler tasks.
+            Please reflect on your experience across all three
+            experiment tasks.
           </p>
         </div>
 
@@ -1086,7 +1442,7 @@ export default function PostExperimentPage() {
           />
 
           <p>
-            You have completed all three scheduling tasks.
+            You have completed all three experiment tasks.
             Please answer the following questions based on
             your overall experience.
           </p>
@@ -1121,7 +1477,7 @@ export default function PostExperimentPage() {
 
           <p>
             Your final responses will be recorded and one
-            post task questionnaire CSV file will be
+            post-experiment questionnaire CSV file will be
             downloaded after submission.
           </p>
         </section>

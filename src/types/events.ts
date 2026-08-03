@@ -96,6 +96,14 @@ export const SCHEDULE_ACTIONS = [
 export type ScheduleAction =
   (typeof SCHEDULE_ACTIONS)[number];
 
+/*
+ * All three task domains use the same 3 × 4 allocation geometry. Room and
+ * Slot therefore remain the canonical stored coordinate types, while these
+ * aliases provide domain-neutral terminology to new code.
+ */
+export type StudyResource = Room;
+export type StudyPeriod = Slot;
+
 export type DragSource =
   | "unassigned_tray"
   | "schedule_grid";
@@ -123,21 +131,49 @@ export const THEORETICAL_EDIT_CATEGORIES = [
 export type TheoreticalEditCategory =
   (typeof THEORETICAL_EDIT_CATEGORIES)[number];
 
-export type TimerWarningLevel = "amber" | "red";
-export type TrialEndReason = "submitted" | "timeout";
-export type ProbeAcknowledgmentSource = "banner_ok" | "bell";
+export type TimerWarningLevel =
+  | "amber"
+  | "red";
 
-export type StudyEventMetadata = Record<string, unknown>;
-export type StudyEventPayload = Record<string, unknown>;
+export type TrialEndReason =
+  | "submitted"
+  | "timeout";
 
-interface StudyEventMeasurements {
+export type ProbeAcknowledgmentSource =
+  | "banner_ok"
+  | "bell";
+
+/* Compatibility spelling used by some study files. */
+export type ProbeAcknowledgementSource =
+  ProbeAcknowledgmentSource;
+
+export type StudyEventMetadata =
+  Record<string, unknown>;
+
+export type StudyEventPayload =
+  Record<string, unknown>;
+
+export interface StudyEventMeasurements {
+  /*
+   * Legacy Symposium field names are retained because the shared scheduler
+   * core and analysis pipeline already use them for every domain. The generic
+   * aliases may be supplied alongside them by newer callers.
+   */
   talkId?: string;
   displacedTalkId?: string;
+
+  itemId?: string;
+  displacedItemId?: string;
 
   fromRoom?: Room;
   fromSlot?: Slot;
   toRoom?: Room;
   toSlot?: Slot;
+
+  fromResource?: StudyResource;
+  fromPeriod?: StudyPeriod;
+  toResource?: StudyResource;
+  toPeriod?: StudyPeriod;
 
   source?: DragSource;
   action?: ScheduleAction;
@@ -163,12 +199,22 @@ interface StudyEventMeasurements {
   roomCompositionSignatureBefore?: string;
   roomCompositionSignatureAfter?: string;
 
+  resourceCompositionSignatureBefore?: string;
+  resourceCompositionSignatureAfter?: string;
+
   scoreBefore?: number;
   scoreAfter?: number;
   scoreDelta?: number;
 
+  /*
+   * speakerConflicts* is the compatibility field used for the shared-actor
+   * conflict metric. In the other skins it represents driver or nurse
+   * conflicts. actorConflicts* is the domain-neutral alias.
+   */
   speakerConflictsBefore?: number;
   speakerConflictsAfter?: number;
+  actorConflictsBefore?: number;
+  actorConflictsAfter?: number;
 
   hammingDistanceFromAIBefore?: number;
   hammingDistanceFromAIAfter?: number;
@@ -209,9 +255,18 @@ interface StudyEventMeasurements {
   postProbeFeasibleBefore?: boolean | null;
   postProbeFeasibleAfter?: boolean | null;
 
+  /*
+   * unresolvedDemoTalkIds* remains the compatibility field used by existing
+   * metrics. For Delivery and Clinic it contains unresolved cold-chain or
+   * ICU-required item IDs respectively.
+   */
   unresolvedDemoTalkIds?: string[] | null;
   unresolvedDemoTalkIdsBefore?: string[] | null;
   unresolvedDemoTalkIdsAfter?: string[] | null;
+
+  unresolvedRequiredItemIds?: string[] | null;
+  unresolvedRequiredItemIdsBefore?: string[] | null;
+  unresolvedRequiredItemIdsAfter?: string[] | null;
 
   resultingViolations?: unknown[];
   violationCount?: number;
@@ -219,6 +274,7 @@ interface StudyEventMeasurements {
   structuralSignature?: string;
   macroStructureSignature?: string;
   roomCompositionSignature?: string;
+  resourceCompositionSignature?: string;
   moatCrossed?: boolean;
 
   remainingMs?: number;
@@ -232,7 +288,8 @@ interface StudyEventMeasurements {
   probeCompliant?: boolean | null;
 }
 
-export interface StudyEvent extends StudyEventMeasurements {
+export interface StudyEvent
+  extends StudyEventMeasurements {
   eventId: string;
   eventIndex: number;
 
@@ -240,10 +297,20 @@ export interface StudyEvent extends StudyEventMeasurements {
   participantToken?: string;
   sessionId: string;
 
+  /* Composite identity, for example symposium-A or delivery-B. */
   trialId: string;
+  compositeTrialId?: string;
+
+  /* Inner trial number within a task domain: 1, 2, or 3. */
   trialNumber: StudyTrialNumber;
+
+  /* Global study order when available: 1 through 9. */
   trialOrder: StudyTrialOrder | number;
   trialIndex?: number;
+
+  outerTaskNumber?: number;
+  innerTaskNumber?: StudyTrialNumber;
+  globalTrialNumber?: number;
 
   condition: ConcretizationLevel;
   conditionOrder: ConditionOrder | number;
@@ -270,14 +337,22 @@ export interface StudyEvent extends StudyEventMeasurements {
   payload?: StudyEventPayload;
 }
 
-export interface CreateStudyEventInput extends StudyEventMeasurements {
+export interface CreateStudyEventInput
+  extends StudyEventMeasurements {
   eventType: StudyEventType;
 
   eventIndex?: number;
 
+  trialId?: string;
+  compositeTrialId?: string;
+
   trialNumber?: StudyTrialNumber;
   trialOrder?: StudyTrialOrder | number;
   trialIndex?: number;
+
+  outerTaskNumber?: number;
+  innerTaskNumber?: StudyTrialNumber;
+  globalTrialNumber?: number;
 
   condition?: ConcretizationLevel;
   conditionOrder?: ConditionOrder | number;

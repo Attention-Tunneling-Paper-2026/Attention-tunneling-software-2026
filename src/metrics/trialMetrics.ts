@@ -1,9 +1,14 @@
 import {
-  SYMPOSIUM_ANALYSIS_BENCHMARKS,
-  SYMPOSIUM_SCORING,
+  TASK_ANALYSIS_BENCHMARKS_BY_ID,
+  TASK_SCORING_BY_ID,
   calculateParetoEfficiencyPercentage,
   calculateParetoEfficiencyProportion,
   getVerifiedGlobalOptimumScore,
+  isSupportedStudyTaskId,
+} from "../data/symposium";
+
+import type {
+  SupportedStudyTaskId,
 } from "../data/symposium";
 
 import type {
@@ -120,24 +125,125 @@ type UnknownRecord =
     unknown
   >;
 
-const THEORETICAL_MAXIMUM_SCHEDULE_SCORE =
-  SYMPOSIUM_ANALYSIS_BENCHMARKS
-    .theoreticalMaximumScore;
+const TRIALS_PER_TASK = 3;
 
-const STATE_HASH_DEFINITION =
-  "exact_talk_to_room_slot_assignment";
+const TASK_ORDER: Record<
+  SupportedStudyTaskId,
+  number
+> = {
+  symposium: 1,
+  delivery: 2,
+  clinic: 3,
+};
 
-const STRUCTURAL_SIGNATURE_DEFINITION =
-  "room_slot_topic_pattern";
+const STATE_HASH_DEFINITION_BY_TASK: Record<
+  SupportedStudyTaskId,
+  string
+> = {
+  symposium:
+    "exact_talk_to_room_slot_assignment",
+  delivery:
+    "exact_shipment_to_van_route_window_assignment",
+  clinic:
+    "exact_duty_to_ward_shift_assignment",
+};
 
-const MACRO_STRUCTURE_DEFINITION =
-  "room_majority_topic_mapping_ignoring_slot_order";
+const STRUCTURAL_SIGNATURE_DEFINITION_BY_TASK: Record<
+  SupportedStudyTaskId,
+  string
+> = {
+  symposium:
+    "room_slot_topic_pattern",
+  delivery:
+    "van_route_window_region_pattern",
+  clinic:
+    "ward_shift_specialty_pattern",
+};
 
-const THEORETICAL_EDIT_TAXONOMY_VERSION =
-  "symposium_edit_taxonomy_v1";
+const MACRO_STRUCTURE_DEFINITION_BY_TASK: Record<
+  SupportedStudyTaskId,
+  string
+> = {
+  symposium:
+    "room_majority_topic_mapping_ignoring_slot_order",
+  delivery:
+    "van_majority_region_mapping_ignoring_window_order",
+  clinic:
+    "ward_majority_specialty_mapping_ignoring_shift_order",
+};
+
+const THEORETICAL_EDIT_TAXONOMY_VERSION_BY_TASK: Record<
+  SupportedStudyTaskId,
+  string
+> = {
+  symposium:
+    "symposium_edit_taxonomy_v1",
+  delivery:
+    "delivery_edit_taxonomy_v1",
+  clinic:
+    "clinic_edit_taxonomy_v1",
+};
 
 const SALVAGE_COUNTING_ANCHOR_REASON =
   "visible_constraint_violation_present_at_trial_start";
+
+function resolveTaskId(
+  ...values: unknown[]
+): SupportedStudyTaskId {
+  for (const value of values) {
+    if (isSupportedStudyTaskId(value)) {
+      return value;
+    }
+  }
+
+  return "symposium";
+}
+
+function getOuterTaskNumber(
+  taskId: SupportedStudyTaskId,
+): number {
+  return TASK_ORDER[taskId];
+}
+
+function getInnerTaskNumber(
+  value: unknown,
+): number | null {
+  return typeof value === "number" &&
+    Number.isInteger(value) &&
+    value >= 1 &&
+    value <= TRIALS_PER_TASK
+    ? value
+    : null;
+}
+
+function getGlobalTrialNumber(
+  taskId: SupportedStudyTaskId,
+  trialNumber: unknown,
+): number | null {
+  const innerTaskNumber =
+    getInnerTaskNumber(trialNumber);
+
+  return innerTaskNumber === null
+    ? null
+    : (getOuterTaskNumber(taskId) - 1) *
+        TRIALS_PER_TASK +
+        innerTaskNumber;
+}
+
+function getCompositeTrialId(
+  taskId: SupportedStudyTaskId,
+  condition: unknown,
+  trialNumber: unknown,
+): string {
+  const suffix =
+    typeof condition === "string" &&
+    condition.length > 0
+      ? condition
+      : getInnerTaskNumber(trialNumber) ??
+        "unknown";
+
+  return `${taskId}-${suffix}`;
+}
 
 function asRecord(
   value:
@@ -1484,6 +1590,36 @@ export function buildTrialEventRows(
           event.eventId,
         );
 
+      const taskId = resolveTaskId(
+        event.taskId,
+        readMetadataValue(
+          event,
+          "taskId",
+        ),
+      );
+
+      const innerTaskNumber =
+        getInnerTaskNumber(
+          event.trialNumber,
+        );
+
+      const outerTaskNumber =
+        getOuterTaskNumber(taskId);
+
+      const globalTrialNumber =
+        getGlobalTrialNumber(
+          taskId,
+          event.trialNumber,
+        );
+
+      const compositeTrialId =
+        event.trialId ||
+        getCompositeTrialId(
+          taskId,
+          event.condition,
+          event.trialNumber,
+        );
+
       return {
         participant_id:
           event.participantId,
@@ -1493,9 +1629,17 @@ export function buildTrialEventRows(
       session_id:
         event.sessionId,
       trial_id:
-        event.trialId,
+        compositeTrialId,
+      composite_trial_id:
+        compositeTrialId,
       trial_number:
         event.trialNumber,
+      inner_task_number:
+        innerTaskNumber,
+      outer_task_number:
+        outerTaskNumber,
+      global_trial_number:
+        globalTrialNumber,
       trial_order:
         event.trialOrder,
       trial_index:
@@ -1512,10 +1656,10 @@ export function buildTrialEventRows(
       probe_naive:
         event.probeNaive,
       task_id:
-        event.taskId,
+        taskId,
       skin:
         event.skin ??
-        event.taskId,
+        taskId,
       task_instance_version:
         event.taskInstanceVersion ??
         "",
@@ -1631,16 +1775,22 @@ export function buildTrialEventRows(
           "roomCompositionSignature",
         ),
       state_hash_definition:
-        STATE_HASH_DEFINITION,
+        STATE_HASH_DEFINITION_BY_TASK[
+          taskId
+        ],
       structural_signature_definition:
-        STRUCTURAL_SIGNATURE_DEFINITION,
+        STRUCTURAL_SIGNATURE_DEFINITION_BY_TASK[
+          taskId
+        ],
       macro_structure_definition:
         eventString(
           event,
           "macroStructureDefinition",
           "macroStructureDefinition",
         ) ||
-        MACRO_STRUCTURE_DEFINITION,
+        MACRO_STRUCTURE_DEFINITION_BY_TASK[
+          taskId
+        ],
       score_before:
         event.scoreBefore ??
         null,
@@ -1749,7 +1899,9 @@ export function buildTrialEventRows(
           "theoreticalEditTaxonomyVersion",
           "theoreticalEditTaxonomyVersion",
         ) ||
-        THEORETICAL_EDIT_TAXONOMY_VERSION,
+        THEORETICAL_EDIT_TAXONOMY_VERSION_BY_TASK[
+          taskId
+        ],
       changed_talk_ids:
         serializeValue(
           readMetadataValue(
@@ -2190,6 +2342,66 @@ export function buildTrialSummaryRows({
       sortedEvents,
     );
 
+  const taskId = resolveTaskId(
+    trial.taskId,
+    finalEvent?.taskId,
+    trialStartEvent?.taskId,
+  );
+
+  const taskScoring =
+    TASK_SCORING_BY_ID[taskId];
+
+  const taskBenchmarks =
+    TASK_ANALYSIS_BENCHMARKS_BY_ID[
+      taskId
+    ];
+
+  const innerTaskNumber =
+    getInnerTaskNumber(
+      trial.trialNumber,
+    );
+
+  const outerTaskNumber =
+    getOuterTaskNumber(taskId);
+
+  const globalTrialNumber =
+    getGlobalTrialNumber(
+      taskId,
+      trial.trialNumber,
+    );
+
+  const compositeTrialId =
+    finalEvent?.trialId ||
+    trialStartEvent?.trialId ||
+    getCompositeTrialId(
+      taskId,
+      trial.condition,
+      trial.trialNumber,
+    );
+
+  const theoreticalMaximumScheduleScore =
+    taskBenchmarks.theoreticalMaximumScore;
+
+  const stateHashDefinition =
+    STATE_HASH_DEFINITION_BY_TASK[
+      taskId
+    ];
+
+  const structuralSignatureDefinition =
+    STRUCTURAL_SIGNATURE_DEFINITION_BY_TASK[
+      taskId
+    ];
+
+  const macroStructureDefinition =
+    MACRO_STRUCTURE_DEFINITION_BY_TASK[
+      taskId
+    ];
+
+  const theoreticalEditTaxonomyVersion =
+    THEORETICAL_EDIT_TAXONOMY_VERSION_BY_TASK[
+      taskId
+    ];
+
   const trialStartElapsedMs =
     trialStartEvent?.elapsedMs ??
     0;
@@ -2442,7 +2654,7 @@ export function buildTrialSummaryRows({
       null
         ? (
             finalScore /
-            THEORETICAL_MAXIMUM_SCHEDULE_SCORE
+            theoreticalMaximumScheduleScore
           ) *
           100
         : null
@@ -2569,6 +2781,7 @@ export function buildTrialSummaryRows({
   const verifiedGlobalOptimumScore =
     getVerifiedGlobalOptimumScore(
       probeShown,
+      taskId,
     );
 
   const verifiedGlobalOptimumProblemInstance =
@@ -2613,6 +2826,7 @@ export function buildTrialSummaryRows({
       : calculateParetoEfficiencyProportion(
           finalScore,
           probeShown,
+          taskId,
         );
 
   const finalParetoEfficiencyPercentage =
@@ -2622,6 +2836,7 @@ export function buildTrialSummaryRows({
       : calculateParetoEfficiencyPercentage(
           finalScore,
           probeShown,
+          taskId,
         );
 
   const finalParetoEfficiencyFeasibleOnlyProportion =
@@ -2862,15 +3077,21 @@ export function buildTrialSummaryRows({
       session_id:
         sessionId,
       trial_id:
-        finalEvent?.trialId ??
-        trialStartEvent?.trialId ??
-        `symposium-trial-${trial.trialNumber}`,
+        compositeTrialId,
+      composite_trial_id:
+        compositeTrialId,
       trial_number:
         trial.trialNumber,
+      inner_task_number:
+        innerTaskNumber,
+      outer_task_number:
+        outerTaskNumber,
+      global_trial_number:
+        globalTrialNumber,
       trial_order:
         trial.trialOrder,
       task_id:
-        trial.taskId,
+        taskId,
       condition:
         trial.condition,
       condition_order:
@@ -2994,7 +3215,7 @@ export function buildTrialSummaryRows({
           "theoreticalEditTaxonomyVersion",
           "theoreticalEditTaxonomyVersion",
         ) ||
-        THEORETICAL_EDIT_TAXONOMY_VERSION,
+        theoreticalEditTaxonomyVersion,
       visited_state_count:
         stateObservations.length,
       unique_states_visited:
@@ -3013,9 +3234,9 @@ export function buildTrialSummaryRows({
       exploration_breadth_signature:
         "macro_structure_signature",
       state_hash_definition:
-        STATE_HASH_DEFINITION,
+        stateHashDefinition,
       structural_signature_definition:
-        STRUCTURAL_SIGNATURE_DEFINITION,
+        structuralSignatureDefinition,
       macro_structure_definition:
         eventString(
           finalEvent,
@@ -3027,7 +3248,7 @@ export function buildTrialSummaryRows({
           "macroStructureDefinition",
           "macroStructureDefinition",
         ) ||
-        MACRO_STRUCTURE_DEFINITION,
+        macroStructureDefinition,
       mean_pairwise_state_hamming:
         calculateMeanPairwiseStateDistance(
           uniqueStateObservations,
@@ -3043,29 +3264,28 @@ export function buildTrialSummaryRows({
       final_hamming_distance_from_ai:
         finalHammingDistance,
       score_unit:
-        SYMPOSIUM_SCORING
-          .scoreUnit,
+        taskScoring.scoreUnit,
       theoretical_maximum_score:
-        THEORETICAL_MAXIMUM_SCHEDULE_SCORE,
+        theoreticalMaximumScheduleScore,
       verified_pre_probe_global_optimum_score:
-        SYMPOSIUM_ANALYSIS_BENCHMARKS
+        taskBenchmarks
           .verifiedPreProbeGlobalOptimumScore,
       verified_post_probe_global_optimum_score:
-        SYMPOSIUM_ANALYSIS_BENCHMARKS
+        taskBenchmarks
           .verifiedPostProbeGlobalOptimumScore,
       verified_global_optimum_score_for_trial:
         verifiedGlobalOptimumScore,
       verified_global_optimum_problem_instance:
         verifiedGlobalOptimumProblemInstance,
       pareto_efficiency_reference:
-        SYMPOSIUM_ANALYSIS_BENCHMARKS
+        taskBenchmarks
           .paretoEfficiencyReference,
       initial_score:
         firstScoreAfter,
       final_score:
         finalScore,
       final_score_maximum:
-        THEORETICAL_MAXIMUM_SCHEDULE_SCORE,
+        theoreticalMaximumScheduleScore,
       final_score_percentage:
         finalScorePercentageOfTheoreticalMaximum,
       final_score_percentage_of_theoretical_maximum:

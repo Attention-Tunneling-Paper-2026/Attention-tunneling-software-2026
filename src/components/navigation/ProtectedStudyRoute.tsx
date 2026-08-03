@@ -18,6 +18,7 @@ import {
 } from "../../types/scheduler";
 
 import type {
+  StudyTaskId,
   StudyTrialNumber,
 } from "../../types/scheduler";
 
@@ -39,18 +40,59 @@ interface ProtectedStudyRouteProps {
     number;
 }
 
+function isStudyTaskId(
+  value: unknown,
+): value is StudyTaskId {
+  return (
+    value === "symposium" ||
+    value === "delivery" ||
+    value === "clinic"
+  );
+}
+
+function getTrialTaskId(
+  trial: unknown,
+): StudyTaskId | null {
+  if (
+    typeof trial !==
+      "object" ||
+    trial === null ||
+    !("taskId" in trial)
+  ) {
+    return null;
+  }
+
+  const taskId =
+    (
+      trial as {
+        taskId?: unknown;
+      }
+    ).taskId;
+
+  return isStudyTaskId(
+    taskId,
+  )
+    ? taskId
+    : null;
+}
+
 export default function ProtectedStudyRoute({
   stage,
   children,
-  totalTrials = 3,
+  totalTrials = 9,
 }: ProtectedStudyRouteProps) {
   const location =
     useLocation();
 
   const {
+    taskId:
+      taskIdParam,
     trialNumber:
       trialNumberParam,
   } = useParams<{
+    taskId?:
+      string;
+
     trialNumber?:
       string;
   }>();
@@ -79,6 +121,14 @@ export default function ProtectedStudyRoute({
         state.studyCompleted,
     );
 
+  const routeTaskId:
+    StudyTaskId | null =
+      isStudyTaskId(
+        taskIdParam,
+      )
+        ? taskIdParam
+        : null;
+
   const parsedTrialNumber =
     Number(
       trialNumberParam,
@@ -93,13 +143,17 @@ export default function ProtectedStudyRoute({
         : null;
 
   const routeTrial =
-    routeTrialNumber ===
-    null
+    routeTaskId === null ||
+    routeTrialNumber === null
       ? undefined
       : trials.find(
           (trial) =>
+            getTrialTaskId(
+              trial,
+            ) ===
+              routeTaskId &&
             trial.trialNumber ===
-            routeTrialNumber,
+              routeTrialNumber,
         );
 
   const openTrial =
@@ -110,6 +164,13 @@ export default function ProtectedStudyRoute({
         trial.status ===
           "submitted",
     );
+
+  const openTrialTaskId =
+    openTrial
+      ? getTrialTaskId(
+          openTrial,
+        )
+      : null;
 
   const completedTrialCount =
     trials.filter(
@@ -149,6 +210,34 @@ export default function ProtectedStudyRoute({
     );
   }
 
+  function getTaskSelectionPath(
+    taskId:
+      StudyTaskId | null,
+  ): string {
+    return taskId
+      ? `/tasks/${taskId}`
+      : "/tasks";
+  }
+
+  function getOpenTrialPath():
+    string {
+    if (
+      !openTrial ||
+      !openTrialTaskId
+    ) {
+      return "/tasks";
+    }
+
+    if (
+      openTrial.status ===
+      "submitted"
+    ) {
+      return `/trial-questionnaire/${openTrialTaskId}/${openTrial.trialNumber}`;
+    }
+
+    return `/task/${openTrialTaskId}/${openTrial.trialNumber}`;
+  }
+
   if (
     !procedureAccepted
   ) {
@@ -158,9 +247,27 @@ export default function ProtectedStudyRoute({
   }
 
   if (
-    studyCompleted ||
+    studyCompleted
+  ) {
+    return stage ===
+      "disclosure"
+      ? renderRoute()
+      : redirect(
+          "/disclosure",
+        );
+  }
+
+  if (
     postExperimentCompleted
   ) {
+    if (
+      !allTrialsComplete
+    ) {
+      return redirect(
+        "/tasks",
+      );
+    }
+
     return stage ===
       "disclosure"
       ? renderRoute()
@@ -173,6 +280,17 @@ export default function ProtectedStudyRoute({
     stage ===
     "tasks"
   ) {
+    if (
+      taskIdParam !==
+        undefined &&
+      routeTaskId ===
+        null
+    ) {
+      return redirect(
+        "/tasks",
+      );
+    }
+
     return renderRoute();
   }
 
@@ -181,12 +299,23 @@ export default function ProtectedStudyRoute({
     "task"
   ) {
     if (
+      routeTaskId ===
+        null
+    ) {
+      return redirect(
+        "/tasks",
+      );
+    }
+
+    if (
       routeTrialNumber ===
         null ||
       !routeTrial
     ) {
       return redirect(
-        "/tasks",
+        getTaskSelectionPath(
+          routeTaskId,
+        ),
       );
     }
 
@@ -195,7 +324,9 @@ export default function ProtectedStudyRoute({
       "questionnaire_complete"
     ) {
       return redirect(
-        "/tasks",
+        getTaskSelectionPath(
+          routeTaskId,
+        ),
       );
     }
 
@@ -204,7 +335,7 @@ export default function ProtectedStudyRoute({
       "submitted"
     ) {
       return redirect(
-        `/trial-questionnaire/${routeTrialNumber}`,
+        `/trial-questionnaire/${routeTaskId}/${routeTrialNumber}`,
       );
     }
 
@@ -213,26 +344,28 @@ export default function ProtectedStudyRoute({
       "active"
     ) {
       return redirect(
-        "/tasks",
+        getTaskSelectionPath(
+          routeTaskId,
+        ),
       );
     }
 
-    if (
-      openTrial &&
-      openTrial.trialNumber !==
-        routeTrialNumber
-    ) {
-      if (
-        openTrial.status ===
-        "submitted"
-      ) {
-        return redirect(
-          `/trial-questionnaire/${openTrial.trialNumber}`,
-        );
-      }
+    const openTrialIsDifferent =
+      Boolean(
+        openTrial,
+      ) &&
+      (
+        openTrialTaskId !==
+          routeTaskId ||
+        openTrial?.trialNumber !==
+          routeTrialNumber
+      );
 
+    if (
+      openTrialIsDifferent
+    ) {
       return redirect(
-        `/task/${openTrial.trialNumber}`,
+        getOpenTrialPath(),
       );
     }
 
@@ -244,12 +377,23 @@ export default function ProtectedStudyRoute({
     "trial-questionnaire"
   ) {
     if (
+      routeTaskId ===
+        null
+    ) {
+      return redirect(
+        "/tasks",
+      );
+    }
+
+    if (
       routeTrialNumber ===
         null ||
       !routeTrial
     ) {
       return redirect(
-        "/tasks",
+        getTaskSelectionPath(
+          routeTaskId,
+        ),
       );
     }
 
@@ -258,7 +402,9 @@ export default function ProtectedStudyRoute({
       "questionnaire_complete"
     ) {
       return redirect(
-        "/tasks",
+        getTaskSelectionPath(
+          routeTaskId,
+        ),
       );
     }
 
@@ -267,7 +413,7 @@ export default function ProtectedStudyRoute({
       "active"
     ) {
       return redirect(
-        `/task/${routeTrialNumber}`,
+        `/task/${routeTaskId}/${routeTrialNumber}`,
       );
     }
 
@@ -276,26 +422,28 @@ export default function ProtectedStudyRoute({
       "submitted"
     ) {
       return redirect(
-        "/tasks",
+        getTaskSelectionPath(
+          routeTaskId,
+        ),
       );
     }
 
-    if (
-      openTrial &&
-      openTrial.trialNumber !==
-        routeTrialNumber
-    ) {
-      if (
-        openTrial.status ===
-        "submitted"
-      ) {
-        return redirect(
-          `/trial-questionnaire/${openTrial.trialNumber}`,
-        );
-      }
+    const openTrialIsDifferent =
+      Boolean(
+        openTrial,
+      ) &&
+      (
+        openTrialTaskId !==
+          routeTaskId ||
+        openTrial?.trialNumber !==
+          routeTrialNumber
+      );
 
+    if (
+      openTrialIsDifferent
+    ) {
       return redirect(
-        `/task/${openTrial.trialNumber}`,
+        getOpenTrialPath(),
       );
     }
 
@@ -309,26 +457,8 @@ export default function ProtectedStudyRoute({
     if (
       !allTrialsComplete
     ) {
-      if (
-        openTrial?.status ===
-        "submitted"
-      ) {
-        return redirect(
-          `/trial-questionnaire/${openTrial.trialNumber}`,
-        );
-      }
-
-      if (
-        openTrial?.status ===
-        "active"
-      ) {
-        return redirect(
-          `/task/${openTrial.trialNumber}`,
-        );
-      }
-
       return redirect(
-        "/tasks",
+        getOpenTrialPath(),
       );
     }
 
@@ -343,19 +473,13 @@ export default function ProtectedStudyRoute({
       !allTrialsComplete
     ) {
       return redirect(
-        "/tasks",
+        getOpenTrialPath(),
       );
     }
 
-    if (
-      !postExperimentCompleted
-    ) {
-      return redirect(
-        "/post-experiment",
-      );
-    }
-
-    return renderRoute();
+    return redirect(
+      "/post-experiment",
+    );
   }
 
   return redirect(

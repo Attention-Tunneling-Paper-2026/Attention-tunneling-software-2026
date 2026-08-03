@@ -1,7 +1,12 @@
 import { create } from "zustand";
 
 import {
-  SYMPOSIUM_TASK_VERSION,
+  getStudyTaskDefinition,
+  isSupportedStudyTaskId,
+} from "../data/symposium";
+
+import type {
+  SupportedStudyTaskId,
 } from "../data/symposium";
 
 import type {
@@ -20,15 +25,24 @@ import type {
   ConcretizationLevel,
   ConditionOrder,
   StudyTrialNumber,
-  StudyTrialOrder,
 } from "../types/scheduler";
 
 type ConditionOrderValue = ConditionOrder | number;
+type TrialMetadataKey = `${SupportedStudyTaskId}:${StudyTrialNumber}`;
+
+const TASK_ORDER: Record<SupportedStudyTaskId, number> = {
+  symposium: 1,
+  delivery: 2,
+  clinic: 3,
+};
+
+const TRIALS_PER_TASK = 3;
 
 interface StartTrialInput {
+  taskId?: SupportedStudyTaskId;
   trialId?: string;
   trialNumber: StudyTrialNumber;
-  trialOrder?: StudyTrialOrder | number;
+  trialOrder?: number;
   conditionOrder?: ConditionOrderValue;
   isFirstTrial?: boolean;
   probeExposureNumber?: number;
@@ -40,15 +54,21 @@ interface ResetEventLogInput {
   participantToken?: string;
   sessionId?: string;
   conditionOrder?: ConditionOrderValue;
+  taskId?: SupportedStudyTaskId;
 }
 
 interface TrialEventMetadata {
+  taskId: SupportedStudyTaskId;
   trialId: string;
+  trialNumber: StudyTrialNumber;
   trialOrder: number;
   conditionOrder: ConditionOrderValue;
   isFirstTrial: boolean;
   probeExposureNumber: number;
   probeNaive: boolean;
+  outerTaskNumber: number;
+  innerTaskNumber: number;
+  globalTrialNumber: number;
   startedAt: number;
 }
 
@@ -57,6 +77,7 @@ interface EventLogStore {
   participantId: string;
   participantToken: string;
 
+  taskId: SupportedStudyTaskId;
   trialId: string;
   trialNumber: StudyTrialNumber;
   trialOrder: number;
@@ -70,7 +91,7 @@ interface EventLogStore {
   sessionStartedAt: number;
   trialStartedAt: number;
   trialMetadata: Partial<
-    Record<StudyTrialNumber, TrialEventMetadata>
+    Record<TrialMetadataKey, TrialEventMetadata>
   >;
 
   events: StudyEvent[];
@@ -89,6 +110,7 @@ interface EventLogStore {
 
   getEventsForTrial: (
     trialNumber: StudyTrialNumber,
+    taskId?: SupportedStudyTaskId,
   ) => StudyEvent[];
 
   /*
@@ -104,16 +126,20 @@ interface EventLogStore {
 
   exportEvents: (
     trialNumber?: StudyTrialNumber,
+    taskId?: SupportedStudyTaskId,
   ) => string;
 
   downloadEvents: (
     trialNumber?: StudyTrialNumber,
+    taskId?: SupportedStudyTaskId,
   ) => void;
 }
 
 const APP_VERSION =
-  "attention-tunneling-software-v2";
+  "attention-tunneling-software-v3";
 const DEFAULT_PARTICIPANT_ID = "P001";
+const DEFAULT_TASK_ID: SupportedStudyTaskId = "symposium";
+const DEFAULT_TRIAL_NUMBER: StudyTrialNumber = 1;
 
 function createId(): string {
   if (
@@ -156,6 +182,30 @@ function normalizePositiveInteger(
   return fallback;
 }
 
+function normalizeTrialOrderForTask(
+  value: number | undefined,
+  taskId: SupportedStudyTaskId,
+  fallback: number,
+): number {
+  const normalized = normalizePositiveInteger(
+    value,
+    fallback,
+  );
+
+  if (
+    taskId !== "symposium" &&
+    normalized <= TRIALS_PER_TASK
+  ) {
+    return (
+      (getOuterTaskNumber(taskId) - 1) *
+        TRIALS_PER_TASK +
+      normalized
+    );
+  }
+
+  return normalized;
+}
+
 function normalizeConditionOrder(
   value: ConditionOrderValue | undefined,
   fallback: ConditionOrderValue,
@@ -175,6 +225,30 @@ function normalizeConditionOrder(
   return fallback;
 }
 
+function getTrialMetadataKey(
+  taskId: SupportedStudyTaskId,
+  trialNumber: StudyTrialNumber,
+): TrialMetadataKey {
+  return `${taskId}:${trialNumber}`;
+}
+
+function getOuterTaskNumber(
+  taskId: SupportedStudyTaskId,
+): number {
+  return TASK_ORDER[taskId];
+}
+
+function getGlobalTrialNumber(
+  taskId: SupportedStudyTaskId,
+  trialNumber: StudyTrialNumber,
+): number {
+  return (
+    (getOuterTaskNumber(taskId) - 1) *
+      TRIALS_PER_TASK +
+    trialNumber
+  );
+}
+
 function getOrderFromConditionOrder(
   trialNumber: StudyTrialNumber,
   conditionOrder: ConditionOrderValue,
@@ -189,51 +263,232 @@ function getOrderFromConditionOrder(
   return index >= 0 ? index + 1 : undefined;
 }
 
+function getGlobalOrderFromConditionOrder(
+  taskId: SupportedStudyTaskId,
+  trialNumber: StudyTrialNumber,
+  conditionOrder: ConditionOrderValue,
+): number | undefined {
+  const innerOrder = getOrderFromConditionOrder(
+    trialNumber,
+    conditionOrder,
+  );
+
+  if (!innerOrder) {
+    return undefined;
+  }
+
+  return (
+    (getOuterTaskNumber(taskId) - 1) *
+      TRIALS_PER_TASK +
+    innerOrder
+  );
+}
+
+function getCompositeTrialId(
+  taskId: SupportedStudyTaskId,
+  trialNumber: StudyTrialNumber,
+): string {
+  return `${taskId}-${getConditionForTrial(trialNumber)}`;
+}
+
+function isLegacyTrialId(
+  value: string,
+  taskId: SupportedStudyTaskId,
+  trialNumber: StudyTrialNumber,
+): boolean {
+  return (
+    value === `${taskId}-trial-${trialNumber}` ||
+    value === `symposium-trial-${trialNumber}`
+  );
+}
+
+function normalizeTrialId(
+  value: string | undefined,
+  taskId: SupportedStudyTaskId,
+  trialNumber: StudyTrialNumber,
+): string {
+  const normalizedValue = value?.trim();
+
+  if (
+    !normalizedValue ||
+    isLegacyTrialId(
+      normalizedValue,
+      taskId,
+      trialNumber,
+    )
+  ) {
+    return getCompositeTrialId(taskId, trialNumber);
+  }
+
+  return normalizedValue;
+}
+
+function inferTaskIdFromTrialId(
+  trialId: unknown,
+): SupportedStudyTaskId | undefined {
+  if (typeof trialId !== "string") {
+    return undefined;
+  }
+
+  const prefix = trialId.split(/[-:]/, 1)[0];
+
+  return isSupportedStudyTaskId(prefix)
+    ? prefix
+    : undefined;
+}
+
+function resolveTaskId(
+  ...values: unknown[]
+): SupportedStudyTaskId {
+  for (const value of values) {
+    if (isSupportedStudyTaskId(value)) {
+      return value;
+    }
+
+    const inferredFromTrialId =
+      inferTaskIdFromTrialId(value);
+
+    if (inferredFromTrialId) {
+      return inferredFromTrialId;
+    }
+  }
+
+  return DEFAULT_TASK_ID;
+}
+
+function readInputTaskId(
+  input: CreateStudyEventInput,
+): unknown {
+  return (
+    input as unknown as {
+      taskId?: unknown;
+    }
+  ).taskId;
+}
+
+function readInputMetadataTaskId(
+  input: CreateStudyEventInput,
+): unknown {
+  const metadata = (
+    input as unknown as {
+      metadata?: unknown;
+    }
+  ).metadata;
+
+  if (
+    typeof metadata !== "object" ||
+    metadata === null ||
+    Array.isArray(metadata)
+  ) {
+    return undefined;
+  }
+
+  return (
+    metadata as Record<string, unknown>
+  ).taskId;
+}
+
+function readInputTrialId(
+  input: CreateStudyEventInput,
+): unknown {
+  return (
+    input as unknown as {
+      trialId?: unknown;
+    }
+  ).trialId;
+}
+
+function readInputParticipantToken(
+  input: CreateStudyEventInput,
+): string | undefined {
+  const participantToken = (
+    input as unknown as {
+      participantToken?: unknown;
+    }
+  ).participantToken;
+
+  return typeof participantToken === "string"
+    ? participantToken
+    : undefined;
+}
+
+function getEventTaskId(
+  event: StudyEvent,
+): SupportedStudyTaskId {
+  const metadata =
+    event.metadata &&
+    typeof event.metadata === "object" &&
+    !Array.isArray(event.metadata)
+      ? (event.metadata as Record<string, unknown>)
+      : {};
+
+  return resolveTaskId(
+    event.taskId,
+    metadata.taskId,
+    event.trialId,
+  );
+}
+
 function cloneOptionalArray<T>(
   value: T[] | null | undefined,
 ): T[] | null | undefined {
   return Array.isArray(value) ? [...value] : value;
 }
 
-function getStartedTrialNumbers(
+function isTrialStartEvent(
+  event: StudyEvent,
+): boolean {
+  return (
+    event.eventType === "trial_start" ||
+    event.eventType ===
+      "assistant_analysis_requested" ||
+    event.eventType ===
+      "assistant_analysis_started" ||
+    event.eventType ===
+      "assistant_recommendation_shown" ||
+    event.eventType === "ai_message_shown"
+  );
+}
+
+function getStartedTrialKeys(
   events: StudyEvent[],
   sessionId: string,
-): Set<StudyTrialNumber> {
-  const startedTrialNumbers =
-    new Set<StudyTrialNumber>();
+): Set<TrialMetadataKey> {
+  const startedTrialKeys =
+    new Set<TrialMetadataKey>();
 
   for (const event of events) {
-    if (event.sessionId !== sessionId) {
+    if (
+      event.sessionId !== sessionId ||
+      !isTrialStartEvent(event)
+    ) {
       continue;
     }
 
-    if (
-      event.eventType === "task_selected" ||
-      event.eventType === "trial_start" ||
-      event.eventType ===
-        "assistant_analysis_requested" ||
-      event.eventType ===
-        "assistant_analysis_started" ||
-      event.eventType ===
-        "assistant_recommendation_shown" ||
-      event.eventType === "ai_message_shown"
-    ) {
-      startedTrialNumbers.add(event.trialNumber);
-    }
+    const taskId = getEventTaskId(event);
+
+    startedTrialKeys.add(
+      getTrialMetadataKey(
+        taskId,
+        event.trialNumber,
+      ),
+    );
   }
 
-  return startedTrialNumbers;
+  return startedTrialKeys;
 }
 
 function inferTrialOrder(
   events: StudyEvent[],
   sessionId: string,
+  taskId: SupportedStudyTaskId,
   trialNumber: StudyTrialNumber,
   conditionOrder: ConditionOrderValue,
 ): number {
   const existingTrialEvent = events.find(
     (event) =>
       event.sessionId === sessionId &&
+      getEventTaskId(event) === taskId &&
       event.trialNumber === trialNumber &&
       event.trialOrder > 0,
   );
@@ -243,7 +498,8 @@ function inferTrialOrder(
   }
 
   const orderFromCondition =
-    getOrderFromConditionOrder(
+    getGlobalOrderFromConditionOrder(
+      taskId,
       trialNumber,
       conditionOrder,
     );
@@ -252,40 +508,63 @@ function inferTrialOrder(
     return orderFromCondition;
   }
 
-  const startedTrialNumbers =
-    getStartedTrialNumbers(events, sessionId);
+  const startedTrialKeys = getStartedTrialKeys(
+    events,
+    sessionId,
+  );
 
-  if (startedTrialNumbers.has(trialNumber)) {
-    return Math.max(1, startedTrialNumbers.size);
+  const trialKey = getTrialMetadataKey(
+    taskId,
+    trialNumber,
+  );
+
+  if (startedTrialKeys.has(trialKey)) {
+    return Math.max(1, startedTrialKeys.size);
   }
 
-  return startedTrialNumbers.size + 1;
+  return startedTrialKeys.size + 1;
 }
 
 function getDefaultTrialMetadata(
+  taskId: SupportedStudyTaskId,
   trialNumber: StudyTrialNumber,
   conditionOrder: ConditionOrderValue =
     DEFAULT_CONDITION_ORDER,
   trialOrder?: number,
-): Omit<TrialEventMetadata, "trialId" | "startedAt"> {
+): Omit<
+  TrialEventMetadata,
+  "trialId" | "startedAt"
+> {
+  const globalTrialNumber = getGlobalTrialNumber(
+    taskId,
+    trialNumber,
+  );
+
   const orderFromCondition =
-    getOrderFromConditionOrder(
+    getGlobalOrderFromConditionOrder(
+      taskId,
       trialNumber,
       conditionOrder,
     );
 
   const normalizedTrialOrder =
-    normalizePositiveInteger(
+    normalizeTrialOrderForTask(
       trialOrder,
-      orderFromCondition ?? trialNumber,
+      taskId,
+      orderFromCondition ?? globalTrialNumber,
     );
 
   return {
+    taskId,
+    trialNumber,
     trialOrder: normalizedTrialOrder,
     conditionOrder,
     isFirstTrial: normalizedTrialOrder === 1,
     probeExposureNumber: normalizedTrialOrder,
     probeNaive: normalizedTrialOrder === 1,
+    outerTaskNumber: getOuterTaskNumber(taskId),
+    innerTaskNumber: trialNumber,
+    globalTrialNumber,
   };
 }
 
@@ -303,11 +582,13 @@ function getSessionEventIndex(
 function trialHasProbeStarted(
   events: StudyEvent[],
   sessionId: string,
+  taskId: SupportedStudyTaskId,
   trialNumber: StudyTrialNumber,
 ): boolean {
   return events.some(
     (event) =>
       event.sessionId === sessionId &&
+      getEventTaskId(event) === taskId &&
       event.trialNumber === trialNumber &&
       event.eventType === "probe_shown",
   );
@@ -317,6 +598,7 @@ function inferPhase(
   input: CreateStudyEventInput,
   events: StudyEvent[],
   sessionId: string,
+  taskId: SupportedStudyTaskId,
   trialNumber: StudyTrialNumber,
 ): StudyPhase {
   if (input.phase) {
@@ -377,6 +659,7 @@ function inferPhase(
       return trialHasProbeStarted(
         events,
         sessionId,
+        taskId,
         trialNumber,
       )
         ? "post_probe"
@@ -429,17 +712,29 @@ function downloadTextFile(
 function createInitialState(
   input?: ResetEventLogInput,
 ) {
-  const trialNumber: StudyTrialNumber = 1;
+  const taskId = resolveTaskId(
+    input?.taskId,
+    DEFAULT_TASK_ID,
+  );
+  const trialNumber = DEFAULT_TRIAL_NUMBER;
   const conditionOrder = normalizeConditionOrder(
     input?.conditionOrder,
     DEFAULT_CONDITION_ORDER,
   );
   const sessionStartedAt = getCurrentTimeMs();
   const defaultMetadata = getDefaultTrialMetadata(
+    taskId,
     trialNumber,
     conditionOrder,
   );
-  const trialId = "symposium-trial-1";
+  const trialId = getCompositeTrialId(
+    taskId,
+    trialNumber,
+  );
+  const trialKey = getTrialMetadataKey(
+    taskId,
+    trialNumber,
+  );
 
   const participantValue =
     input?.participantToken?.trim() ||
@@ -453,6 +748,7 @@ function createInitialState(
     sessionId: sessionValue,
     participantId: participantValue,
     participantToken: participantValue,
+    taskId,
     trialId,
     trialNumber,
     trialOrder: defaultMetadata.trialOrder,
@@ -465,13 +761,13 @@ function createInitialState(
     sessionStartedAt,
     trialStartedAt: sessionStartedAt,
     trialMetadata: {
-      [trialNumber]: {
+      [trialKey]: {
         trialId,
         ...defaultMetadata,
         startedAt: sessionStartedAt,
       },
     } as Partial<
-      Record<StudyTrialNumber, TrialEventMetadata>
+      Record<TrialMetadataKey, TrialEventMetadata>
     >,
     events: [] as StudyEvent[],
   };
@@ -526,9 +822,16 @@ export const useEventLogStore =
       const trialOrder = inferTrialOrder(
         state.events,
         state.sessionId,
+        state.taskId,
         state.trialNumber,
         normalized,
       );
+      const trialKey = getTrialMetadataKey(
+        state.taskId,
+        state.trialNumber,
+      );
+      const existingMetadata =
+        state.trialMetadata[trialKey];
 
       set({
         conditionOrder: normalized,
@@ -536,21 +839,41 @@ export const useEventLogStore =
         isFirstTrial: trialOrder === 1,
         probeExposureNumber: trialOrder,
         probeNaive: trialOrder === 1,
+        trialMetadata: existingMetadata
+          ? {
+              ...state.trialMetadata,
+              [trialKey]: {
+                ...existingMetadata,
+                conditionOrder: normalized,
+                trialOrder,
+                isFirstTrial: trialOrder === 1,
+                probeExposureNumber: trialOrder,
+                probeNaive: trialOrder === 1,
+              },
+            }
+          : state.trialMetadata,
       });
     },
 
     startTrial: ({
+      taskId: requestedTaskId,
       trialId,
       trialNumber,
       trialOrder,
       conditionOrder,
-      isFirstTrial,
-      probeExposureNumber,
-      probeNaive,
     }) => {
       const state = get();
+      const taskId = resolveTaskId(
+        requestedTaskId,
+        trialId,
+        state.taskId,
+      );
+      const trialKey = getTrialMetadataKey(
+        taskId,
+        trialNumber,
+      );
       const existingMetadata =
-        state.trialMetadata[trialNumber];
+        state.trialMetadata[trialKey];
       const resolvedConditionOrder =
         normalizeConditionOrder(
           conditionOrder,
@@ -560,17 +883,20 @@ export const useEventLogStore =
       const inferredOrder = inferTrialOrder(
         state.events,
         state.sessionId,
+        taskId,
         trialNumber,
         resolvedConditionOrder,
       );
       const normalizedTrialOrder =
-        normalizePositiveInteger(
+        normalizeTrialOrderForTask(
           trialOrder,
+          taskId,
           existingMetadata?.trialOrder ??
             inferredOrder,
         );
       const defaultMetadata =
         getDefaultTrialMetadata(
+          taskId,
           trialNumber,
           resolvedConditionOrder,
           normalizedTrialOrder,
@@ -578,35 +904,26 @@ export const useEventLogStore =
       const resolvedStartedAt =
         existingMetadata?.startedAt ??
         getCurrentTimeMs();
-      const resolvedTrialId =
-        trialId ??
-        existingMetadata?.trialId ??
-        `symposium-trial-${trialNumber}`;
+      const resolvedTrialId = normalizeTrialId(
+        trialId ?? existingMetadata?.trialId,
+        taskId,
+        trialNumber,
+      );
 
       const resolvedMetadata: TrialEventMetadata = {
+        ...defaultMetadata,
         trialId: resolvedTrialId,
-        trialOrder: normalizedTrialOrder,
-        conditionOrder: resolvedConditionOrder,
         isFirstTrial:
-          isFirstTrial ??
-          existingMetadata?.isFirstTrial ??
-          defaultMetadata.isFirstTrial,
+          normalizedTrialOrder === 1,
         probeExposureNumber:
-          normalizePositiveInteger(
-            probeExposureNumber,
-            existingMetadata
-              ?.probeExposureNumber ??
-              defaultMetadata
-                .probeExposureNumber,
-          ),
+          normalizedTrialOrder,
         probeNaive:
-          probeNaive ??
-          existingMetadata?.probeNaive ??
-          defaultMetadata.probeNaive,
+          normalizedTrialOrder === 1,
         startedAt: resolvedStartedAt,
       };
 
       set({
+        taskId,
         trialId: resolvedMetadata.trialId,
         trialNumber,
         trialOrder: resolvedMetadata.trialOrder,
@@ -621,7 +938,7 @@ export const useEventLogStore =
         trialStartedAt: resolvedMetadata.startedAt,
         trialMetadata: {
           ...state.trialMetadata,
-          [trialNumber]: resolvedMetadata,
+          [trialKey]: resolvedMetadata,
         },
       });
     },
@@ -630,11 +947,21 @@ export const useEventLogStore =
       const state = get();
       const trialNumber =
         input.trialNumber ?? state.trialNumber;
+      const taskId = resolveTaskId(
+        readInputTaskId(input),
+        readInputMetadataTaskId(input),
+        readInputTrialId(input),
+        state.taskId,
+      );
+      const trialKey = getTrialMetadataKey(
+        taskId,
+        trialNumber,
+      );
       const condition =
         input.condition ??
         getConditionForTrial(trialNumber);
       const storedMetadata =
-        state.trialMetadata[trialNumber];
+        state.trialMetadata[trialKey];
       const conditionOrder =
         normalizeConditionOrder(
           input.conditionOrder,
@@ -644,44 +971,33 @@ export const useEventLogStore =
       const inferredOrder = inferTrialOrder(
         state.events,
         state.sessionId,
+        taskId,
         trialNumber,
         conditionOrder,
       );
       const normalizedTrialOrder =
-        normalizePositiveInteger(
+        normalizeTrialOrderForTask(
           input.trialOrder,
+          taskId,
           storedMetadata?.trialOrder ??
-            (trialNumber === state.trialNumber
+            (taskId === state.taskId &&
+            trialNumber === state.trialNumber
               ? state.trialOrder
               : inferredOrder),
         );
       const defaultMetadata =
         getDefaultTrialMetadata(
+          taskId,
           trialNumber,
           conditionOrder,
           normalizedTrialOrder,
         );
       const isFirstTrial =
-        input.isFirstTrial ??
-        storedMetadata?.isFirstTrial ??
-        (trialNumber === state.trialNumber
-          ? state.isFirstTrial
-          : defaultMetadata.isFirstTrial);
+        normalizedTrialOrder === 1;
       const probeExposureNumber =
-        normalizePositiveInteger(
-          input.probeExposureNumber,
-          storedMetadata?.probeExposureNumber ??
-            (trialNumber === state.trialNumber
-              ? state.probeExposureNumber
-              : defaultMetadata
-                  .probeExposureNumber),
-        );
+        normalizedTrialOrder;
       const probeNaive =
-        input.probeNaive ??
-        storedMetadata?.probeNaive ??
-        (trialNumber === state.trialNumber
-          ? state.probeNaive
-          : defaultMetadata.probeNaive);
+        normalizedTrialOrder === 1;
       const eventIndex =
         input.eventIndex ??
         getSessionEventIndex(
@@ -692,36 +1008,51 @@ export const useEventLogStore =
         input,
         state.events,
         state.sessionId,
+        taskId,
         trialNumber,
       );
       const currentTime = getCurrentTimeMs();
       const startedAt =
         storedMetadata?.startedAt ??
-        (trialNumber === state.trialNumber
+        (taskId === state.taskId &&
+        trialNumber === state.trialNumber
           ? state.trialStartedAt
           : currentTime);
-      const resolvedTrialId =
+      const resolvedTrialId = normalizeTrialId(
         storedMetadata?.trialId ??
-        (trialNumber === state.trialNumber
-          ? state.trialId
-          : `symposium-trial-${trialNumber}`);
+          (taskId === state.taskId &&
+          trialNumber === state.trialNumber
+            ? state.trialId
+            : undefined),
+        taskId,
+        trialNumber,
+      );
+      const taskDefinition =
+        getStudyTaskDefinition(taskId);
+      const outerTaskNumber =
+        getOuterTaskNumber(taskId);
+      const globalTrialNumber =
+        getGlobalTrialNumber(
+          taskId,
+          trialNumber,
+        );
 
-      const event: StudyEvent = {
+      const event = {
         ...input,
         eventId: createId(),
         eventIndex,
         participantId: state.participantId,
         participantToken:
-          input.participantToken ??
+          readInputParticipantToken(input) ??
           state.participantToken,
         sessionId: state.sessionId,
         trialId: resolvedTrialId,
         trialNumber,
         trialOrder: normalizedTrialOrder,
         trialIndex:
-          input.trialIndex ?? normalizedTrialOrder,
-        taskId: input.taskId ?? "symposium",
-        skin: input.skin ?? "symposium",
+          input.trialIndex ?? globalTrialNumber,
+        taskId,
+        skin: taskId,
         condition,
         conditionOrder,
         isFirstTrial,
@@ -729,7 +1060,7 @@ export const useEventLogStore =
         probeNaive,
         taskInstanceVersion:
           input.taskInstanceVersion ??
-          SYMPOSIUM_TASK_VERSION,
+          taskDefinition.taskVersion,
         appVersion:
           input.appVersion ?? APP_VERSION,
         eventType: input.eventType,
@@ -761,25 +1092,32 @@ export const useEventLogStore =
           cloneOptionalArray(
             input.unresolvedDemoTalkIdsAfter,
           ),
-        metadata: input.metadata
-          ? { ...input.metadata }
-          : undefined,
+        metadata: {
+          ...(input.metadata
+            ? { ...input.metadata }
+            : {}),
+          taskId,
+          compositeTrialId: resolvedTrialId,
+          outerTaskNumber,
+          innerTaskNumber: trialNumber,
+          globalTrialNumber,
+        },
         payload: input.payload
           ? { ...input.payload }
           : undefined,
-      };
+      } as unknown as StudyEvent;
 
       set((currentState) => ({
         events: [...currentState.events, event],
         trialMetadata:
-          currentState.trialMetadata[trialNumber]
+          currentState.trialMetadata[trialKey]
             ? currentState.trialMetadata
             : {
                 ...currentState.trialMetadata,
-                [trialNumber]: {
+                [trialKey]: {
+                  ...defaultMetadata,
                   trialId: resolvedTrialId,
-                  trialOrder:
-                    normalizedTrialOrder,
+                  trialOrder: normalizedTrialOrder,
                   conditionOrder,
                   isFirstTrial,
                   probeExposureNumber,
@@ -793,13 +1131,21 @@ export const useEventLogStore =
       return event;
     },
 
-    getEventsForTrial: (trialNumber) => {
+    getEventsForTrial: (
+      trialNumber,
+      requestedTaskId,
+    ) => {
       const state = get();
+      const taskId = resolveTaskId(
+        requestedTaskId,
+        state.taskId,
+      );
 
       return state.events
         .filter(
           (event) =>
             event.sessionId === state.sessionId &&
+            getEventTaskId(event) === taskId &&
             event.trialNumber === trialNumber,
         )
         .sort(
@@ -821,7 +1167,12 @@ export const useEventLogStore =
     clearAllEvents: () => {
       const state = get();
       const startedAt = getCurrentTimeMs();
+      const trialKey = getTrialMetadataKey(
+        state.taskId,
+        state.trialNumber,
+      );
       const metadata = getDefaultTrialMetadata(
+        state.taskId,
         state.trialNumber,
         state.conditionOrder,
         state.trialOrder,
@@ -832,7 +1183,7 @@ export const useEventLogStore =
         sessionStartedAt: startedAt,
         trialStartedAt: startedAt,
         trialMetadata: {
-          [state.trialNumber]: {
+          [trialKey]: {
             trialId: state.trialId,
             ...metadata,
             startedAt,
@@ -845,12 +1196,22 @@ export const useEventLogStore =
       set(createInitialState(input));
     },
 
-    exportEvents: (trialNumber) => {
+    exportEvents: (
+      trialNumber,
+      requestedTaskId,
+    ) => {
       const state = get();
+      const taskId = requestedTaskId
+        ? resolveTaskId(requestedTaskId)
+        : trialNumber !== undefined
+          ? state.taskId
+          : undefined;
       const events = state.events
         .filter(
           (event) =>
             event.sessionId === state.sessionId &&
+            (taskId === undefined ||
+              getEventTaskId(event) === taskId) &&
             (trialNumber === undefined ||
               event.trialNumber === trialNumber),
         )
@@ -868,7 +1229,27 @@ export const useEventLogStore =
             state.participantToken,
           sessionId: state.sessionId,
           conditionOrder: state.conditionOrder,
+          taskId: taskId ?? null,
           trialNumber: trialNumber ?? null,
+          compositeTrialId:
+            taskId && trialNumber
+              ? getCompositeTrialId(
+                  taskId,
+                  trialNumber,
+                )
+              : null,
+          outerTaskNumber: taskId
+            ? getOuterTaskNumber(taskId)
+            : null,
+          innerTaskNumber:
+            trialNumber ?? null,
+          globalTrialNumber:
+            taskId && trialNumber
+              ? getGlobalTrialNumber(
+                  taskId,
+                  trialNumber,
+                )
+              : null,
           exportedAtIso: new Date().toISOString(),
           eventCount: events.length,
           events,
@@ -878,21 +1259,34 @@ export const useEventLogStore =
       );
     },
 
-    downloadEvents: (trialNumber) => {
+    downloadEvents: (
+      trialNumber,
+      requestedTaskId,
+    ) => {
       const state = get();
       const safeParticipant = sanitizeFilePart(
         state.participantToken,
       );
+      const taskId = requestedTaskId
+        ? resolveTaskId(requestedTaskId)
+        : trialNumber !== undefined
+          ? state.taskId
+          : undefined;
       const fileName =
         trialNumber === undefined
-          ? `${safeParticipant}_study_events.json`
-          : `${safeParticipant}_T${trialNumber}_${getConditionForTrial(
+          ? taskId
+            ? `${safeParticipant}_${taskId}_events.json`
+            : `${safeParticipant}_study_events.json`
+          : `${safeParticipant}_${taskId ?? state.taskId}_T${trialNumber}_${getConditionForTrial(
               trialNumber,
             )}_events.json`;
 
       downloadTextFile(
         fileName,
-        state.exportEvents(trialNumber),
+        state.exportEvents(
+          trialNumber,
+          taskId,
+        ),
         "application/json;charset=utf-8",
       );
     },

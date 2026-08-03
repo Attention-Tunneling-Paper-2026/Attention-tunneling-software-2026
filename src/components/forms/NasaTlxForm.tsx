@@ -44,8 +44,8 @@ interface NasaTlxScale {
   highLabel: string;
 }
 
-const nasaTlxScales:
-  NasaTlxScale[] = [
+const NASA_TLX_SCALES:
+  readonly NasaTlxScale[] = [
     {
       dimension:
         "mentalDemand",
@@ -203,6 +203,7 @@ export default function NasaTlxForm({
 
   const formClassName = [
     "nasa-tlx-form",
+    "questionnaire-rating-form",
 
     disabled
       ? "nasa-tlx-form-disabled"
@@ -230,8 +231,8 @@ export default function NasaTlxForm({
         NASA Task Load Index ratings
       </legend>
 
-      <div className="nasa-scale-list">
-        {nasaTlxScales.map(
+      <div className="nasa-scale-list questionnaire-rating-list">
+        {NASA_TLX_SCALES.map(
           ({
             dimension,
             title,
@@ -242,11 +243,17 @@ export default function NasaTlxForm({
             const groupId =
               `${generatedId}-${dimension}`;
 
+            const titleId =
+              `${groupId}-title`;
+
             const questionId =
               `${groupId}-question`;
 
             const labelsId =
               `${groupId}-labels`;
+
+            const statusId =
+              `${groupId}-status`;
 
             const selectedValue =
               normalizeRating(
@@ -260,37 +267,50 @@ export default function NasaTlxForm({
                 key={
                   dimension
                 }
-                className="nasa-scale-card"
-                aria-describedby={`${questionId} ${labelsId}`}
+                className="nasa-scale-card questionnaire-rating-card"
+                aria-labelledby={
+                  titleId
+                }
+                aria-describedby={`${questionId} ${labelsId} ${statusId}`}
               >
-                <legend className="nasa-scale-title">
-                  {title}
+                <legend className="nasa-scale-title questionnaire-rating-title">
+                  <span
+                    id={
+                      titleId
+                    }
+                  >
+                    {title}
+                  </span>
                 </legend>
 
-                <div className="nasa-scale-header">
+                <div className="nasa-scale-header questionnaire-rating-header">
                   <p
                     id={
                       questionId
                     }
+                    className="questionnaire-rating-question"
                   >
                     {question}
                   </p>
 
                   <output
-                    className="nasa-scale-value"
+                    id={
+                      statusId
+                    }
+                    className="nasa-scale-value questionnaire-rating-value"
                     aria-live="polite"
                   >
                     {selectedValue ===
                     null
                       ? "Not selected"
-                      : `${selectedValue}`}
+                      : `${selectedValue} of 7`}
                   </output>
                 </div>
 
                 <div
-                  className="nasa-likert-scale"
+                  className="nasa-likert-scale questionnaire-rating-options questionnaire-rating-options-eight"
                   role="radiogroup"
-                  aria-label={`${title} rating`}
+                  aria-label={`${title} rating from 0 to 7`}
                 >
                   {NASA_TLX_RATINGS.map(
                     (
@@ -310,9 +330,10 @@ export default function NasaTlxForm({
                           }
                           className={[
                             "nasa-likert-option",
+                            "questionnaire-rating-option",
 
                             selected
-                              ? "nasa-likert-option-selected"
+                              ? "nasa-likert-option-selected questionnaire-rating-option-selected"
                               : "",
                           ]
                             .filter(
@@ -329,7 +350,7 @@ export default function NasaTlxForm({
                             id={
                               inputId
                             }
-                            className="nasa-likert-input"
+                            className="nasa-likert-input questionnaire-rating-input"
                             type="radio"
                             name={
                               groupId
@@ -344,21 +365,21 @@ export default function NasaTlxForm({
                               disabled
                             }
                             aria-label={`${title}: ${rating} out of 7`}
-                            onChange={() =>
+                            onChange={() => {
                               onChange(
                                 dimension,
                                 rating,
-                              )
-                            }
+                              );
+                            }}
                           />
 
                           <span
-                            className="nasa-likert-point"
+                            className="nasa-likert-point questionnaire-rating-point"
                             aria-hidden="true"
                           />
 
                           <span
-                            className="nasa-likert-number"
+                            className="nasa-likert-number questionnaire-rating-number"
                             aria-hidden="true"
                           >
                             {rating}
@@ -373,15 +394,26 @@ export default function NasaTlxForm({
                   id={
                     labelsId
                   }
-                  className="nasa-scale-labels"
-                  aria-hidden="true"
+                  className="nasa-scale-labels questionnaire-rating-labels"
                 >
                   <span>
-                    {lowLabel}
+                    <strong>
+                      0
+                    </strong>
+
+                    <small>
+                      {lowLabel}
+                    </small>
                   </span>
 
                   <span>
-                    {highLabel}
+                    <strong>
+                      7
+                    </strong>
+
+                    <small>
+                      {highLabel}
+                    </small>
                   </span>
                 </div>
               </fieldset>

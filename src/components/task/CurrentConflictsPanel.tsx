@@ -4,6 +4,10 @@ import {
 } from "lucide-react";
 
 import {
+  useParams,
+} from "react-router";
+
+import {
   getSpeakerDisplayLabel,
   getTalkById,
 } from "../../data/symposium";
@@ -16,28 +20,259 @@ import {
   useSchedulerStore,
 } from "../../store/schedulerStore";
 
-function getTalkTitle(
-  talkId: string,
-): string {
-  const talk = getTalkById(
-    talkId,
+import type {
+  Talk,
+} from "../../types/scheduler";
+
+type TaskDomainId =
+  | "symposium"
+  | "delivery"
+  | "clinic";
+
+interface CurrentConflictsPanelProps {
+  taskId?:
+    TaskDomainId;
+}
+
+interface ConflictPresentation {
+  actorSingular:
+    string;
+
+  columnLabel:
+    string;
+
+  clearTitle:
+    string;
+
+  conflictTitle:
+    string;
+
+  clearMessage:
+    string;
+}
+
+const CONFLICT_PRESENTATION: Record<
+  TaskDomainId,
+  ConflictPresentation
+> = {
+  symposium: {
+    actorSingular:
+      "speaker",
+
+    columnLabel:
+      "Slot",
+
+    clearTitle:
+      "No current speaker conflicts",
+
+    conflictTitle:
+      "Current speaker conflicts",
+
+    clearMessage:
+      "No speaker conflicts are currently present. Continue checking the projector requirement and room-capacity requirement before submitting the schedule.",
+  },
+
+  delivery: {
+    actorSingular:
+      "driver",
+
+    columnLabel:
+      "Window",
+
+    clearTitle:
+      "No current driver conflicts",
+
+    conflictTitle:
+      "Current driver conflicts",
+
+    clearMessage:
+      "No driver conflicts are currently present. Continue checking the refrigeration requirement and van-capacity requirement before submitting the dispatch plan.",
+  },
+
+  clinic: {
+    actorSingular:
+      "nurse",
+
+    columnLabel:
+      "Shift",
+
+    clearTitle:
+      "No current nurse conflicts",
+
+    conflictTitle:
+      "Current nurse conflicts",
+
+    clearMessage:
+      "No nurse conflicts are currently present. Continue checking the ICU-certification requirement and ward-capacity requirement before submitting the roster.",
+  },
+};
+
+const DELIVERY_TITLE_BY_ID: Readonly<
+  Record<string, string>
+> = {
+  N1: "Priority medical supplies",
+  N2: "Fresh produce delivery",
+  N3: "Temperature-sensitive vaccines",
+  N4: "University meal delivery",
+  H1: "Hospital laboratory samples",
+  H2: "Dairy order",
+  H3: "Business equipment shipment",
+  H4: "Old Town bakery order",
+  R1: "Airport hotel seafood order",
+  R2: "Pharmacy medication shipment",
+  R3: "Event-centre floral order",
+  R4: "South Complex office supplies",
+};
+
+const CLINIC_TITLE_BY_ID: Readonly<
+  Record<string, string>
+> = {
+  N1: "Emergency intake coverage",
+  N2: "Medication round",
+  N3: "Critical patient monitoring",
+  N4: "Discharge review",
+  H1: "Postoperative observation",
+  H2: "Wound-care round",
+  H3: "Patient assessment",
+  H4: "Evening handover",
+  R1: "Respiratory support",
+  R2: "ICU medication review",
+  R3: "Rapid-response coverage",
+  R4: "Rehabilitation assessment",
+};
+
+function isTaskDomainId(
+  value:
+    unknown,
+): value is TaskDomainId {
+  return (
+    value === "symposium" ||
+    value === "delivery" ||
+    value === "clinic"
   );
+}
+
+function getItemTitle(
+  talk:
+    Talk,
+  taskId:
+    TaskDomainId,
+): string {
+  switch (
+    taskId
+  ) {
+    case "delivery":
+      return (
+        DELIVERY_TITLE_BY_ID[
+          talk.id
+        ] ??
+        talk.title
+      );
+
+    case "clinic":
+      return (
+        CLINIC_TITLE_BY_ID[
+          talk.id
+        ] ??
+        talk.title
+      );
+
+    case "symposium":
+    default:
+      return talk.title;
+  }
+}
+
+function getItemLabel(
+  talkId:
+    string,
+  taskId:
+    TaskDomainId,
+): string {
+  const talk =
+    getTalkById(
+      talkId,
+    );
 
   return talk
-    ? `${talk.id} ${talk.title}`
+    ? `${talk.id} ${getItemTitle(talk, taskId)}`
     : talkId;
 }
 
-export default function CurrentConflictsPanel() {
-  const placements = useSchedulerStore(
-    (state) => state.placements,
-  );
+function getActorDisplayLabel(
+  actorId:
+    string,
+  taskId:
+    TaskDomainId,
+): string {
+  const baseLabel =
+    getSpeakerDisplayLabel(
+      actorId,
+    );
 
-  const conflicts = getSpeakerViolations(
-    placements,
-  );
+  if (
+    taskId === "symposium"
+  ) {
+    return baseLabel;
+  }
 
-  const allSpeakerConflictsResolved =
+  const normalizedName =
+    baseLabel.replace(
+      /^Dr\.?\s+/i,
+      "",
+    );
+
+  return taskId ===
+    "delivery"
+    ? `Driver ${normalizedName}`
+    : `Nurse ${normalizedName}`;
+}
+
+export default function CurrentConflictsPanel({
+  taskId,
+}: CurrentConflictsPanelProps) {
+  const {
+    taskId:
+      routeTaskId,
+  } = useParams<{
+    taskId?:
+      string;
+  }>();
+
+  const resolvedTaskId:
+    TaskDomainId =
+      isTaskDomainId(
+        taskId,
+      )
+        ? taskId
+        : isTaskDomainId(
+              routeTaskId,
+            )
+          ? routeTaskId
+          : "symposium";
+
+  const presentation =
+    CONFLICT_PRESENTATION[
+      resolvedTaskId
+    ];
+
+  const placements =
+    useSchedulerStore(
+      (state) =>
+        state.placements,
+    );
+
+  /*
+   * The shared constraint engine stores the responsible person in the
+   * speaker field. In the delivery and clinic task skins, the same field
+   * represents the assigned driver or nurse.
+   */
+  const conflicts =
+    getSpeakerViolations(
+      placements,
+    );
+
+  const allConflictsResolved =
     conflicts.length === 0;
 
   return (
@@ -45,7 +280,7 @@ export default function CurrentConflictsPanel() {
       className={[
         "current-conflicts-panel",
 
-        allSpeakerConflictsResolved
+        allConflictsResolved
           ? "current-conflicts-panel-clear"
           : "",
       ]
@@ -55,13 +290,20 @@ export default function CurrentConflictsPanel() {
       aria-live="polite"
       aria-atomic="true"
       aria-labelledby="current-conflicts-title"
+      data-task-id={
+        resolvedTaskId
+      }
+      data-conflict-resource={
+        presentation
+          .actorSingular
+      }
     >
       <div className="current-conflicts-header">
         <div
           id="current-conflicts-title"
           className="current-conflicts-title"
         >
-          {allSpeakerConflictsResolved ? (
+          {allConflictsResolved ? (
             <CheckCircle2
               size={19}
               aria-hidden="true"
@@ -74,9 +316,11 @@ export default function CurrentConflictsPanel() {
           )}
 
           <span>
-            {allSpeakerConflictsResolved
-              ? "No current speaker conflicts"
-              : "Current speaker conflicts"}
+            {allConflictsResolved
+              ? presentation
+                  .clearTitle
+              : presentation
+                  .conflictTitle}
           </span>
         </div>
 
@@ -88,7 +332,7 @@ export default function CurrentConflictsPanel() {
         </span>
       </div>
 
-      {allSpeakerConflictsResolved ? (
+      {allConflictsResolved ? (
         <div className="current-conflicts-list">
           <div className="current-conflict-item">
             <CheckCircle2
@@ -97,45 +341,61 @@ export default function CurrentConflictsPanel() {
             />
 
             <span>
-              The visible speaker conflicts are resolved.
-              Continue considering both scheduling
-              preferences before submitting the schedule.
+              {
+                presentation
+                  .clearMessage
+              }
             </span>
           </div>
         </div>
       ) : (
         <div className="current-conflicts-list">
-          {conflicts.map((conflict) => {
-            const talkLabels =
-              conflict.talkIds.map(
-                getTalkTitle,
-              );
+          {conflicts.map(
+            (conflict) => {
+              const itemLabels =
+                conflict.talkIds.map(
+                  (talkId) =>
+                    getItemLabel(
+                      talkId,
+                      resolvedTaskId,
+                    ),
+                );
 
-            return (
-              <div
-                key={[
-                  conflict.speaker,
-                  conflict.slot,
-                  ...conflict.talkIds,
-                ].join(":")}
-                className="current-conflict-item"
-              >
-                <AlertTriangle
-                  size={16}
-                  aria-hidden="true"
-                />
-
-                <span>
-                  {getSpeakerDisplayLabel(
+              return (
+                <div
+                  key={[
+                    resolvedTaskId,
                     conflict.speaker,
-                  )}{" "}
-                  is assigned to{" "}
-                  {talkLabels.join(" and ")}{" "}
-                  during Slot {conflict.slot}.
-                </span>
-              </div>
-            );
-          })}
+                    conflict.slot,
+                    ...conflict.talkIds,
+                  ].join(":")}
+                  className="current-conflict-item"
+                >
+                  <AlertTriangle
+                    size={16}
+                    aria-hidden="true"
+                  />
+
+                  <span>
+                    {getActorDisplayLabel(
+                      conflict.speaker,
+                      resolvedTaskId,
+                    )}{" "}
+                    is assigned to{" "}
+                    {itemLabels.join(
+                      " and ",
+                    )}{" "}
+                    during{" "}
+                    {
+                      presentation
+                        .columnLabel
+                    }{" "}
+                    {conflict.slot}.
+                  </span>
+                </div>
+              );
+            },
+          )}
         </div>
       )}
     </section>

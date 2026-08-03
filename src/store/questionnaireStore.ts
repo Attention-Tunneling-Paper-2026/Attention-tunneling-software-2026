@@ -74,6 +74,9 @@ interface QuestionnaireStore
   getTrialResponse: (
     trialNumber:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) =>
     | TrialQuestionnaireResponse
     | undefined;
@@ -90,6 +93,9 @@ interface QuestionnaireStore
         NasaTlxRating,
         null
       >,
+
+    taskId?:
+      StudyTaskId,
   ) => void;
 
   setExperienceRating: (
@@ -101,6 +107,9 @@ interface QuestionnaireStore
 
     value:
       LikertRating,
+
+    taskId?:
+      StudyTaskId,
   ) => void;
 
   setManipulationCheckValue: (
@@ -112,6 +121,9 @@ interface QuestionnaireStore
 
     value:
       LikertRating,
+
+    taskId?:
+      StudyTaskId,
   ) => void;
 
   setProbeRecallValue: <
@@ -125,11 +137,17 @@ interface QuestionnaireStore
 
     value:
       ProbeRecallResponses[Key],
+
+    taskId?:
+      StudyTaskId,
   ) => void;
 
   submitTrialQuestionnaire: (
     trialNumber:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) =>
     | TrialQuestionnaireResponse
     | undefined;
@@ -137,6 +155,9 @@ interface QuestionnaireStore
   markTrialQuestionnaireExported: (
     trialNumber:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) =>
     | TrialQuestionnaireResponse
     | undefined;
@@ -144,6 +165,9 @@ interface QuestionnaireStore
   isTrialQuestionnaireComplete: (
     trialNumber:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   areAllTrialQuestionnairesSubmitted:
@@ -194,6 +218,9 @@ interface QuestionnaireStore
   resetTrialResponse: (
     trialNumber:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => void;
 
   resetQuestionnaires:
@@ -203,8 +230,21 @@ interface QuestionnaireStore
     () => void;
 }
 
-const TOTAL_TRIALS =
+const TRIALS_PER_TASK =
   3;
+
+const TOTAL_TASKS =
+  3;
+
+const TOTAL_TRIALS =
+  TRIALS_PER_TASK *
+  TOTAL_TASKS;
+
+const STUDY_TASK_IDS = [
+  "symposium",
+  "delivery",
+  "clinic",
+] as const;
 
 const LEGACY_STORAGE_KEYS = [
   "attentionTunnelingQuestionnaires",
@@ -224,17 +264,131 @@ function removeLegacyPersistedState():
     const key of
     LEGACY_STORAGE_KEYS
   ) {
-    window.localStorage.removeItem(
-      key,
-    );
+    try {
+      window.localStorage.removeItem(
+        key,
+      );
 
-    window.sessionStorage.removeItem(
-      key,
-    );
+      window.sessionStorage.removeItem(
+        key,
+      );
+    } catch {
+      // Storage can be unavailable in private or restricted browser contexts.
+    }
   }
 }
 
 removeLegacyPersistedState();
+
+function normalizeTaskId(
+  value:
+    unknown,
+
+  fallback:
+    StudyTaskId =
+      "symposium",
+): StudyTaskId {
+  if (
+    value ===
+      "symposium" ||
+    value ===
+      "delivery" ||
+    value ===
+      "clinic"
+  ) {
+    return value as
+      StudyTaskId;
+  }
+
+  return fallback;
+}
+
+function getTaskOrder(
+  taskId:
+    StudyTaskId,
+): number {
+  switch (
+    taskId as string
+  ) {
+    case "delivery":
+      return 2;
+
+    case "clinic":
+      return 3;
+
+    case "symposium":
+    default:
+      return 1;
+  }
+}
+
+function getTrialResponseKey(
+  taskId:
+    StudyTaskId,
+
+  trialNumber:
+    StudyTrialNumber,
+): string {
+  return `${taskId}:${trialNumber}`;
+}
+
+function responseMatchesTrial(
+  response:
+    TrialQuestionnaireResponse,
+
+  trialNumber:
+    StudyTrialNumber,
+
+  taskId:
+    StudyTaskId,
+): boolean {
+  return (
+    response.trialNumber ===
+      trialNumber &&
+    normalizeTaskId(
+      response.taskId,
+    ) ===
+      taskId
+  );
+}
+
+function sortTrialResponses(
+  responses:
+    TrialQuestionnaireResponse[],
+): TrialQuestionnaireResponse[] {
+  return [
+    ...responses,
+  ].sort(
+    (
+      first,
+      second,
+    ) => {
+      const taskDifference =
+        getTaskOrder(
+          normalizeTaskId(
+            first.taskId,
+          ),
+        ) -
+        getTaskOrder(
+          normalizeTaskId(
+            second.taskId,
+          ),
+        );
+
+      if (
+        taskDifference !==
+        0
+      ) {
+        return taskDifference;
+      }
+
+      return (
+        first.trialNumber -
+        second.trialNumber
+      );
+    },
+  );
+}
 
 function normalizeNasaTlxRating(
   value:
@@ -386,8 +540,24 @@ function cloneTrialResponse(
   response:
     TrialQuestionnaireResponse,
 ): TrialQuestionnaireResponse {
+  const expectedCondition =
+    getConditionForTrial(
+      response.trialNumber,
+    );
+
   return {
     ...response,
+
+    taskId:
+      normalizeTaskId(
+        response.taskId,
+      ),
+
+    condition:
+      response.condition ===
+        expectedCondition
+        ? response.condition
+        : expectedCondition,
 
     nasaTlx:
       cloneNasaTlxRatings(
@@ -489,6 +659,94 @@ function finalResponseIsSubmitted(
   );
 }
 
+function findTrialResponse(
+  responses:
+    TrialQuestionnaireResponse[],
+
+  trialNumber:
+    StudyTrialNumber,
+
+  taskId:
+    StudyTaskId,
+): TrialQuestionnaireResponse | undefined {
+  return responses.find(
+    (response) =>
+      responseMatchesTrial(
+        response,
+        trialNumber,
+        taskId,
+      ),
+  );
+}
+
+function replaceTrialResponse(
+  responses:
+    TrialQuestionnaireResponse[],
+
+  replacement:
+    TrialQuestionnaireResponse,
+): TrialQuestionnaireResponse[] {
+  return sortTrialResponses(
+    responses.map(
+      (response) =>
+        responseMatchesTrial(
+          response,
+          replacement.trialNumber,
+          normalizeTaskId(
+            replacement.taskId,
+          ),
+        )
+          ? replacement
+          : response,
+    ),
+  );
+}
+
+function hasEveryExpectedSubmittedResponse(
+  responses:
+    TrialQuestionnaireResponse[],
+): boolean {
+  const submittedResponseKeys =
+    new Set(
+      responses
+        .filter(
+          responseIsSubmitted,
+        )
+        .map(
+          (response) =>
+            getTrialResponseKey(
+              normalizeTaskId(
+                response.taskId,
+              ),
+              response.trialNumber,
+            ),
+        ),
+    );
+
+  if (
+    submittedResponseKeys.size !==
+    TOTAL_TRIALS
+  ) {
+    return false;
+  }
+
+  return STUDY_TASK_IDS.every(
+    (taskId) =>
+      (
+        [
+          1,
+          2,
+          3,
+        ] as const
+      ).every(
+        (trialNumber) =>
+          submittedResponseKeys.has(
+            `${taskId}:${trialNumber}`,
+          ),
+      ),
+  );
+}
+
 export const useQuestionnaireStore =
   create<QuestionnaireStore>(
     (
@@ -506,16 +764,27 @@ export const useQuestionnaireStore =
             trialNumber,
           ),
       ) => {
+        const resolvedTaskId =
+          normalizeTaskId(
+            taskId,
+          );
+
         const expectedCondition =
           getConditionForTrial(
             trialNumber,
           );
 
+        const resolvedCondition =
+          condition ===
+            expectedCondition
+            ? condition
+            : expectedCondition;
+
         const existingResponse =
-          get().trialResponses.find(
-            (response) =>
-              response.trialNumber ===
-              trialNumber,
+          findTrialResponse(
+            get().trialResponses,
+            trialNumber,
+            resolvedTaskId,
           );
 
         if (
@@ -529,35 +798,34 @@ export const useQuestionnaireStore =
           set(
             (state) => ({
               trialResponses:
-                state.trialResponses.map(
-                  (response) =>
-                    response.trialNumber ===
-                    trialNumber
-                      ? normalizedResponse
-                      : response,
+                replaceTrialResponse(
+                  state.trialResponses,
+                  normalizedResponse,
                 ),
             }),
           );
 
-          return normalizedResponse;
+          return cloneTrialResponse(
+            normalizedResponse,
+          );
         }
 
         const createdResponse =
           createDefaultTrialQuestionnaireResponse(
             trialNumber,
-            taskId ===
-              "symposium"
-              ? taskId
-              : "symposium",
-            condition ===
-              expectedCondition
-              ? condition
-              : expectedCondition,
+            resolvedTaskId,
+            resolvedCondition,
           );
 
         const initializedResponse:
           TrialQuestionnaireResponse = {
             ...createdResponse,
+
+            taskId:
+              resolvedTaskId,
+
+            condition:
+              resolvedCondition,
 
             startedAtIso:
               createdResponse.startedAtIso ??
@@ -567,22 +835,19 @@ export const useQuestionnaireStore =
 
         set(
           (state) => ({
-            trialResponses: [
-              ...state.trialResponses.filter(
-                (response) =>
-                  response.trialNumber !==
-                  trialNumber,
-              ),
+            trialResponses:
+              sortTrialResponses([
+                ...state.trialResponses.filter(
+                  (response) =>
+                    !responseMatchesTrial(
+                      response,
+                      trialNumber,
+                      resolvedTaskId,
+                    ),
+                ),
 
-              initializedResponse,
-            ].sort(
-              (
-                first,
-                second,
-              ) =>
-                first.trialNumber -
-                second.trialNumber,
-            ),
+                initializedResponse,
+              ]),
           }),
         );
 
@@ -593,12 +858,16 @@ export const useQuestionnaireStore =
 
       getTrialResponse: (
         trialNumber,
+        taskId =
+          "symposium",
       ) => {
         const response =
-          get().trialResponses.find(
-            (item) =>
-              item.trialNumber ===
-              trialNumber,
+          findTrialResponse(
+            get().trialResponses,
+            trialNumber,
+            normalizeTaskId(
+              taskId,
+            ),
           );
 
         return response
@@ -612,6 +881,8 @@ export const useQuestionnaireStore =
         trialNumber,
         dimension,
         value,
+        taskId =
+          "symposium",
       ) => {
         if (
           !isNasaTlxValue(
@@ -621,14 +892,22 @@ export const useQuestionnaireStore =
           return;
         }
 
+        const resolvedTaskId =
+          normalizeTaskId(
+            taskId,
+          );
+
         set(
           (state) => ({
             trialResponses:
               state.trialResponses.map(
                 (response) => {
                   if (
-                    response.trialNumber !==
-                      trialNumber ||
+                    !responseMatchesTrial(
+                      response,
+                      trialNumber,
+                      resolvedTaskId,
+                    ) ||
                     response.submittedAtIso !==
                       null
                   ) {
@@ -655,6 +934,8 @@ export const useQuestionnaireStore =
         trialNumber,
         dimension,
         value,
+        taskId =
+          "symposium",
       ) => {
         if (
           !isLikertRating(
@@ -664,14 +945,22 @@ export const useQuestionnaireStore =
           return;
         }
 
+        const resolvedTaskId =
+          normalizeTaskId(
+            taskId,
+          );
+
         set(
           (state) => ({
             trialResponses:
               state.trialResponses.map(
                 (response) => {
                   if (
-                    response.trialNumber !==
-                      trialNumber ||
+                    !responseMatchesTrial(
+                      response,
+                      trialNumber,
+                      resolvedTaskId,
+                    ) ||
                     response.submittedAtIso !==
                       null
                   ) {
@@ -698,6 +987,8 @@ export const useQuestionnaireStore =
         trialNumber,
         dimension,
         value,
+        taskId =
+          "symposium",
       ) => {
         if (
           !isLikertRating(
@@ -707,14 +998,22 @@ export const useQuestionnaireStore =
           return;
         }
 
+        const resolvedTaskId =
+          normalizeTaskId(
+            taskId,
+          );
+
         set(
           (state) => ({
             trialResponses:
               state.trialResponses.map(
                 (response) => {
                   if (
-                    response.trialNumber !==
-                      trialNumber ||
+                    !responseMatchesTrial(
+                      response,
+                      trialNumber,
+                      resolvedTaskId,
+                    ) ||
                     response.submittedAtIso !==
                       null
                   ) {
@@ -741,15 +1040,25 @@ export const useQuestionnaireStore =
         trialNumber,
         dimension,
         value,
+        taskId =
+          "symposium",
       ) => {
+        const resolvedTaskId =
+          normalizeTaskId(
+            taskId,
+          );
+
         set(
           (state) => ({
             trialResponses:
               state.trialResponses.map(
                 (response) => {
                   if (
-                    response.trialNumber !==
-                      trialNumber ||
+                    !responseMatchesTrial(
+                      response,
+                      trialNumber,
+                      resolvedTaskId,
+                    ) ||
                     response.submittedAtIso !==
                       null
                   ) {
@@ -794,12 +1103,19 @@ export const useQuestionnaireStore =
 
       submitTrialQuestionnaire: (
         trialNumber,
+        taskId =
+          "symposium",
       ) => {
+        const resolvedTaskId =
+          normalizeTaskId(
+            taskId,
+          );
+
         const response =
-          get().trialResponses.find(
-            (item) =>
-              item.trialNumber ===
-              trialNumber,
+          findTrialResponse(
+            get().trialResponses,
+            trialNumber,
+            resolvedTaskId,
           );
 
         if (
@@ -844,12 +1160,9 @@ export const useQuestionnaireStore =
         set(
           (state) => ({
             trialResponses:
-              state.trialResponses.map(
-                (item) =>
-                  item.trialNumber ===
-                  trialNumber
-                    ? submittedResponse
-                    : item,
+              replaceTrialResponse(
+                state.trialResponses,
+                submittedResponse,
               ),
           }),
         );
@@ -861,12 +1174,19 @@ export const useQuestionnaireStore =
 
       markTrialQuestionnaireExported: (
         trialNumber,
+        taskId =
+          "symposium",
       ) => {
+        const resolvedTaskId =
+          normalizeTaskId(
+            taskId,
+          );
+
         const response =
-          get().trialResponses.find(
-            (item) =>
-              item.trialNumber ===
-              trialNumber,
+          findTrialResponse(
+            get().trialResponses,
+            trialNumber,
+            resolvedTaskId,
           );
 
         if (
@@ -898,12 +1218,9 @@ export const useQuestionnaireStore =
         set(
           (state) => ({
             trialResponses:
-              state.trialResponses.map(
-                (item) =>
-                  item.trialNumber ===
-                  trialNumber
-                    ? exportedResponse
-                    : item,
+              replaceTrialResponse(
+                state.trialResponses,
+                exportedResponse,
               ),
           }),
         );
@@ -915,12 +1232,16 @@ export const useQuestionnaireStore =
 
       isTrialQuestionnaireComplete: (
         trialNumber,
+        taskId =
+          "symposium",
       ) => {
         const response =
-          get().trialResponses.find(
-            (item) =>
-              item.trialNumber ===
-              trialNumber,
+          findTrialResponse(
+            get().trialResponses,
+            trialNumber,
+            normalizeTaskId(
+              taskId,
+            ),
           );
 
         return response
@@ -931,18 +1252,10 @@ export const useQuestionnaireStore =
       },
 
       areAllTrialQuestionnairesSubmitted:
-        () => {
-          const responses =
-            get().trialResponses;
-
-          return (
-            responses.length ===
-              TOTAL_TRIALS &&
-            responses.every(
-              responseIsSubmitted,
-            )
-          );
-        },
+        () =>
+          hasEveryExpectedSubmittedResponse(
+            get().trialResponses,
+          ),
 
       initializeFinalQuestionnaire:
         () => {
@@ -1109,7 +1422,7 @@ export const useQuestionnaireStore =
                 submittedAtIso,
 
               submittedAtIso,
-          };
+            };
 
           set({
             finalQuestionnaire:
@@ -1169,14 +1482,24 @@ export const useQuestionnaireStore =
 
       resetTrialResponse: (
         trialNumber,
+        taskId =
+          "symposium",
       ) => {
+        const resolvedTaskId =
+          normalizeTaskId(
+            taskId,
+          );
+
         set(
           (state) => ({
             trialResponses:
               state.trialResponses.filter(
                 (response) =>
-                  response.trialNumber !==
-                  trialNumber,
+                  !responseMatchesTrial(
+                    response,
+                    trialNumber,
+                    resolvedTaskId,
+                  ),
               ),
           }),
         );

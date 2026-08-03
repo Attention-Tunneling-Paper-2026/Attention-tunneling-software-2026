@@ -38,8 +38,61 @@ export type TrialCsvExportType =
   | "events"
   | "summary";
 
-export const TOTAL_STUDY_TRIALS =
+type SupportedStudyTaskId =
+  | "symposium"
+  | "delivery"
+  | "clinic";
+
+interface StudyTaskDefinition {
+  taskId:
+    SupportedStudyTaskId;
+
+  outerTaskNumber:
+    number;
+}
+
+interface TrialIdentity {
+  taskId:
+    SupportedStudyTaskId;
+
+  trialNumber:
+    StudyTrialNumber;
+}
+
+const STUDY_TASKS:
+  readonly StudyTaskDefinition[] = [
+    {
+      taskId:
+        "symposium",
+
+      outerTaskNumber:
+        1,
+    },
+    {
+      taskId:
+        "delivery",
+
+      outerTaskNumber:
+        2,
+    },
+    {
+      taskId:
+        "clinic",
+
+      outerTaskNumber:
+        3,
+    },
+  ];
+
+export const TOTAL_TASK_DOMAINS =
+  STUDY_TASKS.length;
+
+export const TRIALS_PER_TASK =
   3;
+
+export const TOTAL_STUDY_TRIALS =
+  TOTAL_TASK_DOMAINS *
+  TRIALS_PER_TASK;
 
 interface StudySessionState {
   participantId:
@@ -62,6 +115,9 @@ interface StudySessionState {
 
   procedureAccepted:
     boolean;
+
+  currentTaskId:
+    StudyTaskId | null;
 
   currentTrialNumber:
     StudyTrialNumber | null;
@@ -142,6 +198,9 @@ interface StudySessionStore
   startTrial: (
     trialNumber:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) =>
     | StudyTrialAssignment
     | undefined;
@@ -149,41 +208,65 @@ interface StudySessionStore
   markAssistantAnalysisRequested: (
     trialNumber?:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   markAssistantAnalysisStarted: (
     trialNumber?:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   markAssistantAnalysisCompleted: (
     trialNumber?:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   markAssistantRecommendationShown: (
     trialNumber?:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   markTrialTimerStarted: (
     trialNumber?:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   markProbeShown: (
     trialNumber?:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   markProbeCollapsed: (
     trialNumber?:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   markProbeAcknowledged: (
     trialNumber?:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   markTrialSubmitted: (
@@ -192,16 +275,25 @@ interface StudySessionStore
 
     reason?:
       StudyTrialEndReason,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   openTrialQuestionnaire: (
     trialNumber?:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   completeTrialQuestionnaire: (
     trialNumber?:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   setTrialCsvExportStatus: (
@@ -216,16 +308,25 @@ interface StudySessionStore
 
     errorMessage?:
       string,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   markTrialEventsCsvExported: (
     trialNumber:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   markTrialSummaryCsvExported: (
     trialNumber:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) => boolean;
 
   openPostExperiment:
@@ -261,6 +362,9 @@ interface StudySessionStore
   getTrialProgress: (
     trialNumber:
       StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
   ) =>
     | StudyTrialProgress
     | undefined;
@@ -305,6 +409,98 @@ const LEGACY_STORAGE_KEYS = [
 
 const DEFAULT_PARTICIPANT_ID =
   "P001";
+
+function isSupportedStudyTaskId(
+  value:
+    unknown,
+): value is SupportedStudyTaskId {
+  return (
+    value ===
+      "symposium" ||
+    value ===
+      "delivery" ||
+    value ===
+      "clinic"
+  );
+}
+
+function normalizeTaskId(
+  value:
+    unknown,
+
+  fallback:
+    SupportedStudyTaskId =
+      "symposium",
+): SupportedStudyTaskId {
+  return isSupportedStudyTaskId(
+    value,
+  )
+    ? value
+    : fallback;
+}
+
+function toStudyTaskId(
+  taskId:
+    SupportedStudyTaskId,
+): StudyTaskId {
+  return taskId as unknown as StudyTaskId;
+}
+
+function getTaskIdFromAssignment(
+  assignment:
+    Pick<
+      StudyTrialAssignment,
+      "taskId"
+    >,
+): SupportedStudyTaskId {
+  return normalizeTaskId(
+    assignment.taskId,
+  );
+}
+
+function trialMatchesIdentity(
+  trial:
+    Pick<
+      StudyTrialAssignment,
+      "taskId" | "trialNumber"
+    >,
+
+  identity:
+    TrialIdentity,
+): boolean {
+  return (
+    getTaskIdFromAssignment(
+      trial,
+    ) ===
+      identity.taskId &&
+    trial.trialNumber ===
+      identity.trialNumber
+  );
+}
+
+function getGlobalTrialNumber(
+  taskId:
+    SupportedStudyTaskId,
+
+  trialNumber:
+    StudyTrialNumber,
+): number {
+  const taskIndex =
+    STUDY_TASKS.findIndex(
+      (task) =>
+        task.taskId ===
+        taskId,
+    );
+
+  return (
+    Math.max(
+      0,
+      taskIndex,
+    ) *
+      TRIALS_PER_TASK +
+    trialNumber
+  );
+}
 
 function removeLegacyPersistedState():
   void {
@@ -396,39 +592,55 @@ function createAssignments(
   conditionOrder:
     ConditionOrder,
 ): StudyTrialAssignment[] {
-  return createSymposiumTrials(
-    conditionOrder,
-  ).map(
-    (trial) => ({
-      trialNumber:
-        trial.trialNumber,
+  const innerTrialDefinitions =
+    createSymposiumTrials(
+      conditionOrder,
+    );
 
-      trialOrder:
-        trial.trialOrder,
+  return STUDY_TASKS.flatMap(
+    (task) =>
+      innerTrialDefinitions.map(
+        (definition) => {
+          const globalTrialNumber =
+            getGlobalTrialNumber(
+              task.taskId,
+              definition.trialNumber,
+            );
 
-      taskId:
-        trial.taskId,
+          return {
+            trialNumber:
+              definition.trialNumber,
 
-      condition:
-        trial.condition,
+            trialOrder:
+              globalTrialNumber,
 
-      conditionOrder:
-        trial.conditionOrder,
+            taskId:
+              toStudyTaskId(
+                task.taskId,
+              ),
 
-      participantLabel:
-        trial.participantLabel,
+            condition:
+              definition.condition,
 
-      isFirstTrial:
-        trial.trialOrder ===
-        1,
+            conditionOrder:
+              definition.conditionOrder,
 
-      probeExposureNumber:
-        trial.trialOrder,
+            participantLabel:
+              `Task ${definition.trialNumber}`,
 
-      probeNaive:
-        trial.trialOrder ===
-        1,
-    }),
+            isFirstTrial:
+              globalTrialNumber ===
+              1,
+
+            probeExposureNumber:
+              globalTrialNumber,
+
+            probeNaive:
+              globalTrialNumber ===
+              1,
+          } satisfies StudyTrialAssignment;
+        },
+      ),
   );
 }
 
@@ -544,6 +756,9 @@ function createStateForParticipant(
     procedureAccepted:
       false,
 
+    currentTaskId:
+      null,
+
     currentTrialNumber:
       null,
 
@@ -600,29 +815,55 @@ function areAllTrialsCompleteFromTrials(
   trials:
     StudyTrialProgress[],
 ): boolean {
-  return (
-    trials.length ===
-      TOTAL_STUDY_TRIALS &&
-    trials.every(
-      (trial) =>
-        trial.status ===
-        "questionnaire_complete",
-    )
+  if (
+    trials.length !==
+    TOTAL_STUDY_TRIALS
+  ) {
+    return false;
+  }
+
+  return STUDY_TASKS.every(
+    (task) =>
+      (
+        [
+          1,
+          2,
+          3,
+        ] as const
+      ).every(
+        (trialNumber) =>
+          trials.some(
+            (trial) =>
+              trialMatchesIdentity(
+                trial,
+                {
+                  taskId:
+                    task.taskId,
+
+                  trialNumber,
+                },
+              ) &&
+              trial.status ===
+                "questionnaire_complete",
+          ),
+      ),
   );
 }
 
-function getAssignmentForTrial(
+function getAssignmentForIdentity(
   assignments:
     StudyTrialAssignment[],
 
-  trialNumber:
-    StudyTrialNumber,
+  identity:
+    TrialIdentity,
 ): StudyTrialAssignment | undefined {
   const assignment =
     assignments.find(
       (item) =>
-        item.trialNumber ===
-        trialNumber,
+        trialMatchesIdentity(
+          item,
+          identity,
+        ),
     );
 
   return assignment
@@ -630,6 +871,22 @@ function getAssignmentForTrial(
         assignment,
       )
     : undefined;
+}
+
+function getTrialForIdentity(
+  trials:
+    StudyTrialProgress[],
+
+  identity:
+    TrialIdentity,
+): StudyTrialProgress | undefined {
+  return trials.find(
+    (trial) =>
+      trialMatchesIdentity(
+        trial,
+        identity,
+      ),
+  );
 }
 
 function getNextPendingAssignment(
@@ -646,8 +903,12 @@ function getNextPendingAssignment(
           first,
           second,
         ) =>
-          first.trialOrder -
-          second.trialOrder,
+          Number(
+            first.trialOrder,
+          ) -
+          Number(
+            second.trialOrder,
+          ),
       )
       .find(
         (trial) =>
@@ -661,9 +922,17 @@ function getNextPendingAssignment(
     return undefined;
   }
 
-  return getAssignmentForTrial(
+  return getAssignmentForIdentity(
     assignments,
-    pendingTrial.trialNumber,
+    {
+      taskId:
+        getTaskIdFromAssignment(
+          pendingTrial,
+        ),
+
+      trialNumber:
+        pendingTrial.trialNumber,
+    },
   );
 }
 
@@ -687,46 +956,65 @@ function sessionConfigurationIsValid(
   }
 
   const definitions =
-    createSymposiumTrials(
+    createAssignments(
       conditionOrder,
     );
 
   return definitions.every(
     (definition) => {
+      const identity:
+        TrialIdentity = {
+          taskId:
+            getTaskIdFromAssignment(
+              definition,
+            ),
+
+          trialNumber:
+            definition.trialNumber,
+        };
+
       const assignment =
         assignments.find(
           (item) =>
-            item.trialNumber ===
-            definition.trialNumber,
+            trialMatchesIdentity(
+              item,
+              identity,
+            ),
         );
 
       const trial =
         trials.find(
           (item) =>
-            item.trialNumber ===
-            definition.trialNumber,
+            trialMatchesIdentity(
+              item,
+              identity,
+            ),
         );
 
       return (
-        assignment?.taskId ===
-          "symposium" &&
-        assignment.condition ===
+        assignment?.condition ===
           definition.condition &&
-        assignment.participantLabel ===
+        assignment?.participantLabel ===
           definition.participantLabel &&
-        assignment.trialOrder ===
-          definition.trialOrder &&
-        assignment.conditionOrder ===
+        Number(
+          assignment?.trialOrder,
+        ) ===
+          Number(
+            definition.trialOrder,
+          ) &&
+        assignment?.conditionOrder ===
           definition.conditionOrder &&
-        trial?.taskId ===
-          "symposium" &&
-        trial.condition ===
+        trial?.condition ===
           definition.condition &&
-        trial.participantLabel ===
+        trial?.participantLabel ===
           definition.participantLabel &&
-        trial.trialOrder ===
-          definition.trialOrder &&
-        trial.conditionOrder ===
+        Number(
+          trial?.trialOrder,
+        ) ===
+          Number(
+            definition.trialOrder,
+          ) &&
+        trial?.conditionOrder ===
           definition.conditionOrder
       );
     },
@@ -744,14 +1032,92 @@ export const useStudySessionStore =
       set,
       get,
     ) => {
-      function resolveTrialNumber(
+      function resolveIdentity(
         trialNumber?:
           StudyTrialNumber,
-      ): StudyTrialNumber | null {
-        return (
+
+        taskId?:
+          StudyTaskId,
+      ): TrialIdentity | null {
+        const state =
+          get();
+
+        const resolvedTrialNumber =
           trialNumber ??
-          get().currentTrialNumber
-        );
+          state.currentTrialNumber;
+
+        if (
+          resolvedTrialNumber ===
+          null
+        ) {
+          return null;
+        }
+
+        if (
+          isSupportedStudyTaskId(
+            taskId,
+          )
+        ) {
+          return {
+            taskId,
+            trialNumber:
+              resolvedTrialNumber,
+          };
+        }
+
+        if (
+          state.currentTrialNumber ===
+            resolvedTrialNumber &&
+          isSupportedStudyTaskId(
+            state.currentTaskId,
+          )
+        ) {
+          return {
+            taskId:
+              state.currentTaskId,
+
+            trialNumber:
+              resolvedTrialNumber,
+          };
+        }
+
+        const openMatches =
+          state.trials.filter(
+            (trial) =>
+              trial.trialNumber ===
+                resolvedTrialNumber &&
+              (
+                trial.status ===
+                  "active" ||
+                trial.status ===
+                  "submitted"
+              ),
+          );
+
+        if (
+          openMatches.length ===
+          1
+        ) {
+          return {
+            taskId:
+              getTaskIdFromAssignment(
+                openMatches[
+                  0
+                ],
+              ),
+
+            trialNumber:
+              resolvedTrialNumber,
+          };
+        }
+
+        return {
+          taskId:
+            "symposium",
+
+          trialNumber:
+            resolvedTrialNumber,
+        };
       }
 
       function markTrialTimestamp(
@@ -760,37 +1126,43 @@ export const useStudySessionStore =
 
         trialNumber?:
           StudyTrialNumber,
+
+        taskId?:
+          StudyTaskId,
       ): boolean {
         const state =
           get();
 
-        const resolvedTrialNumber =
-          resolveTrialNumber(
+        const identity =
+          resolveIdentity(
             trialNumber,
+            taskId,
           );
 
         if (
-          resolvedTrialNumber ===
-          null
+          !identity
         ) {
           return false;
         }
 
         const trial =
-          state.trials.find(
-            (item) =>
-              item.trialNumber ===
-              resolvedTrialNumber,
+          getTrialForIdentity(
+            state.trials,
+            identity,
           );
 
         if (
-          !trial
+          !trial ||
+          trial.status ===
+            "questionnaire_complete"
         ) {
           return false;
         }
 
         if (
-          trial[field]
+          trial[
+            field
+          ]
         ) {
           return true;
         }
@@ -803,8 +1175,10 @@ export const useStudySessionStore =
           trials:
             state.trials.map(
               (item) =>
-                item.trialNumber ===
-                resolvedTrialNumber
+                trialMatchesIdentity(
+                  item,
+                  identity,
+                )
                   ? {
                       ...item,
 
@@ -970,11 +1344,13 @@ export const useStudySessionStore =
 
             return get().startTrial(
               assignment.trialNumber,
+              assignment.taskId,
             );
           },
 
         startTrial: (
           trialNumber,
+          taskId,
         ) => {
           const state =
             get();
@@ -987,10 +1363,24 @@ export const useStudySessionStore =
             return undefined;
           }
 
-          const currentAssignment =
-            getAssignmentForTrial(
-              state.assignments,
+          const resolvedTaskId =
+            normalizeTaskId(
+              taskId,
+              "symposium",
+            );
+
+          const identity:
+            TrialIdentity = {
+              taskId:
+                resolvedTaskId,
+
               trialNumber,
+            };
+
+          const currentAssignment =
+            getAssignmentForIdentity(
+              state.assignments,
+              identity,
             );
 
           if (
@@ -1000,10 +1390,9 @@ export const useStudySessionStore =
           }
 
           const requestedTrial =
-            state.trials.find(
-              (trial) =>
-                trial.trialNumber ===
-                trialNumber,
+            getTrialForIdentity(
+              state.trials,
+              identity,
             );
 
           if (
@@ -1017,8 +1406,10 @@ export const useStudySessionStore =
           const otherOpenTrial =
             state.trials.find(
               (trial) =>
-                trial.trialNumber !==
-                  trialNumber &&
+                !trialMatchesIdentity(
+                  trial,
+                  identity,
+                ) &&
                 (
                   trial.status ===
                     "active" ||
@@ -1038,37 +1429,10 @@ export const useStudySessionStore =
             new Date()
               .toISOString();
 
-          const trialOrder =
-            currentAssignment.trialOrder;
-
-          const conditionOrder =
-            currentAssignment.conditionOrder;
-
-          const isFirstTrial =
-            currentAssignment.isFirstTrial;
-
-          const probeExposureNumber =
-            currentAssignment.probeExposureNumber;
-
-          const probeNaive =
-            currentAssignment.probeNaive;
-
-          const updatedAssignment:
-            StudyTrialAssignment = {
-              ...currentAssignment,
-
-              trialOrder,
-
-              conditionOrder,
-
-              isFirstTrial,
-
-              probeExposureNumber,
-
-              probeNaive,
-            };
-
           set({
+            currentTaskId:
+              currentAssignment.taskId,
+
             currentTrialNumber:
               trialNumber,
 
@@ -1078,24 +1442,17 @@ export const useStudySessionStore =
                 ? "trial_questionnaire"
                 : "task",
 
-            assignments:
-              state.assignments.map(
-                (assignment) =>
-                  assignment.trialNumber ===
-                  trialNumber
-                    ? updatedAssignment
-                    : assignment,
-              ),
-
             trials:
               state.trials.map(
                 (trial) =>
-                  trial.trialNumber ===
-                  trialNumber
+                  trialMatchesIdentity(
+                    trial,
+                    identity,
+                  )
                     ? {
                         ...trial,
 
-                        ...updatedAssignment,
+                        ...currentAssignment,
 
                         status:
                           trial.status ===
@@ -1110,99 +1467,115 @@ export const useStudySessionStore =
           });
 
           return cloneAssignment(
-            updatedAssignment,
+            currentAssignment,
           );
         },
 
         markAssistantAnalysisRequested: (
           trialNumber,
+          taskId,
         ) =>
           markTrialTimestamp(
             "assistantAnalysisRequestedAtIso",
             trialNumber,
+            taskId,
           ),
 
         markAssistantAnalysisStarted: (
           trialNumber,
+          taskId,
         ) =>
           markTrialTimestamp(
             "assistantAnalysisStartedAtIso",
             trialNumber,
+            taskId,
           ),
 
         markAssistantAnalysisCompleted: (
           trialNumber,
+          taskId,
         ) =>
           markTrialTimestamp(
             "assistantAnalysisCompletedAtIso",
             trialNumber,
+            taskId,
           ),
 
         markAssistantRecommendationShown: (
           trialNumber,
+          taskId,
         ) =>
           markTrialTimestamp(
             "assistantRecommendationShownAtIso",
             trialNumber,
+            taskId,
           ),
 
         markTrialTimerStarted: (
           trialNumber,
+          taskId,
         ) =>
           markTrialTimestamp(
             "timerStartedAtIso",
             trialNumber,
+            taskId,
           ),
 
         markProbeShown: (
           trialNumber,
+          taskId,
         ) =>
           markTrialTimestamp(
             "probeShownAtIso",
             trialNumber,
+            taskId,
           ),
 
         markProbeCollapsed: (
           trialNumber,
+          taskId,
         ) =>
           markTrialTimestamp(
             "probeCollapsedAtIso",
             trialNumber,
+            taskId,
           ),
 
         markProbeAcknowledged: (
           trialNumber,
+          taskId,
         ) =>
           markTrialTimestamp(
             "probeAcknowledgedAtIso",
             trialNumber,
+            taskId,
           ),
 
         markTrialSubmitted: (
           trialNumber,
           reason =
             "submitted",
+          taskId,
         ) => {
           const state =
             get();
 
-          const resolvedTrialNumber =
-            resolveTrialNumber(
+          const identity =
+            resolveIdentity(
               trialNumber,
+              taskId,
             );
 
           if (
-            resolvedTrialNumber ===
-            null
+            !identity
           ) {
             return false;
           }
 
           const trial =
-            state.trials.find(
-              (item) =>
-                item.trialNumber ===
-                resolvedTrialNumber,
+            getTrialForIdentity(
+              state.trials,
+              identity,
             );
 
           if (
@@ -1227,8 +1600,13 @@ export const useStudySessionStore =
             submittedAtIso;
 
           set({
+            currentTaskId:
+              toStudyTaskId(
+                identity.taskId,
+              ),
+
             currentTrialNumber:
-              resolvedTrialNumber,
+              identity.trialNumber,
 
             stage:
               "trial_questionnaire",
@@ -1236,8 +1614,10 @@ export const useStudySessionStore =
             trials:
               state.trials.map(
                 (item) =>
-                  item.trialNumber ===
-                  resolvedTrialNumber
+                  trialMatchesIdentity(
+                    item,
+                    identity,
+                  )
                     ? {
                         ...item,
 
@@ -1249,7 +1629,7 @@ export const useStudySessionStore =
                         trialEndedAtIso,
 
                         trialEndReason:
-                          trial.trialEndReason ??
+                          item.trialEndReason ??
                           reason,
                       }
                     : item,
@@ -1261,27 +1641,27 @@ export const useStudySessionStore =
 
         openTrialQuestionnaire: (
           trialNumber,
+          taskId,
         ) => {
           const state =
             get();
 
-          const resolvedTrialNumber =
-            resolveTrialNumber(
+          const identity =
+            resolveIdentity(
               trialNumber,
+              taskId,
             );
 
           if (
-            resolvedTrialNumber ===
-            null
+            !identity
           ) {
             return false;
           }
 
           const trial =
-            state.trials.find(
-              (item) =>
-                item.trialNumber ===
-                resolvedTrialNumber,
+            getTrialForIdentity(
+              state.trials,
+              identity,
             );
 
           if (
@@ -1298,8 +1678,13 @@ export const useStudySessionStore =
               .toISOString();
 
           set({
+            currentTaskId:
+              toStudyTaskId(
+                identity.taskId,
+              ),
+
             currentTrialNumber:
-              resolvedTrialNumber,
+              identity.trialNumber,
 
             stage:
               "trial_questionnaire",
@@ -1307,8 +1692,10 @@ export const useStudySessionStore =
             trials:
               state.trials.map(
                 (item) =>
-                  item.trialNumber ===
-                  resolvedTrialNumber
+                  trialMatchesIdentity(
+                    item,
+                    identity,
+                  )
                     ? {
                         ...item,
 
@@ -1323,27 +1710,27 @@ export const useStudySessionStore =
 
         completeTrialQuestionnaire: (
           trialNumber,
+          taskId,
         ) => {
           const state =
             get();
 
-          const resolvedTrialNumber =
-            resolveTrialNumber(
+          const identity =
+            resolveIdentity(
               trialNumber,
+              taskId,
             );
 
           if (
-            resolvedTrialNumber ===
-            null
+            !identity
           ) {
             return false;
           }
 
           const trial =
-            state.trials.find(
-              (item) =>
-                item.trialNumber ===
-                resolvedTrialNumber,
+            getTrialForIdentity(
+              state.trials,
+              identity,
             );
 
           if (
@@ -1357,6 +1744,9 @@ export const useStudySessionStore =
             "questionnaire_complete"
           ) {
             set({
+              currentTaskId:
+                null,
+
               currentTrialNumber:
                 null,
 
@@ -1383,8 +1773,10 @@ export const useStudySessionStore =
             trials:
               state.trials.map(
                 (item) =>
-                  item.trialNumber ===
-                  resolvedTrialNumber
+                  trialMatchesIdentity(
+                    item,
+                    identity,
+                  )
                     ? {
                         ...item,
 
@@ -1416,6 +1808,9 @@ export const useStudySessionStore =
                     : item,
               ),
 
+            currentTaskId:
+              null,
+
             currentTrialNumber:
               null,
 
@@ -1431,19 +1826,23 @@ export const useStudySessionStore =
           exportType,
           status,
           errorMessage,
+          taskId,
         ) => {
           const state =
             get();
 
-          const trialExists =
-            state.trials.some(
-              (trial) =>
-                trial.trialNumber ===
-                trialNumber,
+          const identity =
+            resolveIdentity(
+              trialNumber,
+              taskId,
             );
 
           if (
-            !trialExists
+            !identity ||
+            !getTrialForIdentity(
+              state.trials,
+              identity,
+            )
           ) {
             return false;
           }
@@ -1457,8 +1856,10 @@ export const useStudySessionStore =
               state.trials.map(
                 (trial) => {
                   if (
-                    trial.trialNumber !==
-                    trialNumber
+                    !trialMatchesIdentity(
+                      trial,
+                      identity,
+                    )
                   ) {
                     return trial;
                   }
@@ -1518,20 +1919,26 @@ export const useStudySessionStore =
 
         markTrialEventsCsvExported: (
           trialNumber,
+          taskId,
         ) =>
           get().setTrialCsvExportStatus(
             trialNumber,
             "events",
             "exported",
+            undefined,
+            taskId,
           ),
 
         markTrialSummaryCsvExported: (
           trialNumber,
+          taskId,
         ) =>
           get().setTrialCsvExportStatus(
             trialNumber,
             "summary",
             "exported",
+            undefined,
+            taskId,
           ),
 
         openPostExperiment:
@@ -1550,6 +1957,9 @@ export const useStudySessionStore =
             }
 
             set({
+              currentTaskId:
+                null,
+
               currentTrialNumber:
                 null,
 
@@ -1732,14 +2142,23 @@ export const useStudySessionStore =
 
             if (
               state.currentTrialNumber ===
-              null
+                null ||
+              !isSupportedStudyTaskId(
+                state.currentTaskId,
+              )
             ) {
               return undefined;
             }
 
-            return getAssignmentForTrial(
+            return getAssignmentForIdentity(
               state.assignments,
-              state.currentTrialNumber,
+              {
+                taskId:
+                  state.currentTaskId,
+
+                trialNumber:
+                  state.currentTrialNumber,
+              },
             );
           },
 
@@ -1756,12 +2175,24 @@ export const useStudySessionStore =
 
         getTrialProgress: (
           trialNumber,
+          taskId,
         ) => {
+          const identity =
+            resolveIdentity(
+              trialNumber,
+              taskId,
+            );
+
+          if (
+            !identity
+          ) {
+            return undefined;
+          }
+
           const trial =
-            get().trials.find(
-              (item) =>
-                item.trialNumber ===
-                trialNumber,
+            getTrialForIdentity(
+              get().trials,
+              identity,
             );
 
           return trial

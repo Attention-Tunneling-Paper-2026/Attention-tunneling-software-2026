@@ -4,7 +4,10 @@ import {
   CheckCircle2,
   ClipboardList,
   Clock3,
+  Hospital,
   LockKeyhole,
+  Truck,
+  type LucideIcon,
 } from "lucide-react";
 
 import {
@@ -23,72 +26,223 @@ import {
 } from "../store/eventLogStore";
 
 import {
-  useSchedulerStore,
-} from "../store/schedulerStore";
-
-import {
   useStudySessionStore,
 } from "../store/studySessionStore";
-
-import {
-  isConditionOrder,
-} from "../types/scheduler";
-
-import type {
-  StudyTrialOrder,
-} from "../types/scheduler";
 
 import type {
   StudyTrialProgress,
 } from "../types/study";
 
-const TOTAL_TRIALS =
+type TaskDomainId =
+  | "symposium"
+  | "delivery"
+  | "clinic";
+
+type ExperimentTaskNumber =
+  | 1
+  | 2
+  | 3;
+
+interface TaskDomainDefinition {
+  id:
+    TaskDomainId;
+
+  taskNumber:
+    ExperimentTaskNumber;
+
+  categoryLabel:
+    string;
+
+  title:
+    string;
+
+  description:
+    string;
+
+  itemCountLabel:
+    string;
+
+  itemInstruction:
+    string;
+
+  resourceCountLabel:
+    string;
+
+  resourceInstruction:
+    string;
+
+  icon:
+    LucideIcon;
+}
+
+interface TaskDomainProgress
+  extends TaskDomainDefinition {
+  completedSubtaskCount:
+    number;
+
+  hasStarted:
+    boolean;
+
+  hasOpenSubtask:
+    boolean;
+
+  completed:
+    boolean;
+}
+
+const TOTAL_EXPERIMENT_TASKS =
   3;
 
-function isStudyTrialOrder(
-  value: unknown,
-): value is StudyTrialOrder {
+const SUBTASKS_PER_TASK =
+  3;
+
+const TOTAL_REQUIRED_STUDY_TASKS =
+  TOTAL_EXPERIMENT_TASKS;
+
+const TASK_DOMAINS:
+  TaskDomainDefinition[] = [
+    {
+      id:
+        "symposium",
+
+      taskNumber:
+        1,
+
+      categoryLabel:
+        "Problem 1 · Scheduling",
+
+      title:
+        "Symposium Scheduler",
+
+      description:
+        "Arrange twelve symposium talks across three rooms and four time slots while satisfying the three main scheduling constraints.",
+
+      itemCountLabel:
+        "12 talks",
+
+      itemInstruction:
+        "Projector, capacity, and speaker constraints",
+
+      resourceCountLabel:
+        "3 rooms",
+
+      resourceInstruction:
+        "Three task options",
+
+      icon:
+        CalendarDays,
+    },
+    {
+      id:
+        "delivery",
+
+      taskNumber:
+        2,
+
+      categoryLabel:
+        "Problem 2 · Logistics",
+
+      title:
+        "Delivery Dispatch",
+
+      description:
+        "Arrange twelve shipments across three vans and four route windows while satisfying the three main dispatch constraints.",
+
+      itemCountLabel:
+        "12 shipments",
+
+      itemInstruction:
+        "Refrigeration, capacity, and driver constraints",
+
+      resourceCountLabel:
+        "3 vans",
+
+      resourceInstruction:
+        "Three task options",
+
+      icon:
+        Truck,
+    },
+    {
+      id:
+        "clinic",
+
+      taskNumber:
+        3,
+
+      categoryLabel:
+        "Problem 3 · Workforce allocation",
+
+      title:
+        "Clinic Roster",
+
+      description:
+        "Arrange twelve nursing duties across three wards and four shifts while satisfying the three main roster constraints.",
+
+      itemCountLabel:
+        "12 duties",
+
+      itemInstruction:
+        "ICU certification, capacity, and nurse constraints",
+
+      resourceCountLabel:
+        "3 wards",
+
+      resourceInstruction:
+        "Three task options",
+
+      icon:
+        Hospital,
+    },
+  ];
+
+function trialIsComplete(
+  trial:
+    StudyTrialProgress,
+): boolean {
+  return trial.status ===
+    "questionnaire_complete";
+}
+
+function trialIsOpen(
+  trial:
+    StudyTrialProgress,
+): boolean {
   return (
-    value === 1 ||
-    value === 2 ||
-    value === 3
+    trial.status ===
+      "active" ||
+    trial.status ===
+      "submitted"
   );
 }
 
-function getParticipantTaskNumber(
-  trial: StudyTrialProgress,
-): StudyTrialOrder {
-  return isStudyTrialOrder(
-    trial.trialOrder,
-  )
-    ? trial.trialOrder
-    : trial.trialNumber;
-}
+function getTaskButtonLabel(
+  task:
+    TaskDomainProgress,
 
-function getTrialButtonLabel(
-  trial:
-    StudyTrialProgress,
+  locked:
+    boolean,
 ): string {
-  const participantTaskNumber =
-    getParticipantTaskNumber(
-      trial,
-    );
-
-  switch (
-    trial.status
+  if (
+    task.completed
   ) {
-    case "pending":
-      return `Begin Task ${participantTaskNumber}`;
-
-    case "active":
-      return `Continue Task ${participantTaskNumber}`;
-
-    case "submitted":
-      return `Continue Task ${participantTaskNumber} questionnaire`;
-
-    case "questionnaire_complete":
-      return `Task ${participantTaskNumber} completed`;
+    return `Problem ${task.taskNumber} completed`;
   }
+
+  if (
+    locked
+  ) {
+    return `Problem ${task.taskNumber} locked`;
+  }
+
+  if (
+    task.hasStarted ||
+    task.hasOpenSubtask
+  ) {
+    return `Continue Problem ${task.taskNumber}`;
+  }
+
+  return `Open Problem ${task.taskNumber}`;
 }
 
 export default function TaskSelectionPage() {
@@ -131,28 +285,10 @@ export default function TaskSelectionPage() {
         state.trials,
     );
 
-  const startStudyTrial =
-    useStudySessionStore(
-      (state) =>
-        state.startTrial,
-    );
-
-  const openTrialQuestionnaire =
-    useStudySessionStore(
-      (state) =>
-        state.openTrialQuestionnaire,
-    );
-
   const openPostExperiment =
     useStudySessionStore(
       (state) =>
         state.openPostExperiment,
-    );
-
-  const initializeTrial =
-    useSchedulerStore(
-      (state) =>
-        state.initializeTrial,
     );
 
   const setEventParticipantId =
@@ -179,20 +315,50 @@ export default function TaskSelectionPage() {
         state.addEvent,
     );
 
-  const orderedTrials =
+  const taskProgress =
     useMemo(
       () =>
-        [...trials].sort(
-          (
-            firstTrial,
-            secondTrial,
-          ) =>
-            getParticipantTaskNumber(
-              firstTrial,
-            ) -
-            getParticipantTaskNumber(
-              secondTrial,
-            ),
+        TASK_DOMAINS.map(
+          (task):
+            TaskDomainProgress => {
+            const taskTrials =
+              trials.filter(
+                (trial) =>
+                  trial.taskId ===
+                  task.id,
+              );
+
+            const completedSubtaskCount =
+              taskTrials.filter(
+                trialIsComplete,
+              ).length;
+
+            const hasOpenSubtask =
+              taskTrials.some(
+                trialIsOpen,
+              );
+
+            const hasStarted =
+              taskTrials.some(
+                (trial) =>
+                  trial.status !==
+                  "pending",
+              );
+
+            return {
+              ...task,
+
+              completedSubtaskCount,
+
+              hasStarted,
+
+              hasOpenSubtask,
+
+              completed:
+                completedSubtaskCount >=
+                  1,
+            };
+          },
         ),
       [
         trials,
@@ -200,25 +366,25 @@ export default function TaskSelectionPage() {
     );
 
   const completedTrialCount =
-    orderedTrials.filter(
-      (trial) =>
-        trial.status ===
-        "questionnaire_complete",
+    trials.filter(
+      trialIsComplete,
+    ).length;
+
+  const completedTaskCount =
+    taskProgress.filter(
+      (task) =>
+        task.completed,
     ).length;
 
   const allTrialsComplete =
-    orderedTrials.length ===
-      TOTAL_TRIALS &&
-    completedTrialCount ===
-      TOTAL_TRIALS;
+    completedTrialCount >=
+      TOTAL_REQUIRED_STUDY_TASKS &&
+    completedTaskCount ===
+      TOTAL_EXPERIMENT_TASKS;
 
   const openTrial =
-    orderedTrials.find(
-      (trial) =>
-        trial.status ===
-          "active" ||
-        trial.status ===
-          "submitted",
+    trials.find(
+      trialIsOpen,
     );
 
   useEffect(() => {
@@ -273,170 +439,83 @@ export default function TaskSelectionPage() {
     setEventSessionId,
   ]);
 
-  function handleOpenTrial(
-    trial:
-      StudyTrialProgress,
+  function handleOpenTask(
+    task:
+      TaskDomainProgress,
   ) {
     if (
-      trial.status ===
-      "questionnaire_complete"
+      task.completed
     ) {
       return;
     }
 
     if (
       openTrial &&
-      openTrial.trialNumber !==
-        trial.trialNumber
+      openTrial.taskId !==
+        task.id
     ) {
       return;
     }
 
-    if (
-      trial.status ===
-      "submitted"
-    ) {
-      const questionnaireOpened =
-        openTrialQuestionnaire(
-          trial.trialNumber,
-        );
+    addEvent({
+      eventType:
+        "task_selected",
 
-      if (
-        !questionnaireOpened
-      ) {
-        return;
-      }
+      phase:
+        "pre_ai",
 
-      navigate(
-        `/trial-questionnaire/${trial.trialNumber}`,
-      );
+      metadata: {
+        page:
+          "task_selection",
 
-      return;
-    }
+        selectionLevel:
+          "task_domain",
 
-    const wasPending =
-      trial.status ===
-      "pending";
+        taskId:
+          task.id,
 
-    const assignment =
-      startStudyTrial(
-        trial.trialNumber,
-      );
+        taskNumber:
+          task.taskNumber,
 
-    if (
-      !assignment
-    ) {
-      return;
-    }
+        taskTitle:
+          task.title,
 
-    if (
-      wasPending
-    ) {
-      const assignmentTrialOrder =
-        isStudyTrialOrder(
-          assignment.trialOrder,
-        )
-          ? assignment.trialOrder
-          : getParticipantTaskNumber(
-              trial,
-            );
+        completedSubtasks:
+          task.completedSubtaskCount,
 
-      const assignmentConditionOrder =
-        isConditionOrder(
-          assignment.conditionOrder,
-        )
-          ? assignment.conditionOrder
-          : conditionOrder;
+        totalSubtasks:
+          SUBTASKS_PER_TASK,
 
-      initializeTrial(
-        assignment.trialNumber,
-        assignmentConditionOrder,
-        assignmentTrialOrder,
-      );
+        totalTasks:
+          TOTAL_EXPERIMENT_TASKS,
 
-      addEvent({
-        eventType:
-          "task_selected",
+        totalTrials:
+          TOTAL_REQUIRED_STUDY_TASKS,
 
-        trialNumber:
-          assignment.trialNumber,
+        participantId,
 
-        trialOrder:
-          assignment.trialOrder,
-
-        condition:
-          assignment.condition,
-
-        conditionOrder:
-          assignment.conditionOrder,
-
-        isFirstTrial:
-          assignment.isFirstTrial,
-
-        probeExposureNumber:
-          assignment.probeExposureNumber,
-
-        probeNaive:
-          assignment.probeNaive,
-
-        phase:
-          "pre_ai",
-
-        metadata: {
-          page:
-            "task_selection",
-
-          taskId:
-            "symposium",
-
-          taskTitle:
-            "Symposium Scheduler",
-
-          participantLabel:
-            assignment.participantLabel,
-
-          participantTaskNumber:
-            assignmentTrialOrder,
-
-          totalTrials:
-            TOTAL_TRIALS,
-
-          assignmentMethod:
-            "researcher_assigned",
-        },
-      });
-    }
+        sessionId,
+      },
+    });
 
     navigate(
-      `/task/${assignment.trialNumber}`,
+      `/tasks/${task.id}`,
       {
         state: {
-          trialNumber:
-            assignment.trialNumber,
-
-          trialOrder:
-            assignment.trialOrder,
-
-          totalTrials:
-            TOTAL_TRIALS,
-
           taskId:
-            "symposium",
+            task.id,
 
-          condition:
-            assignment.condition,
+          taskNumber:
+            task.taskNumber,
 
-          conditionOrder:
-            assignment.conditionOrder,
+          taskTitle:
+            task.title,
 
-          isFirstTrial:
-            assignment.isFirstTrial,
+          completedSubtasks:
+            task.completedSubtaskCount,
 
-          probeExposureNumber:
-            assignment.probeExposureNumber,
-
-          probeNaive:
-            assignment.probeNaive,
+          totalSubtasks:
+            SUBTASKS_PER_TASK,
         },
       },
     );
@@ -475,15 +554,16 @@ export default function TaskSelectionPage() {
       <header className="study-page-header">
         <div className="study-page-header-content">
           <div className="study-page-eyebrow">
-            AI Assisted Scheduling Study
+            AI Assisted Problem-Solving Study
           </div>
 
           <h1>
-            Task Selection
+            Problem Selection
           </h1>
 
           <p>
-            Select the task assigned to you by the researcher.
+            Select each constraint-satisfaction problem and complete
+            the task assigned by the instructor.
           </p>
         </div>
 
@@ -491,8 +571,8 @@ export default function TaskSelectionPage() {
           className="study-progress-label"
           aria-label="Study progress"
         >
-          {completedTrialCount} of{" "}
-          {TOTAL_TRIALS} completed
+          {completedTaskCount} of{" "}
+          {TOTAL_EXPERIMENT_TASKS} problems completed
         </div>
       </header>
 
@@ -510,142 +590,131 @@ export default function TaskSelectionPage() {
 
           <div>
             <h2 id="task-selection-guidance">
-              Researcher assigned tasks
+              Three constraint-satisfaction problems
             </h2>
 
             <p>
-              All three tasks use the Symposium Scheduler.
-              Select only the task number assigned to you by
-              the researcher.
+              The experiment contains three constraint-satisfaction
+              problems, and each problem includes three task options.
+              You will complete three tasks in total—one task from
+              each problem. Select the task specified by the
+              instructor.
             </p>
           </div>
         </section>
 
-        <section
-          className="task-selection-overview-card"
-          aria-labelledby="symposium-task-title"
-        >
-          <div className="task-selection-overview-header">
-            <div className="task-assignment-icon">
-              <CalendarDays
-                size={30}
-                aria-hidden="true"
-              />
-            </div>
+        <div className="task-selection-domain-list">
+          {taskProgress.map(
+            (task) => {
+              const TaskIcon =
+                task.icon;
 
-            <div>
-              <div className="task-assignment-label">
-                Scheduling task
-              </div>
+              const blockedByAnotherTask =
+                Boolean(
+                  openTrial &&
+                  openTrial.taskId !==
+                    task.id,
+                );
 
-              <h2 id="symposium-task-title">
-                Symposium Scheduler
-              </h2>
-            </div>
-          </div>
+              const disabled =
+                task.completed ||
+                blockedByAnotherTask ||
+                allTrialsComplete;
 
-          <p className="task-assignment-description">
-            Arrange twelve symposium talks across three rooms
-            and four time slots while satisfying the scheduling
-            requirements.
-          </p>
+              return (
+                <section
+                  key={task.id}
+                  className="task-selection-overview-card"
+                  aria-labelledby={`${task.id}-task-title`}
+                >
+                  <div className="task-selection-overview-header">
+                    <div className="task-assignment-icon">
+                      <TaskIcon
+                        size={30}
+                        aria-hidden="true"
+                      />
+                    </div>
 
-          <div className="task-assignment-details">
-            <div className="task-assignment-detail">
-              <ClipboardList
-                size={20}
-                aria-hidden="true"
-              />
+                    <div>
+                      <div className="task-assignment-label">
+                        {task.categoryLabel}
+                      </div>
 
-              <div>
-                <strong>
-                  12 talks
-                </strong>
+                      <h2 id={`${task.id}-task-title`}>
+                        {task.title}
+                      </h2>
+                    </div>
+                  </div>
 
-                <span>
-                  Schedule every talk exactly once
-                </span>
-              </div>
-            </div>
+                  <p className="task-assignment-description">
+                    {task.description}
+                  </p>
 
-            <div className="task-assignment-detail">
-              <CalendarDays
-                size={20}
-                aria-hidden="true"
-              />
+                  <div className="task-assignment-details">
+                    <div className="task-assignment-detail">
+                      <ClipboardList
+                        size={20}
+                        aria-hidden="true"
+                      />
 
-              <div>
-                <strong>
-                  3 rooms
-                </strong>
+                      <div>
+                        <strong>
+                          {task.itemCountLabel}
+                        </strong>
 
-                <span>
-                  Four available time slots
-                </span>
-              </div>
-            </div>
+                        <span>
+                          {task.itemInstruction}
+                        </span>
+                      </div>
+                    </div>
 
-            <div className="task-assignment-detail">
-              <Clock3
-                size={20}
-                aria-hidden="true"
-              />
+                    <div className="task-assignment-detail">
+                      <TaskIcon
+                        size={20}
+                        aria-hidden="true"
+                      />
 
-              <div>
-                <strong>
-                  15 minutes
-                </strong>
+                      <div>
+                        <strong>
+                          {task.resourceCountLabel}
+                        </strong>
 
-                <span>
-                  Timer begins after AI analysis
-                </span>
-              </div>
-            </div>
-          </div>
+                        <span>
+                          {task.resourceInstruction}
+                        </span>
+                      </div>
+                    </div>
 
-          <div className="task-selection-actions">
-            <div
-              className="task-selection-button-grid"
-              aria-label="Task selection buttons"
-            >
-              {orderedTrials.map(
-                (trial) => {
-                  const completed =
-                    trial.status ===
-                    "questionnaire_complete";
+                    <div className="task-assignment-detail">
+                      <Clock3
+                        size={20}
+                        aria-hidden="true"
+                      />
 
-                  const current =
-                    trial.status ===
-                      "active" ||
-                    trial.status ===
-                      "submitted";
+                      <div>
+                        <strong>
+                          3 task options
+                        </strong>
 
-                  const blockedByAnotherTrial =
-                    Boolean(
-                      openTrial &&
-                      openTrial.trialNumber !==
-                        trial.trialNumber,
-                    );
+                        <span>
+                          Complete the assigned task
+                        </span>
+                      </div>
+                    </div>
+                  </div>
 
-                  const disabled =
-                    completed ||
-                    blockedByAnotherTrial ||
-                    allTrialsComplete;
-
-                  return (
+                  <div className="task-selection-actions task-selection-compact-actions">
                     <button
-                      key={
-                        trial.trialNumber
-                      }
                       type="button"
                       className={[
-                        completed
+                        task.completed
                           ? "study-completed-button"
                           : "study-primary-button",
 
                         "task-selection-main-button",
+                        "task-selection-compact-button",
 
-                        current
+                        task.hasOpenSubtask
                           ? "task-selection-main-button-current"
                           : "",
                       ]
@@ -655,48 +724,59 @@ export default function TaskSelectionPage() {
                         .join(
                           " ",
                         )}
-                      disabled={
-                        disabled
-                      }
+                      disabled={disabled}
                       onClick={() => {
-                        handleOpenTrial(
-                          trial,
+                        handleOpenTask(
+                          task,
                         );
                       }}
                     >
-                      {completed && (
+                      {task.completed ? (
                         <CheckCircle2
                           size={18}
                           aria-hidden="true"
                         />
-                      )}
-
-                      <span>
-                        {getTrialButtonLabel(
-                          trial,
-                        )}
-                      </span>
-
-                      {!completed && (
-                        <ArrowRight
+                      ) : blockedByAnotherTask ? (
+                        <LockKeyhole
                           size={18}
                           aria-hidden="true"
                         />
-                      )}
-                    </button>
-                  );
-                },
-              )}
-            </div>
+                      ) : null}
 
-            {openTrial && (
-              <p className="task-selection-blocked-message">
-                Complete the current task and its questionnaire
-                before opening another task.
-              </p>
-            )}
-          </div>
-        </section>
+                      <span>
+                        {getTaskButtonLabel(
+                          task,
+                          blockedByAnotherTask,
+                        )}
+                      </span>
+
+                      {!task.completed &&
+                        !blockedByAnotherTask && (
+                          <ArrowRight
+                            size={18}
+                            aria-hidden="true"
+                          />
+                        )}
+                    </button>
+
+                    <p className="task-selection-subtask-progress task-selection-task-progress">
+                      {task.completed
+                        ? "Assigned task completed"
+                        : "Select 1 of 3 task options"}
+                    </p>
+                  </div>
+                </section>
+              );
+            },
+          )}
+        </div>
+
+        {openTrial && (
+          <p className="task-selection-blocked-message">
+            Complete the current task and its questionnaire before
+            opening another constraint-satisfaction problem.
+          </p>
+        )}
 
         <section className="task-progress-card">
           <div className="task-progress-header">
@@ -705,36 +785,28 @@ export default function TaskSelectionPage() {
             </h2>
 
             <span>
-              {completedTrialCount} of{" "}
-              {TOTAL_TRIALS} tasks completed
+              {completedTaskCount} of{" "}
+              {TOTAL_EXPERIMENT_TASKS} problems completed
             </span>
           </div>
 
           <div
             className="task-progress-steps"
-            aria-label="Task completion progress"
+            aria-label="Problem completion progress"
           >
-            {orderedTrials.map(
-              (trial) => {
-                const completed =
-                  trial.status ===
-                  "questionnaire_complete";
-
+            {taskProgress.map(
+              (task) => {
                 const current =
-                  trial.status ===
-                    "active" ||
-                  trial.status ===
-                    "submitted";
+                  !task.completed &&
+                  task.hasStarted;
 
                 return (
                   <div
-                    key={
-                      trial.trialNumber
-                    }
+                    key={task.id}
                     className={[
                       "task-progress-step",
 
-                      completed
+                      task.completed
                         ? "task-progress-step-complete"
                         : "",
 
@@ -750,25 +822,18 @@ export default function TaskSelectionPage() {
                       )}
                   >
                     <div className="task-progress-step-marker">
-                      {completed ? (
+                      {task.completed ? (
                         <CheckCircle2
                           size={19}
                           aria-hidden="true"
                         />
                       ) : (
-                        getParticipantTaskNumber(
-                          trial,
-                        )
+                        task.taskNumber
                       )}
                     </div>
 
                     <span>
-                      Task{" "}
-                      {
-                        getParticipantTaskNumber(
-                          trial,
-                        )
-                      }
+                      Problem {task.taskNumber}
                     </span>
                   </div>
                 );
@@ -786,11 +851,11 @@ export default function TaskSelectionPage() {
 
             <div>
               <h2>
-                All scheduling tasks completed
+                All assigned tasks completed
               </h2>
 
               <p>
-                Continue to the post task questionnaire to
+                Continue to the post-experiment questionnaire to
                 complete the final study questions.
               </p>
             </div>
@@ -802,7 +867,7 @@ export default function TaskSelectionPage() {
                 handlePostExperiment
               }
             >
-              Proceed to post task questionnaire
+              Proceed to post-experiment questionnaire
 
               <ArrowRight
                 size={18}

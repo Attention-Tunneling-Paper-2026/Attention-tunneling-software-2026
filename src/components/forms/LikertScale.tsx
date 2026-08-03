@@ -85,6 +85,9 @@ export default function LikertScale({
   const labelsId =
     `${generatedId}-labels`;
 
+  const statusId =
+    `${generatedId}-status`;
+
   const options =
     createLikertOptions(
       min,
@@ -100,11 +103,23 @@ export default function LikertScale({
       ? value
       : null;
 
+  const minimumOption =
+    options[0] ??
+    min;
+
+  const maximumOption =
+    options[
+      options.length -
+      1
+    ] ??
+    max;
+
   const fieldsetClassName = [
     "likert-card",
+    "questionnaire-rating-card",
 
     disabled
-      ? "likert-card-disabled"
+      ? "likert-card-disabled questionnaire-rating-card-disabled"
       : "",
 
     className,
@@ -119,6 +134,7 @@ export default function LikertScale({
   const describedBy = [
     descriptionId,
     labelsId,
+    statusId,
   ]
     .filter(
       Boolean,
@@ -127,16 +143,11 @@ export default function LikertScale({
       " ",
     );
 
-  const minimumOption =
-    options[0] ??
-    min;
-
-  const maximumOption =
-    options[
-      options.length -
-      1
-    ] ??
-    max;
+  const optionCountClass =
+    options.length >
+      0
+      ? `questionnaire-rating-options-${options.length}`
+      : "";
 
   return (
     <fieldset
@@ -153,7 +164,7 @@ export default function LikertScale({
         describedBy
       }
     >
-      <legend>
+      <legend className="likert-legend questionnaire-rating-title">
         <span className="likert-legend-content">
           <strong
             id={
@@ -162,26 +173,56 @@ export default function LikertScale({
           >
             {title}
           </strong>
-
-          {description ? (
-            <span
-              id={
-                descriptionId
-              }
-              className="likert-description"
-            >
-              {description}
-            </span>
-          ) : null}
         </span>
       </legend>
 
+      <div className="likert-header questionnaire-rating-header">
+        {description ? (
+          <p
+            id={
+              descriptionId
+            }
+            className="likert-description questionnaire-rating-question"
+          >
+            {description}
+          </p>
+        ) : (
+          <span
+            className="likert-description-spacer"
+            aria-hidden="true"
+          />
+        )}
+
+        <output
+          id={
+            statusId
+          }
+          className="likert-value questionnaire-rating-value"
+          aria-live="polite"
+        >
+          {selectedValue ===
+          null
+            ? "Not selected"
+            : `${selectedValue} of ${maximumOption}`}
+        </output>
+      </div>
+
       <div
-        className="likert-options"
+        className={[
+          "likert-options",
+          "questionnaire-rating-options",
+          optionCountClass,
+        ]
+          .filter(
+            Boolean,
+          )
+          .join(
+            " ",
+          )}
         role="radiogroup"
         aria-label={
           ariaLabel ??
-          title
+          `${title} rating from ${minimumOption} to ${maximumOption}`
         }
         aria-required={
           required
@@ -211,9 +252,10 @@ export default function LikertScale({
                 }
                 className={[
                   "likert-option",
+                  "questionnaire-rating-option",
 
                   selected
-                    ? "likert-option-selected"
+                    ? "likert-option-selected questionnaire-rating-option-selected"
                     : "",
                 ]
                   .filter(
@@ -227,7 +269,7 @@ export default function LikertScale({
                   id={
                     optionId
                   }
-                  className="likert-input"
+                  className="likert-input questionnaire-rating-input"
                   type="radio"
                   name={
                     name
@@ -245,15 +287,15 @@ export default function LikertScale({
                     disabled
                   }
                   aria-label={`${title}: ${option} out of ${maximumOption}`}
-                  onChange={() =>
+                  onChange={() => {
                     onChange(
                       option,
-                    )
-                  }
+                    );
+                  }}
                 />
 
                 <span
-                  className="likert-number"
+                  className="likert-number questionnaire-rating-number"
                   aria-hidden="true"
                 >
                   {option}
@@ -268,7 +310,7 @@ export default function LikertScale({
         id={
           labelsId
         }
-        className="likert-labels"
+        className="likert-labels questionnaire-rating-labels"
       >
         <span>
           <strong>

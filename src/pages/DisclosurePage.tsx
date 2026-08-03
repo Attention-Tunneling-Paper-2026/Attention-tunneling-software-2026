@@ -27,7 +27,15 @@ import {
   useStudySessionStore,
 } from "../store/studySessionStore";
 
-const TOTAL_TRIALS = 3;
+const TOTAL_EXPERIMENT_TASKS =
+  3;
+
+const TRIALS_PER_TASK =
+  3;
+
+const TOTAL_STUDY_TRIALS =
+  TOTAL_EXPERIMENT_TASKS *
+  TRIALS_PER_TASK;
 
 export default function DisclosurePage() {
   const navigate =
@@ -126,9 +134,23 @@ export default function DisclosurePage() {
         "questionnaire_complete",
     ).length;
 
+  const completedTaskCount =
+    Math.min(
+      TOTAL_EXPERIMENT_TASKS,
+      Math.floor(
+        completedTrialCount /
+          TRIALS_PER_TASK,
+      ),
+    );
+
+  const allStudyTrialsComplete =
+    completedTrialCount ===
+    TOTAL_STUDY_TRIALS;
+
   useEffect(() => {
     if (
-      !postExperimentCompleted
+      !postExperimentCompleted ||
+      !allStudyTrialsComplete
     ) {
       navigate(
         "/post-experiment",
@@ -148,6 +170,7 @@ export default function DisclosurePage() {
       sessionId,
     );
   }, [
+    allStudyTrialsComplete,
     navigate,
     participantId,
     postExperimentCompleted,
@@ -159,6 +182,7 @@ export default function DisclosurePage() {
   useEffect(() => {
     if (
       !postExperimentCompleted ||
+      !allStudyTrialsComplete ||
       disclosureLogged.current
     ) {
       return;
@@ -200,14 +224,24 @@ export default function DisclosurePage() {
         page:
           "disclosure",
 
+        completedTaskCount,
+
+        totalExperimentTasks:
+          TOTAL_EXPERIMENT_TASKS,
+
         completedTrialCount,
 
+        trialsPerTask:
+          TRIALS_PER_TASK,
+
         totalTrials:
-          TOTAL_TRIALS,
+          TOTAL_STUDY_TRIALS,
       },
     });
   }, [
     addEvent,
+    allStudyTrialsComplete,
+    completedTaskCount,
     completedTrialCount,
     disclosureViewed,
     events,
@@ -226,7 +260,8 @@ export default function DisclosurePage() {
 
   function handleCompleteStudy() {
     if (
-      studyCompleted
+      studyCompleted ||
+      !allStudyTrialsComplete
     ) {
       return;
     }
@@ -263,10 +298,18 @@ export default function DisclosurePage() {
         page:
           "disclosure",
 
+        completedTaskCount,
+
+        totalExperimentTasks:
+          TOTAL_EXPERIMENT_TASKS,
+
         completedTrialCount,
 
+        trialsPerTask:
+          TRIALS_PER_TASK,
+
         totalTrials:
-          TOTAL_TRIALS,
+          TOTAL_STUDY_TRIALS,
 
         disclosureViewed:
           true,
@@ -277,7 +320,8 @@ export default function DisclosurePage() {
   }
 
   if (
-    !postExperimentCompleted
+    !postExperimentCompleted ||
+    !allStudyTrialsComplete
   ) {
     return null;
   }
@@ -287,7 +331,7 @@ export default function DisclosurePage() {
       <header className="study-page-header">
         <div className="study-page-header-content">
           <div className="study-page-eyebrow">
-            AI Assisted Scheduling Study
+            AI-Assisted Problem-Solving Study
           </div>
 
           <h1>
@@ -323,13 +367,13 @@ export default function DisclosurePage() {
 
           <div>
             <h2 id="completion-title">
-              Scheduling tasks completed
+              Experiment tasks completed
             </h2>
 
             <p>
-              Participant {participantId} completed{" "}
-              {completedTrialCount} of {TOTAL_TRIALS} task
-              questionnaires.
+              Participant {participantId} completed all{" "}
+              {TOTAL_EXPERIMENT_TASKS} experiment tasks and{" "}
+              {completedTrialCount} task questionnaires.
             </p>
           </div>
         </section>
@@ -353,12 +397,19 @@ export default function DisclosurePage() {
                 The study examines how the form of an AI
                 recommendation may influence attention,
                 decision making, and adaptation during
-                complex scheduling tasks.
+                complex constraint-satisfaction problems.
               </p>
             </div>
           </div>
 
           <div className="disclosure-text-card">
+            <p>
+              The three problem domains were symposium
+              scheduling, delivery dispatch, and clinic roster
+              allocation. Each domain was completed using
+              three different forms of AI assistance.
+            </p>
+
             <p>
               In particular, the study investigates whether
               seeing a more concrete AI solution can make
@@ -368,7 +419,7 @@ export default function DisclosurePage() {
             </p>
 
             <p>
-              This pattern is referred to as AI induced
+              This pattern is referred to as AI-induced
               attentional tunneling. It describes a situation
               in which attention becomes concentrated on a
               locally attractive representation while other
@@ -401,48 +452,49 @@ export default function DisclosurePage() {
 
           <div className="disclosure-text-card">
             <p>
-              The recommendation content and schedule
-              artifacts were prepared in advance and
-              presented consistently according to the
-              assigned study condition.
+              The recommendation content and task artifacts
+              were prepared in advance and presented
+              consistently according to the assigned study
+              condition.
             </p>
 
             <p>
-              Participants received one of three forms of
-              assistance during each task:
+              Participants received three forms of assistance
+              within each problem domain:
             </p>
 
             <div className="disclosure-condition-list">
               <div className="disclosure-condition-item">
                 <strong>
-                  Strategy
+                  Low concretization
                 </strong>
 
                 <span>
-                  A general scheduling strategy without
-                  placements on the grid.
+                  A general strategy without placements on the
+                  task grid.
                 </span>
               </div>
 
               <div className="disclosure-condition-item">
                 <strong>
-                  Partial artifact
+                  Medium concretization
                 </strong>
 
                 <span>
-                  The same strategy with several starting
+                  The same strategy with a partially completed
+                  task artifact and several starting
                   placements.
                 </span>
               </div>
 
               <div className="disclosure-condition-item">
                 <strong>
-                  Full artifact
+                  High concretization
                 </strong>
 
                 <span>
                   The same strategy with a complete proposed
-                  schedule.
+                  task solution.
                 </span>
               </div>
             </div>
@@ -450,8 +502,7 @@ export default function DisclosurePage() {
             <p>
               The apparent analysis delay and assistant
               presentation were included to make the
-              interaction feel consistent across
-              participants.
+              interaction feel consistent across participants.
             </p>
           </div>
         </section>
@@ -472,23 +523,30 @@ export default function DisclosurePage() {
               </h2>
 
               <p>
-                The update shown during the scheduling task
-                was an intentional part of the study.
+                The updates shown while tasks were in progress
+                were intentional parts of the study.
               </p>
             </div>
           </div>
 
           <div className="disclosure-text-card">
             <p>
-              The update was used to examine whether
+              The updates concerned a projector failure in the
+              symposium task, a refrigeration failure in the
+              delivery task, and a change in ICU certification
+              availability in the clinic task.
+            </p>
+
+            <p>
+              These updates were used to examine whether
               participants noticed, interpreted, and
-              integrated new information after beginning
-              work from an AI recommendation.
+              integrated new information after beginning work
+              from an AI recommendation.
             </p>
 
             <p>
               Researchers are interested in the time required
-              to respond to the update, the changes made
+              to respond to each update, the changes made
               afterward, and whether participants continued
               following the original solution structure.
             </p>
@@ -520,11 +578,12 @@ export default function DisclosurePage() {
 
           <div className="disclosure-text-card">
             <p>
-              Knowing the precise research purpose or that
-              the AI output was prepared in advance could
-              have caused participants to monitor their own
-              behavior differently, search deliberately for
-              differences, or respond to the task update in
+              Knowing the precise research purpose, the three
+              assistance conditions, or that the AI output was
+              prepared in advance could have caused
+              participants to monitor their behavior
+              differently, deliberately search for condition
+              differences, or respond to the task updates in
               an unnatural way.
             </p>
 
@@ -553,7 +612,7 @@ export default function DisclosurePage() {
 
               <p>
                 The study records interactions needed to
-                understand scheduling behavior.
+                understand constraint-solving behavior.
               </p>
             </div>
           </div>
@@ -561,8 +620,8 @@ export default function DisclosurePage() {
           <div className="disclosure-text-card">
             <p>
               Recorded information may include drag actions,
-              schedule changes, timing, responses to task
-              updates, submitted schedules, and questionnaire
+              task-state changes, timing, responses to task
+              updates, submitted solutions, and questionnaire
               responses.
             </p>
 

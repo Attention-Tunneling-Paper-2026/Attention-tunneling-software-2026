@@ -1,12 +1,183 @@
 import {
+  useParams,
+} from "react-router";
+
+import {
   SYMPOSIUM_TASK_DATA,
 } from "../../data/tasks/symposium";
 
-export default function ConstraintsPanel() {
+type SupportedTaskId =
+  | "symposium"
+  | "delivery"
+  | "clinic";
+
+interface TaskRule {
+  id: string;
+  title: string;
+  description: string;
+}
+
+interface ConstraintsPanelProps {
+  taskId?: SupportedTaskId;
+}
+
+interface TaskRulesContent {
+  constraintsTitle: string;
+  preferencesTitle: string;
+  constraints: readonly TaskRule[];
+  preferences: readonly TaskRule[];
+}
+
+const DELIVERY_CONSTRAINTS: readonly TaskRule[] = [
+  {
+    id: "refrigeration_requirement",
+    title: "Refrigeration requirement",
+    description:
+      "Cold-chain shipments N1, R1, R2, and R3 require refrigeration. They may only use Van A or Van C.",
+  },
+  {
+    id: "van_capacity_requirement",
+    title: "Van capacity requirement",
+    description:
+      "Shipment N3 requires a van capacity of at least 80 units. It may only use Van A or Van B.",
+  },
+  {
+    id: "driver_availability",
+    title: "Driver availability",
+    description:
+      "A driver cannot handle more than one shipment during the same route window.",
+  },
+];
+
+const DELIVERY_PREFERENCES: readonly TaskRule[] = [
+  {
+    id: "delivery-region-grouping",
+    title: "Group delivery regions",
+    description:
+      "Where possible, keep shipments from the same delivery region on the same van.",
+  },
+  {
+    id: "delivery-preferred-window",
+    title: "Use preferred windows",
+    description:
+      "Where possible, schedule shipments in their preferred route windows.",
+  },
+];
+
+const CLINIC_CONSTRAINTS: readonly TaskRule[] = [
+  {
+    id: "icu_requirement",
+    title: "ICU requirement",
+    description:
+      "ICU-required duties N1, R1, R2, and R3 must use an ICU-certified ward. They may only use Ward A or Ward C.",
+  },
+  {
+    id: "ward_capacity_requirement",
+    title: "Ward capacity requirement",
+    description:
+      "Duty N3 requires a ward capacity of at least 80 patients. It may only use Ward A or Ward B.",
+  },
+  {
+    id: "nurse_availability",
+    title: "Nurse availability",
+    description:
+      "A nurse cannot perform more than one duty during the same shift.",
+  },
+];
+
+const CLINIC_PREFERENCES: readonly TaskRule[] = [
+  {
+    id: "clinic-specialty-grouping",
+    title: "Group clinical specialties",
+    description:
+      "Where possible, keep duties from the same specialty in the same ward.",
+  },
+  {
+    id: "clinic-preferred-shift",
+    title: "Use preferred shifts",
+    description:
+      "Where possible, assign duties to their preferred shifts.",
+  },
+];
+
+const TASK_RULES: Record<SupportedTaskId, TaskRulesContent> = {
+  symposium: {
+    constraintsTitle:
+      "Scheduling Constraints",
+    preferencesTitle:
+      "Scheduling Preferences",
+    constraints:
+      SYMPOSIUM_TASK_DATA.constraints,
+    preferences:
+      SYMPOSIUM_TASK_DATA.preferences,
+  },
+  delivery: {
+    constraintsTitle:
+      "Delivery Constraints",
+    preferencesTitle:
+      "Delivery Preferences",
+    constraints:
+      DELIVERY_CONSTRAINTS,
+    preferences:
+      DELIVERY_PREFERENCES,
+  },
+  clinic: {
+    constraintsTitle:
+      "Roster Constraints",
+    preferencesTitle:
+      "Roster Preferences",
+    constraints:
+      CLINIC_CONSTRAINTS,
+    preferences:
+      CLINIC_PREFERENCES,
+  },
+};
+
+function isSupportedTaskId(
+  value: unknown,
+): value is SupportedTaskId {
+  return (
+    value === "symposium" ||
+    value === "delivery" ||
+    value === "clinic"
+  );
+}
+
+export default function ConstraintsPanel({
+  taskId,
+}: ConstraintsPanelProps) {
+  const {
+    taskId: routeTaskId,
+  } = useParams<{
+    taskId?: string;
+  }>();
+
+  const resolvedTaskId =
+    taskId ??
+    (isSupportedTaskId(
+      routeTaskId,
+    )
+      ? routeTaskId
+      : "symposium");
+
+  const taskRules =
+    TASK_RULES[
+      resolvedTaskId
+    ];
+
+  const constraintsTitleId =
+    `${resolvedTaskId}-constraints-title`;
+
+  const preferencesTitleId =
+    `${resolvedTaskId}-preferences-title`;
+
   return (
     <aside
       className="panel constraint-panel"
       aria-labelledby="task-rules-title"
+      data-task-id={
+        resolvedTaskId
+      }
     >
       <div
         id="task-rules-title"
@@ -17,23 +188,34 @@ export default function ConstraintsPanel() {
 
       <section
         className="constraint-section"
-        aria-labelledby="scheduling-constraints-title"
+        aria-labelledby={
+          constraintsTitleId
+        }
       >
         <div
-          id="scheduling-constraints-title"
+          id={
+            constraintsTitleId
+          }
           className="constraint-section-title"
         >
-          Scheduling Constraints
+          {
+            taskRules.constraintsTitle
+          }
         </div>
 
         <div
           className="constraint-rules-list"
           role="list"
         >
-          {SYMPOSIUM_TASK_DATA.constraints.map(
-            (constraint, index) => (
+          {taskRules.constraints.map(
+            (
+              constraint,
+              index,
+            ) => (
               <div
-                key={constraint.id}
+                key={
+                  constraint.id
+                }
                 className="constraint-rule"
                 role="listitem"
                 aria-label={`${constraint.title}: ${constraint.description}`}
@@ -48,7 +230,9 @@ export default function ConstraintsPanel() {
                 </span>
 
                 <span>
-                  {constraint.description}
+                  {
+                    constraint.description
+                  }
                 </span>
               </div>
             ),
@@ -58,23 +242,34 @@ export default function ConstraintsPanel() {
 
       <section
         className="preference-section"
-        aria-labelledby="scheduling-preferences-title"
+        aria-labelledby={
+          preferencesTitleId
+        }
       >
         <div
-          id="scheduling-preferences-title"
+          id={
+            preferencesTitleId
+          }
           className="preference-section-title"
         >
-          Scheduling Preferences
+          {
+            taskRules.preferencesTitle
+          }
         </div>
 
         <div
           className="preference-rules-list"
           role="list"
         >
-          {SYMPOSIUM_TASK_DATA.preferences.map(
-            (preference, index) => (
+          {taskRules.preferences.map(
+            (
+              preference,
+              index,
+            ) => (
               <div
-                key={preference.id}
+                key={
+                  preference.id
+                }
                 className="preference-rule"
                 role="listitem"
                 aria-label={`${preference.title}: ${preference.description}`}
@@ -89,7 +284,9 @@ export default function ConstraintsPanel() {
                 </span>
 
                 <span>
-                  {preference.description}
+                  {
+                    preference.description
+                  }
                 </span>
               </div>
             ),

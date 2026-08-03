@@ -1,4 +1,8 @@
 import {
+  useParams,
+} from "react-router";
+
+import {
   ROOM_DETAILS,
   ROOMS,
   SLOTS,
@@ -17,60 +21,273 @@ import type {
 
 import ScheduleCell from "./ScheduleCell";
 
-export default function SchedulerGrid() {
-  const placements = useSchedulerStore(
-    (state) => state.placements,
-  );
+type TaskDomainId =
+  | "symposium"
+  | "delivery"
+  | "clinic";
 
-  const trialLocked = useSchedulerStore(
-    (state) => state.trialLocked,
-  );
+interface SchedulerGridProps {
+  taskId?:
+    TaskDomainId;
+}
 
-  function getTalkAtCell(
-    room: Room,
-    slot: Slot,
-  ): Talk | undefined {
-    const placement = placements.find(
-      (item) =>
-        item.room === room &&
-        item.slot === slot,
+interface GridPresentation {
+  unlockedAriaLabel:
+    string;
+
+  lockedAriaLabel:
+    string;
+
+  rowAxisLabel:
+    string;
+
+  getColumnLabel: (
+    slot:
+      Slot,
+  ) => string;
+
+  getRowLabel: (
+    room:
+      Room,
+  ) => string;
+
+  getCapacityLabel: (
+    capacity:
+      number,
+  ) => string;
+
+  getEquipmentLabel: (
+    available:
+      boolean,
+  ) => string;
+
+  hint:
+    string;
+}
+
+const GRID_PRESENTATION: Record<
+  TaskDomainId,
+  GridPresentation
+> = {
+  symposium: {
+    unlockedAriaLabel:
+      "Symposium schedule",
+
+    lockedAriaLabel:
+      "Symposium schedule, locked",
+
+    rowAxisLabel:
+      "Room",
+
+    getColumnLabel: (
+      slot,
+    ) => `Slot ${slot}`,
+
+    getRowLabel: (
+      room,
+    ) => `Room ${room}`,
+
+    getCapacityLabel: (
+      capacity,
+    ) => `${capacity} seats`,
+
+    getEquipmentLabel: (
+      available,
+    ) =>
+      available
+        ? "Projector available"
+        : "No projector",
+
+    hint:
+      "Demo talks require a projector room. Availability windows, room restrictions, and capacity requirements are enforced while dragging. Speaker conflicts remain visible.",
+  },
+
+  delivery: {
+    unlockedAriaLabel:
+      "Delivery dispatch plan",
+
+    lockedAriaLabel:
+      "Delivery dispatch plan, locked",
+
+    rowAxisLabel:
+      "Van",
+
+    getColumnLabel: (
+      slot,
+    ) => `Window ${slot}`,
+
+    getRowLabel: (
+      room,
+    ) => `Van ${room}`,
+
+    getCapacityLabel: (
+      capacity,
+    ) => `${capacity}-unit capacity`,
+
+    getEquipmentLabel: (
+      available,
+    ) =>
+      available
+        ? "Refrigeration available"
+        : "No refrigeration",
+
+    hint:
+      "Cold-chain shipments require a refrigerated van. Availability windows, vehicle restrictions, and capacity requirements are enforced while dragging. Driver conflicts remain visible.",
+  },
+
+  clinic: {
+    unlockedAriaLabel:
+      "Clinic roster",
+
+    lockedAriaLabel:
+      "Clinic roster, locked",
+
+    rowAxisLabel:
+      "Ward",
+
+    getColumnLabel: (
+      slot,
+    ) => `Shift ${slot}`,
+
+    getRowLabel: (
+      room,
+    ) => `Ward ${room}`,
+
+    getCapacityLabel: (
+      capacity,
+    ) => `${capacity}-patient capacity`,
+
+    getEquipmentLabel: (
+      available,
+    ) =>
+      available
+        ? "ICU certified"
+        : "Not ICU certified",
+
+    hint:
+      "ICU-required duties must be assigned to an ICU-certified ward. Availability windows, ward restrictions, and capacity requirements are enforced while dragging. Nurse conflicts remain visible.",
+  },
+};
+
+function isTaskDomainId(
+  value:
+    unknown,
+): value is TaskDomainId {
+  return (
+    value === "symposium" ||
+    value === "delivery" ||
+    value === "clinic"
+  );
+}
+
+export default function SchedulerGrid({
+  taskId,
+}: SchedulerGridProps) {
+  const {
+    taskId:
+      taskIdParam,
+  } = useParams<{
+    taskId?:
+      string;
+  }>();
+
+  const resolvedTaskId:
+    TaskDomainId =
+      isTaskDomainId(
+        taskId,
+      )
+        ? taskId
+        : isTaskDomainId(
+              taskIdParam,
+            )
+          ? taskIdParam
+          : "symposium";
+
+  const presentation =
+    GRID_PRESENTATION[
+      resolvedTaskId
+    ];
+
+  const placements =
+    useSchedulerStore(
+      (state) =>
+        state.placements,
     );
 
-    if (!placement) {
+  const trialLocked =
+    useSchedulerStore(
+      (state) =>
+        state.trialLocked,
+    );
+
+  function getTalkAtCell(
+    room:
+      Room,
+    slot:
+      Slot,
+  ): Talk | undefined {
+    const placement =
+      placements.find(
+        (item) =>
+          item.room === room &&
+          item.slot === slot,
+      );
+
+    if (
+      !placement
+    ) {
       return undefined;
     }
 
-    return getTalkById(placement.talkId);
+    return getTalkById(
+      placement.talkId,
+    );
   }
 
   /*
    * Speaker identity remains internal here. ScheduleCell converts it to
-   * the participant-facing label, such as Kim to Dr. Chaky.
+   * the participant-facing label. In the delivery and clinic skins, the
+   * same shared identity field represents the assigned driver or nurse.
    */
-  function hasSpeakerConflict(
-    talkId: string,
-    slot: Slot,
+  function hasResourceConflict(
+    talkId:
+      string,
+    slot:
+      Slot,
   ): boolean {
-    const talk = getTalkById(talkId);
+    const talk =
+      getTalkById(
+        talkId,
+      );
 
-    if (!talk?.speaker) {
+    if (
+      !talk?.speaker
+    ) {
       return false;
     }
 
-    return placements.some((placement) => {
-      if (
-        placement.slot !== slot ||
-        placement.talkId === talk.id
-      ) {
-        return false;
-      }
+    return placements.some(
+      (placement) => {
+        if (
+          placement.slot !==
+            slot ||
+          placement.talkId ===
+            talk.id
+        ) {
+          return false;
+        }
 
-      const otherTalk = getTalkById(
-        placement.talkId,
-      );
+        const otherTalk =
+          getTalkById(
+            placement.talkId,
+          );
 
-      return otherTalk?.speaker === talk.speaker;
-    });
+        return (
+          otherTalk?.speaker ===
+          talk.speaker
+        );
+      },
+    );
   }
 
   return (
@@ -78,11 +295,18 @@ export default function SchedulerGrid() {
       className="scheduler-grid"
       aria-label={
         trialLocked
-          ? "Symposium schedule, locked"
-          : "Symposium schedule"
+          ? presentation.lockedAriaLabel
+          : presentation.unlockedAriaLabel
       }
-      aria-disabled={trialLocked}
-      data-trial-locked={trialLocked}
+      aria-disabled={
+        trialLocked
+      }
+      data-trial-locked={
+        trialLocked
+      }
+      data-task-id={
+        resolvedTaskId
+      }
     >
       <div
         className="grid-header"
@@ -92,87 +316,106 @@ export default function SchedulerGrid() {
           className="slot-label"
           aria-hidden="true"
         >
-          Room
+          {presentation.rowAxisLabel}
         </div>
 
-        {SLOTS.map((slot) => (
-          <div
-            key={slot}
-            className="slot-label"
-            role="columnheader"
-          >
-            Slot {slot}
-          </div>
-        ))}
+        {SLOTS.map(
+          (slot) => (
+            <div
+              key={slot}
+              className="slot-label"
+              role="columnheader"
+            >
+              {presentation.getColumnLabel(
+                slot,
+              )}
+            </div>
+          ),
+        )}
       </div>
 
       <div
         role="grid"
-        aria-colcount={SLOTS.length + 1}
-        aria-rowcount={ROOMS.length}
-        aria-readonly={trialLocked}
+        aria-colcount={
+          SLOTS.length + 1
+        }
+        aria-rowcount={
+          ROOMS.length
+        }
+        aria-readonly={
+          trialLocked
+        }
       >
-        {ROOMS.map((room) => {
-          const details = ROOM_DETAILS[room];
+        {ROOMS.map(
+          (room) => {
+            const details =
+              ROOM_DETAILS[
+                room
+              ];
 
-          return (
-            <div
-              key={room}
-              className="room-row"
-              role="row"
-            >
+            return (
               <div
-                className="room-label"
-                role="rowheader"
+                key={room}
+                className="room-row"
+                role="row"
               >
-                <strong>
-                  Room {room}
-                </strong>
+                <div
+                  className="room-label"
+                  role="rowheader"
+                >
+                  <strong>
+                    {presentation.getRowLabel(
+                      room,
+                    )}
+                  </strong>
 
-                <span>
-                  {details.capacity} seats
-                </span>
+                  <span>
+                    {presentation.getCapacityLabel(
+                      details.capacity,
+                    )}
+                  </span>
 
-                <span>
-                  {details.hasProjector
-                    ? "Projector available"
-                    : "No projector"}
-                </span>
+                  <span>
+                    {presentation.getEquipmentLabel(
+                      details.hasProjector,
+                    )}
+                  </span>
+                </div>
+
+                {SLOTS.map(
+                  (slot) => {
+                    const talk =
+                      getTalkAtCell(
+                        room,
+                        slot,
+                      );
+
+                    return (
+                      <ScheduleCell
+                        key={`${room}-${slot}`}
+                        room={room}
+                        slot={slot}
+                        talk={talk}
+                        hasConflict={
+                          talk
+                            ? hasResourceConflict(
+                                talk.id,
+                                slot,
+                              )
+                            : false
+                        }
+                      />
+                    );
+                  },
+                )}
               </div>
-
-              {SLOTS.map((slot) => {
-                const talk = getTalkAtCell(
-                  room,
-                  slot,
-                );
-
-                return (
-                  <ScheduleCell
-                    key={`${room}-${slot}`}
-                    room={room}
-                    slot={slot}
-                    talk={talk}
-                    hasConflict={
-                      talk
-                        ? hasSpeakerConflict(
-                            talk.id,
-                            slot,
-                          )
-                        : false
-                    }
-                  />
-                );
-              })}
-            </div>
-          );
-        })}
+            );
+          },
+        )}
       </div>
 
       <div className="grid-hint">
-        Demo talks require a projector room.
-        Availability windows, room restrictions,
-        and capacity requirements are enforced while
-        dragging. Speaker conflicts remain visible.
+        {presentation.hint}
       </div>
     </section>
   );

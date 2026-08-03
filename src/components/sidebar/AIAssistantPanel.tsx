@@ -5,6 +5,10 @@ import {
 } from "lucide-react";
 
 import {
+  useParams,
+} from "react-router";
+
+import {
   SYMPOSIUM_TASK_DATA,
 } from "../../data/tasks/symposium";
 
@@ -12,24 +16,151 @@ import {
   useSchedulerStore,
 } from "../../store/schedulerStore";
 
-const SHARED_RECOMMENDATION =
-  "Organize by topic tracks: Room A = NLP, Room B = Health, Room C = Robotics, ordered by speaker availability.";
+type TaskDomainId =
+  | "symposium"
+  | "delivery"
+  | "clinic";
 
-export default function AIAssistantPanel() {
-  const level = useSchedulerStore(
-    (state) => state.level,
+interface AIAssistantPanelProps {
+  taskId?:
+    TaskDomainId;
+}
+
+interface TaskAssistantPresentation {
+  recommendation:
+    string;
+
+  partialPrefillAcknowledgment:
+    string;
+
+  fullPrefillAcknowledgment:
+    string;
+
+  reviewMessage:
+    string;
+}
+
+const TASK_ASSISTANT_PRESENTATION: Record<
+  TaskDomainId,
+  TaskAssistantPresentation
+> = {
+  symposium: {
+    recommendation:
+      "Organize by topic tracks: Room A = NLP, Room B = Health, Room C = Robotics, ordered by speaker availability.",
+
+    partialPrefillAcknowledgment:
+      "I have placed several talks on the schedule as a starting point. Complete the remaining assignments and revise any placement that conflicts with the task constraints.",
+
+    fullPrefillAcknowledgment:
+      "I have filled the schedule using this topic-track structure. Review every talk placement and revise any placement that conflicts with the task constraints.",
+
+    reviewMessage:
+      "Review the recommendation against all task constraints before submitting your final schedule.",
+  },
+
+  delivery: {
+    recommendation:
+      "Organize by delivery regions: Van A = North region, Van B = Central region, Van C = South region, ordered by driver availability.",
+
+    partialPrefillAcknowledgment:
+      "I have placed several shipments in the dispatch plan as a starting point. Complete the remaining assignments and revise any placement that conflicts with the task constraints.",
+
+    fullPrefillAcknowledgment:
+      "I have filled the dispatch plan using this regional structure. Review every shipment assignment and revise any placement that conflicts with the task constraints.",
+
+    reviewMessage:
+      "Review the recommendation against all task constraints before submitting your final dispatch plan.",
+  },
+
+  clinic: {
+    recommendation:
+      "Organize by clinical specialties: Ward A = Emergency care, Ward B = General medicine, Ward C = Critical care, ordered by nurse availability.",
+
+    partialPrefillAcknowledgment:
+      "I have placed several clinical duties in the roster as a starting point. Complete the remaining assignments and revise any placement that conflicts with the task constraints.",
+
+    fullPrefillAcknowledgment:
+      "I have filled the roster using this specialty-based structure. Review every duty assignment and revise any placement that conflicts with the task constraints.",
+
+    reviewMessage:
+      "Review the recommendation against all task constraints before submitting your final roster.",
+  },
+};
+
+function isTaskDomainId(
+  value:
+    unknown,
+): value is TaskDomainId {
+  return (
+    value === "symposium" ||
+    value === "delivery" ||
+    value === "clinic"
   );
+}
+
+export default function AIAssistantPanel({
+  taskId,
+}: AIAssistantPanelProps) {
+  const {
+    taskId:
+      routeTaskId,
+  } = useParams<{
+    taskId?:
+      string;
+  }>();
+
+  const resolvedTaskId:
+    TaskDomainId =
+      isTaskDomainId(
+        taskId,
+      )
+        ? taskId
+        : isTaskDomainId(
+              routeTaskId,
+            )
+          ? routeTaskId
+          : "symposium";
+
+  const level =
+    useSchedulerStore(
+      (state) =>
+        state.level,
+    );
 
   const assistantContent =
     SYMPOSIUM_TASK_DATA
-      .assistantByCondition[level];
+      .assistantByCondition[
+        level
+      ];
+
+  const presentation =
+    TASK_ASSISTANT_PRESENTATION[
+      resolvedTaskId
+    ];
+
+  const prefillAcknowledgment =
+    level === "B"
+      ? presentation
+          .partialPrefillAcknowledgment
+      : level === "C"
+        ? presentation
+            .fullPrefillAcknowledgment
+        : null;
+
+  const contentVersion =
+    `${assistantContent.contentVersion}-${resolvedTaskId}-v1`;
 
   return (
     <aside
       className="panel ai-assistant-panel"
-      aria-label={assistantContent.name}
+      aria-label={
+        assistantContent.name
+      }
       data-content-version={
-        assistantContent.contentVersion
+        contentVersion
+      }
+      data-task-id={
+        resolvedTaskId
       }
     >
       <div className="ai-panel-header">
@@ -51,7 +182,10 @@ export default function AIAssistantPanel() {
               aria-hidden="true"
             />
 
-            {assistantContent.statusLabel}
+            {
+              assistantContent
+                .statusLabel
+            }
           </div>
         </div>
       </div>
@@ -70,19 +204,23 @@ export default function AIAssistantPanel() {
 
           <div className="ai-message-bubble">
             <div className="ai-message-label">
-              {assistantContent.recommendationLabel}
+              {
+                assistantContent
+                  .recommendationLabel
+              }
             </div>
 
             <p>
-              {SHARED_RECOMMENDATION}
+              {
+                presentation
+                  .recommendation
+              }
             </p>
 
-            {assistantContent
-              .prefillAcknowledgment ? (
+            {prefillAcknowledgment ? (
               <p>
                 {
-                  assistantContent
-                    .prefillAcknowledgment
+                  prefillAcknowledgment
                 }
               </p>
             ) : null}
@@ -97,8 +235,10 @@ export default function AIAssistantPanel() {
         />
 
         <span>
-          Review the recommendation against all task
-          constraints before submitting your final schedule.
+          {
+            presentation
+              .reviewMessage
+          }
         </span>
       </div>
     </aside>

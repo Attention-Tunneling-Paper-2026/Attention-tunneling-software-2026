@@ -78,6 +78,7 @@ import type {
   Placement,
   Room,
   Slot,
+  StudyTaskId,
   StudyTrialNumber,
   StudyTrialOrder,
 } from "../types/scheduler";
@@ -102,11 +103,144 @@ const PROBE_COLLAPSE_SECONDS =
 const AI_ANALYSIS_DELAY_MS =
   1000;
 
-const MACRO_STRUCTURE_DEFINITION =
-  "room_majority_topic_mapping_ignoring_slot_order";
+const TOTAL_TASK_DOMAINS =
+  3;
 
-const THEORETICAL_EDIT_TAXONOMY_VERSION =
-  "symposium_edit_taxonomy_v1";
+const TRIALS_PER_TASK =
+  3;
+
+const TOTAL_STUDY_TRIALS =
+  TOTAL_TASK_DOMAINS *
+  TRIALS_PER_TASK;
+
+interface TaskPresentation {
+  title:
+    string;
+
+  summaryTitle:
+    string;
+
+  summaryDescription:
+    string;
+
+  submitLabel:
+    string;
+
+  solutionNoun:
+    string;
+
+  recommendationNoun:
+    string;
+
+  pageId:
+    string;
+
+  macroStructureDefinition:
+    string;
+
+  theoreticalEditTaxonomyVersion:
+    string;
+}
+
+function getTaskPresentation(
+  taskId:
+    StudyTaskId,
+): TaskPresentation {
+  switch (
+    taskId as string
+  ) {
+    case "delivery":
+      return {
+        title:
+          "Delivery Dispatch",
+
+        summaryTitle:
+          "Delivery Dispatch Task Summary",
+
+        summaryDescription:
+          "Arrange all twelve shipments across three vans and four route windows while satisfying the refrigeration, capacity, and shared-driver constraints.",
+
+        submitLabel:
+          "Submit Dispatch",
+
+        solutionNoun:
+          "dispatch plan",
+
+        recommendationNoun:
+          "dispatch recommendation",
+
+        pageId:
+          "delivery_dispatch",
+
+        macroStructureDefinition:
+          "van_majority_region_mapping_ignoring_route_window_order",
+
+        theoreticalEditTaxonomyVersion:
+          "delivery_edit_taxonomy_v1",
+      };
+
+    case "clinic":
+      return {
+        title:
+          "Clinic Roster",
+
+        summaryTitle:
+          "Clinic Roster Task Summary",
+
+        summaryDescription:
+          "Arrange all twelve nursing duties across three wards and four shifts while satisfying the ICU certification, capacity, and shared-nurse constraints.",
+
+        submitLabel:
+          "Submit Roster",
+
+        solutionNoun:
+          "roster",
+
+        recommendationNoun:
+          "roster recommendation",
+
+        pageId:
+          "clinic_roster",
+
+        macroStructureDefinition:
+          "ward_majority_specialty_mapping_ignoring_shift_order",
+
+        theoreticalEditTaxonomyVersion:
+          "clinic_edit_taxonomy_v1",
+      };
+
+    case "symposium":
+    default:
+      return {
+        title:
+          "Symposium Scheduler",
+
+        summaryTitle:
+          "Symposium Task Summary",
+
+        summaryDescription:
+          "Arrange all twelve talks across three rooms and four time slots while satisfying the projector, capacity, and shared-speaker constraints.",
+
+        submitLabel:
+          "Submit Schedule",
+
+        solutionNoun:
+          "schedule",
+
+        recommendationNoun:
+          "scheduling recommendation",
+
+        pageId:
+          "symposium_scheduler",
+
+        macroStructureDefinition:
+          "room_majority_topic_mapping_ignoring_slot_order",
+
+        theoreticalEditTaxonomyVersion:
+          "symposium_edit_taxonomy_v1",
+      };
+  }
+}
 
 type AssistantStatus =
   | "idle"
@@ -114,6 +248,9 @@ type AssistantStatus =
   | "ready";
 
 interface SymposiumSchedulerProps {
+  taskId:
+    StudyTaskId;
+
   taskNumber:
     StudyTrialNumber;
 }
@@ -281,10 +418,30 @@ function getEditCategory(
 }
 
 export default function SymposiumScheduler({
+  taskId,
   taskNumber,
 }: SymposiumSchedulerProps) {
   const navigate =
     useNavigate();
+
+  const taskPresentation =
+    getTaskPresentation(
+      taskId,
+    );
+
+  const taskPageId =
+    taskPresentation.pageId;
+
+  const macroStructureDefinition =
+    taskPresentation
+      .macroStructureDefinition;
+
+  const theoreticalEditTaxonomyVersion =
+    taskPresentation
+      .theoreticalEditTaxonomyVersion;
+
+  const taskKey =
+    `${taskId}:${taskNumber}`;
 
   const [
     remainingSeconds,
@@ -348,6 +505,11 @@ export default function SymposiumScheduler({
   ] = useState(
     false,
   );
+
+  const initializedTaskKeyRef =
+    useRef<string | null>(
+      null,
+    );
 
   const eventTrialStartedRef =
     useRef(
@@ -516,8 +678,10 @@ export default function SymposiumScheduler({
       (state) =>
         state.trials.find(
           (trial) =>
+            trial.taskId ===
+              taskId &&
             trial.trialNumber ===
-            taskNumber,
+              taskNumber,
         ),
     );
 
@@ -632,9 +796,9 @@ export default function SymposiumScheduler({
     );
 
   /*
-   * Manual submission requires a complete schedule with no original
-   * speaker conflicts. Semantic probe compliance is measured but never
-   * gates submission.
+   * Manual submission requires the current arrangement to satisfy the
+   * task's three main constraints. Semantic probe compliance is measured
+   * but never gates submission.
    */
   const manualSubmitAllowed =
     assistantReady &&
@@ -652,24 +816,31 @@ export default function SymposiumScheduler({
       false,
     );
   }, [
+    taskId,
     taskNumber,
   ]);
 
   useEffect(() => {
     if (
       schedulerTrialNumber !==
-      taskNumber
+        taskNumber ||
+      initializedTaskKeyRef.current !==
+        taskKey
     ) {
       initializeTrial(
         taskNumber,
         conditionOrder,
         trialOrder,
       );
+
+      initializedTaskKeyRef.current =
+        taskKey;
     }
   }, [
     conditionOrder,
     initializeTrial,
     schedulerTrialNumber,
+    taskKey,
     taskNumber,
     trialOrder,
   ]);
@@ -686,7 +857,7 @@ export default function SymposiumScheduler({
 
     startEventTrial({
       trialId:
-        `symposium-trial-${taskNumber}`,
+        `${taskId}-trial-${taskNumber}`,
 
       trialNumber:
         taskNumber,
@@ -707,6 +878,7 @@ export default function SymposiumScheduler({
     probeExposureNumber,
     probeNaive,
     startEventTrial,
+    taskId,
     taskNumber,
     trialOrder,
   ]);
@@ -745,7 +917,7 @@ export default function SymposiumScheduler({
 
             metadata: {
               page:
-                "symposium_scheduler",
+                taskPageId,
 
               taskNumber,
 
@@ -778,7 +950,7 @@ export default function SymposiumScheduler({
 
             metadata: {
               page:
-                "symposium_scheduler",
+                taskPageId,
 
               taskNumber,
 
@@ -812,6 +984,7 @@ export default function SymposiumScheduler({
     markAssistantAnalysisCompleted,
     markAssistantRecommendationShown,
     taskNumber,
+    taskPageId,
   ]);
 
   useEffect(() => {
@@ -965,12 +1138,18 @@ export default function SymposiumScheduler({
 
       metadata: {
         taskId:
-          "symposium",
+          taskId,
 
         taskNumber,
 
         totalTrials:
-          3,
+          TOTAL_STUDY_TRIALS,
+
+        totalTaskDomains:
+          TOTAL_TASK_DOMAINS,
+
+        trialsPerTask:
+          TRIALS_PER_TASK,
 
         trialOrder,
 
@@ -1043,10 +1222,10 @@ export default function SymposiumScheduler({
           initialSnapshot.roomCompositionSignature,
 
         macroStructureDefinition:
-          MACRO_STRUCTURE_DEFINITION,
+          macroStructureDefinition,
 
         theoreticalEditTaxonomyVersion:
-          THEORETICAL_EDIT_TAXONOMY_VERSION,
+          theoreticalEditTaxonomyVersion,
 
         initialDistanceToBestPostProbeSolution:
           initialSnapshot.distanceToBestPostProbeSolution,
@@ -1067,8 +1246,11 @@ export default function SymposiumScheduler({
     level,
     markTrialTimerStarted,
     probeExposureNumber,
+    macroStructureDefinition,
     probeNaive,
+    taskId,
     taskNumber,
+    theoreticalEditTaxonomyVersion,
     trialOrder,
   ]);
 
@@ -1159,7 +1341,7 @@ export default function SymposiumScheduler({
 
       metadata: {
         taskId:
-          "symposium",
+          taskId,
 
         taskNumber,
 
@@ -1171,6 +1353,7 @@ export default function SymposiumScheduler({
     assistantReady,
     expectedCondition,
     remainingSeconds,
+    taskId,
     taskNumber,
     trialSubmitted,
   ]);
@@ -1341,7 +1524,7 @@ export default function SymposiumScheduler({
 
       metadata: {
         taskId:
-          "symposium",
+          taskId,
 
         taskNumber,
 
@@ -1398,6 +1581,7 @@ export default function SymposiumScheduler({
     remainingSeconds,
     setActiveTalkId,
     setTrialLocked,
+    taskId,
     taskNumber,
   ]);
 
@@ -1545,7 +1729,7 @@ export default function SymposiumScheduler({
 
         metadata: {
           taskId:
-            "symposium",
+            taskId,
 
           taskNumber,
 
@@ -1608,6 +1792,7 @@ export default function SymposiumScheduler({
     probeAcknowledged,
     probeVisible,
     remainingSeconds,
+    taskId,
     taskNumber,
     trialSubmitted,
   ]);
@@ -1652,7 +1837,7 @@ export default function SymposiumScheduler({
 
             metadata: {
               taskId:
-                "symposium",
+                taskId,
 
               taskNumber,
 
@@ -1687,6 +1872,7 @@ export default function SymposiumScheduler({
     probeAcknowledged,
     probeCollapsed,
     probeVisible,
+    taskId,
     taskNumber,
     trialSubmitted,
   ]);
@@ -1718,7 +1904,7 @@ export default function SymposiumScheduler({
 
       metadata: {
         page:
-          "symposium_scheduler",
+          taskPageId,
 
         taskNumber,
 
@@ -1752,7 +1938,7 @@ export default function SymposiumScheduler({
 
       metadata: {
         page:
-          "symposium_scheduler",
+          taskPageId,
 
         taskNumber,
 
@@ -1783,7 +1969,7 @@ export default function SymposiumScheduler({
 
       metadata: {
         page:
-          "symposium_scheduler",
+          taskPageId,
 
         taskNumber,
       },
@@ -1807,7 +1993,7 @@ export default function SymposiumScheduler({
 
       metadata: {
         page:
-          "symposium_scheduler",
+          taskPageId,
 
         taskNumber,
       },
@@ -1896,7 +2082,7 @@ export default function SymposiumScheduler({
 
       metadata: {
         taskId:
-          "symposium",
+          taskId,
 
         taskNumber,
 
@@ -1989,7 +2175,7 @@ export default function SymposiumScheduler({
 
       metadata: {
         taskId:
-          "symposium",
+          taskId,
 
         taskNumber,
 
@@ -2129,7 +2315,7 @@ export default function SymposiumScheduler({
 
       metadata: {
         taskId:
-          "symposium",
+          taskId,
 
         taskNumber,
 
@@ -2256,7 +2442,7 @@ export default function SymposiumScheduler({
 
       metadata: {
         taskId:
-          "symposium",
+          taskId,
 
         taskNumber,
 
@@ -2480,7 +2666,7 @@ export default function SymposiumScheduler({
 
           metadata: {
             taskId:
-              "symposium",
+              taskId,
 
             taskNumber,
 
@@ -2713,7 +2899,7 @@ export default function SymposiumScheduler({
 
         metadata: {
           taskId:
-            "symposium",
+            taskId,
 
           taskNumber,
 
@@ -2849,7 +3035,7 @@ export default function SymposiumScheduler({
 
         metadata: {
           taskId:
-            "symposium",
+            taskId,
 
           taskNumber,
 
@@ -2969,7 +3155,7 @@ export default function SymposiumScheduler({
 
         metadata: {
           taskId:
-            "symposium",
+            taskId,
 
           taskNumber,
 
@@ -3127,7 +3313,7 @@ export default function SymposiumScheduler({
 
         metadata: {
           taskId:
-            "symposium",
+            taskId,
 
           taskNumber,
 
@@ -3523,7 +3709,7 @@ export default function SymposiumScheduler({
 
       metadata: {
         taskId:
-          "symposium",
+          taskId,
 
         taskNumber,
 
@@ -3548,13 +3734,13 @@ export default function SymposiumScheduler({
           metrics.roomCompositionSignature,
 
         macroStructureDefinition:
-          MACRO_STRUCTURE_DEFINITION,
+          macroStructureDefinition,
 
         theoreticalEditCategory:
           metrics.theoreticalEditCategory,
 
         theoreticalEditTaxonomyVersion:
-          THEORETICAL_EDIT_TAXONOMY_VERSION,
+          theoreticalEditTaxonomyVersion,
 
         previousDistanceToBestPostProbeSolution:
           metrics.previousDistanceToBestPostProbeSolution,
@@ -3782,7 +3968,7 @@ export default function SymposiumScheduler({
 
     const commonMetadata = {
       taskId:
-        "symposium",
+        taskId,
 
       taskNumber,
 
@@ -3876,10 +4062,10 @@ export default function SymposiumScheduler({
         snapshot.roomCompositionSignature,
 
       macroStructureDefinition:
-        MACRO_STRUCTURE_DEFINITION,
+        macroStructureDefinition,
 
       theoreticalEditTaxonomyVersion:
-        THEORETICAL_EDIT_TAXONOMY_VERSION,
+        theoreticalEditTaxonomyVersion,
 
       distanceToBestPostProbeSolution:
         snapshot.distanceToBestPostProbeSolution,
@@ -4069,7 +4255,7 @@ export default function SymposiumScheduler({
 
     initializeTrialResponse(
       taskNumber,
-      "symposium",
+      taskId,
       expectedCondition,
     );
 
@@ -4224,7 +4410,7 @@ export default function SymposiumScheduler({
     window.setTimeout(
       () => {
         navigate(
-          `/trial-questionnaire/${taskNumber}`,
+          `/trial-questionnaire/${taskId}/${taskNumber}`,
           {
             replace:
               true,
@@ -4236,10 +4422,13 @@ export default function SymposiumScheduler({
               trialOrder,
 
               totalTrials:
-                3,
+                TRIALS_PER_TASK,
+
+              totalStudyTrials:
+                TOTAL_STUDY_TRIALS,
 
               taskId:
-                "symposium",
+                taskId,
 
               condition:
                 expectedCondition,
@@ -4277,15 +4466,19 @@ export default function SymposiumScheduler({
         handleDragEnd
       }
     >
-      <div className="scheduler-page">
+      <div
+        className={`scheduler-page scheduler-page-${taskId}`}
+        data-task-id={taskId}
+      >
         <header className="scheduler-header">
           <div>
             <div className="scheduler-title">
-              Symposium Scheduler
+              {taskPresentation.title}
             </div>
 
             <div className="scheduler-task">
-              Task {trialOrder} of 3
+              Task {taskNumber} of{" "}
+              {TRIALS_PER_TASK}
             </div>
           </div>
 
@@ -4327,7 +4520,7 @@ export default function SymposiumScheduler({
             >
               {timerExpired
                 ? "Submitting..."
-                : "Submit Schedule"}
+                : taskPresentation.submitLabel}
             </button>
           </div>
         </header>
@@ -4352,8 +4545,9 @@ export default function SymposiumScheduler({
 
         {timerExpired && (
           <div className="trial-timeout-message">
-            Time is over. Your current schedule is being
-            submitted automatically.
+            Time is over. Your current{" "}
+            {taskPresentation.solutionNoun} is being submitted
+            automatically.
           </div>
         )}
 
@@ -4404,8 +4598,8 @@ export default function SymposiumScheduler({
                   </strong>
 
                   <span>
-                    Click to receive a scheduling
-                    recommendation.
+                    Click to receive a{" "}
+                    {taskPresentation.recommendationNoun}.
                   </span>
 
                   <div className="ai-launch-action">
@@ -4446,12 +4640,13 @@ export default function SymposiumScheduler({
                 />
 
                 <strong>
-                  Schedule not started
+                  {taskPresentation.title} not started
                 </strong>
 
                 <span>
                   Ask the AI assistant to analyze the task
-                  before editing the schedule.
+                  before editing the{" "}
+                  {taskPresentation.solutionNoun}.
                 </span>
               </div>
             )}
@@ -4483,13 +4678,11 @@ export default function SymposiumScheduler({
               <div className="task-details-header">
                 <div>
                   <h2 id="task-details-title">
-                    Symposium Task Summary
+                    {taskPresentation.summaryTitle}
                   </h2>
 
                   <p>
-                    Schedule all twelve talks while satisfying
-                    the scheduling constraints and considering
-                    both scheduling preferences.
+                    {taskPresentation.summaryDescription}
                   </p>
                 </div>
 

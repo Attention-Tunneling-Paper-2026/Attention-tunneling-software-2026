@@ -9,6 +9,7 @@ import ProtectedStudyRoute from "./components/navigation/ProtectedStudyRoute.tsx
 import DisclosurePage from "./pages/DisclosurePage.tsx";
 import PostExperimentPage from "./pages/PostExperimentPage.tsx";
 import ProcedurePage from "./pages/ProcedurePage.tsx";
+import TaskConditionSelectionPage from "./pages/TaskConditionSelectionPage.tsx";
 import TaskPage from "./pages/TaskPage.tsx";
 import TaskSelectionPage from "./pages/TaskSelectionPage.tsx";
 import TrialQuestionnairePage from "./pages/TrialQuestionnairePage.tsx";
@@ -31,9 +32,7 @@ function App() {
 
       <Route
         path="/procedure"
-        element={
-          <ProcedurePage />
-        }
+        element={<ProcedurePage />}
       />
 
       <Route
@@ -46,7 +45,16 @@ function App() {
       />
 
       <Route
-        path="/task/:trialNumber"
+        path="/tasks/:taskId"
+        element={
+          <ProtectedStudyRoute stage="tasks">
+            <TaskConditionSelectionPage />
+          </ProtectedStudyRoute>
+        }
+      />
+
+      <Route
+        path="/task/:taskId/:trialNumber"
         element={
           <ProtectedStudyRoute stage="task">
             <TaskPage />
@@ -55,7 +63,7 @@ function App() {
       />
 
       <Route
-        path="/trial-questionnaire/:trialNumber"
+        path="/trial-questionnaire/:taskId/:trialNumber"
         element={
           <ProtectedStudyRoute stage="trial-questionnaire">
             <TrialQuestionnairePage />
