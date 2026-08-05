@@ -1997,6 +1997,22 @@ export const useEventLogStore =
       requestedTaskId,
     ) => {
       const state = get();
+      const probeNaiveTrialIds = new Set(
+        state.events
+          .filter(
+            (event) =>
+              event.participantId === state.participantId &&
+              event.probeNaive,
+          )
+          .map((event) => event.trialId),
+      );
+
+      if (probeNaiveTrialIds.size > 1) {
+        throw new Error(
+          `Participant ${state.participantId} has more than one probe-naive trial.`,
+        );
+      }
+
       const taskId = resolveTaskId(
         requestedTaskId,
         state.taskId,

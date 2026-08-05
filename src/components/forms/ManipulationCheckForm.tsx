@@ -4,6 +4,9 @@ export interface ManipulationCheckValues {
   recommendationSpecificity:
     number | null;
 
+  recommendationDetail:
+    number | null;
+
   solutionConcreteness:
     number | null;
 
@@ -11,6 +14,9 @@ export interface ManipulationCheckValues {
     number | null;
 
   directUsability:
+    number | null;
+
+  solutionActionability:
     number | null;
 }
 
@@ -67,6 +73,17 @@ const manipulationCheckItems:
 
     {
       dimension:
+        "recommendationDetail",
+
+      title:
+        "AI output detail",
+
+      statement:
+        "The AI recommendation included detailed task information.",
+    },
+
+    {
+      dimension:
         "solutionConcreteness",
 
       title:
@@ -97,6 +114,17 @@ const manipulationCheckItems:
       statement:
         "I could use the AI output directly with little additional planning.",
     },
+
+    {
+      dimension:
+        "solutionActionability",
+
+      title:
+        "AI solution actionability",
+
+      statement:
+        "The AI recommendation made the actions needed to use its solution clear.",
+    },
   ];
 
 function isValidManipulationRating(
@@ -121,6 +149,9 @@ export function createDefaultManipulationCheckValues(): ManipulationCheckValues 
     recommendationSpecificity:
       null,
 
+    recommendationDetail:
+      null,
+
     solutionConcreteness:
       null,
 
@@ -128,6 +159,9 @@ export function createDefaultManipulationCheckValues(): ManipulationCheckValues 
       null,
 
     directUsability:
+      null,
+
+    solutionActionability:
       null,
   };
 }

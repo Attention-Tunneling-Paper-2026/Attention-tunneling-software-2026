@@ -35,6 +35,7 @@ import CurrentConflictsPanel from "../components/task/CurrentConflictsPanel";
 import TaskSummaryTable from "../components/task/TaskSummaryTable";
 
 import {
+  getAssistantRecommendation,
   getExpectedInitialPlacementCount,
   getInitialPlacementsForTrial,
   getSemanticProbe,
@@ -95,6 +96,9 @@ import "../styles/scheduler.css";
 
 const AI_ANALYSIS_DELAY_MS =
   1000;
+
+const IDLE_THRESHOLD_MS =
+  10_000;
 
 const TOTAL_TASK_DOMAINS =
   STUDY_TASK_IDS.length;
@@ -244,20 +248,6 @@ interface SymposiumSchedulerProps {
     StudyTrialNumber;
 }
 
-interface EditHistoryAnalysis {
-  statePreviouslyVisited:
-    boolean;
-
-  visitCountBefore:
-    number;
-
-  isImmediateReversal:
-    boolean;
-
-  isBacktracking:
-    boolean;
-}
-
 /*
  * Prefer the cell directly under the pointer. The fallback keeps
  * keyboard and non-pointer dragging functional.
@@ -329,24 +319,9 @@ function getEditCategory(
   talkId:
     string,
 
-  historyAnalysis:
-    EditHistoryAnalysis,
-
   taskId:
     StudyTaskId,
 ): EditCategory {
-  if (
-    historyAnalysis.isImmediateReversal
-  ) {
-    return "immediate_reversal";
-  }
-
-  if (
-    historyAnalysis.statePreviouslyVisited
-  ) {
-    return "return_to_previous_state";
-  }
-
   if (
     isDemoTalk(
       talkId,
@@ -507,6 +482,11 @@ function SymposiumSchedulerTrial({
       null,
     );
 
+  const assistantRecommendationPendingLogRef =
+    useRef(
+      false,
+    );
+
   const trialStartLoggedRef =
     useRef(
       false,
@@ -549,6 +529,46 @@ function SymposiumSchedulerTrial({
   const probeShownAtRef =
     useRef<number | null>(
       null,
+    );
+
+  const probeCollapsedLoggedRef =
+    useRef(
+      false,
+    );
+
+  const probeDeadlineCheckRef =
+    useRef<
+      (
+        now:
+          number,
+      ) => void
+    >(
+      () => undefined,
+    );
+
+  const collapseDeadlineCheckRef =
+    useRef<
+      (
+        now:
+          number,
+      ) => void
+    >(
+      () => undefined,
+    );
+
+  const idleLastActivityAtRef =
+    useRef<number | null>(
+      null,
+    );
+
+  const recordActivityRef =
+    useRef<
+      (
+        now?:
+          number,
+      ) => void
+    >(
+      () => undefined,
     );
 
   const dragStartedAtRef =
@@ -746,6 +766,33 @@ function SymposiumSchedulerTrial({
       taskNumber,
     );
 
+  const assistantRecommendation =
+    getAssistantRecommendation(
+      level,
+      taskId,
+    );
+
+  const renderedAssistantText =
+    [
+      assistantRecommendation.heading,
+      assistantRecommendation.message,
+      assistantRecommendation
+        .prefillAcknowledgment,
+    ]
+      .filter(
+        (value) =>
+          typeof value ===
+            "string" &&
+          value.length >
+            0,
+      )
+      .join(
+        "\n\n",
+      );
+
+  const assistantContentVersion =
+    `${taskDefinition.messageVersion}-${taskId}-v1`;
+
   const trialOrder:
     StudyTrialOrderValue =
       isStudyTrialOrder(
@@ -809,6 +856,91 @@ function SymposiumSchedulerTrial({
     remainingSeconds ===
     0;
 
+  recordActivityRef.current = (
+    now =
+      getCurrentTimeMs(),
+  ) => {
+    if (
+      !assistantReady ||
+      trialSubmitted ||
+      trialStartedAtRef.current ===
+        null
+    ) {
+      return;
+    }
+
+    const idleStartedAt =
+      idleLastActivityAtRef.current;
+
+    idleLastActivityAtRef.current =
+      now;
+
+    if (
+      idleStartedAt ===
+        null
+    ) {
+      return;
+    }
+
+    const idleDurationMs =
+      now -
+      idleStartedAt;
+
+    if (
+      idleDurationMs <
+      IDLE_THRESHOLD_MS
+    ) {
+      return;
+    }
+
+    const trialStartedAt =
+      trialStartedAtRef.current;
+
+    addEvent({
+      ...eventIdentity,
+      eventType:
+        "idle",
+
+      trialNumber:
+        taskNumber,
+
+      condition:
+        expectedCondition,
+
+      phase:
+        probeShownAtRef.current ===
+        null
+          ? "pre_probe"
+          : "post_probe",
+
+      metadata: {
+        taskId:
+          taskId,
+
+        taskNumber,
+
+        idleThresholdMs:
+          IDLE_THRESHOLD_MS,
+
+        idleDurationMs,
+
+        idleStartedAtElapsedMs:
+          Math.max(
+            0,
+            idleStartedAt -
+              trialStartedAt,
+          ),
+
+        idleEndedAtElapsedMs:
+          Math.max(
+            0,
+            now -
+              trialStartedAt,
+          ),
+      },
+    });
+  };
+
   const currentSnapshot =
     createScheduleSnapshot(
       placements,
@@ -835,6 +967,9 @@ function SymposiumSchedulerTrial({
     setParticipantAssignmentMade(
       false,
     );
+
+    idleLastActivityAtRef.current =
+      null;
   }, [
     taskId,
     taskNumber,
@@ -888,10 +1023,16 @@ function SymposiumSchedulerTrial({
         true,
       );
 
-      setProbeCollapsed(
+      const persistedProbeCollapsed =
         typeof trialProgress
           ?.probeCollapsedAtIso ===
-          "string",
+          "string";
+
+      probeCollapsedLoggedRef.current =
+        persistedProbeCollapsed;
+
+      setProbeCollapsed(
+        persistedProbeCollapsed,
       );
 
       setProbeAcknowledged(
@@ -1019,37 +1160,8 @@ function SymposiumSchedulerTrial({
             },
           });
 
-          addEvent({
-
-            ...eventIdentity,
-            eventType:
-              "assistant_recommendation_shown",
-
-            trialNumber:
-              taskNumber,
-
-            condition:
-              expectedCondition,
-
-            phase:
-              "pre_probe",
-
-            metadata: {
-              page:
-                taskPageId,
-
-              taskNumber,
-
-              taskVersion:
-                taskDefinition.taskVersion,
-
-              aiArtifactVersion:
-                taskDefinition.artifactVersion,
-
-              aiMessageVersion:
-                taskDefinition.messageVersion,
-            },
-          });
+          assistantRecommendationPendingLogRef.current =
+            true;
 
           setAssistantStatus(
             "ready",
@@ -1071,6 +1183,122 @@ function SymposiumSchedulerTrial({
     markAssistantRecommendationShown,
     taskNumber,
     taskPageId,
+  ]);
+
+  useEffect(() => {
+    if (
+      !assistantReady ||
+      !assistantRecommendationPendingLogRef.current
+    ) {
+      return;
+    }
+
+    const assistantPanel =
+      document.querySelector<HTMLElement>(
+        `.ai-assistant-panel[data-task-id="${taskId}"]`,
+      );
+
+    const renderedText =
+      assistantPanel
+        ? Array.from(
+            assistantPanel.querySelectorAll<HTMLElement>(
+              ".ai-message-bubble p",
+            ),
+          )
+            .map(
+              (element) =>
+                element.textContent
+                  ?.trim() ??
+                "",
+            )
+            .filter(
+              (value) =>
+                value.length >
+                0,
+            )
+            .join(
+              "\n\n",
+            ) ||
+          renderedAssistantText
+        : renderedAssistantText;
+
+    const contentVersion =
+      assistantPanel
+        ?.getAttribute(
+          "data-content-version",
+        ) ??
+      assistantContentVersion;
+
+    assistantRecommendationPendingLogRef.current =
+      false;
+
+    addEvent({
+
+      taskId,
+      trialId,
+      trialOrder,
+      conditionOrder,
+      isFirstTrial,
+      probeExposureNumber,
+      probeNaive,
+      globalOptionNumber,
+      globalTrialNumber,
+      eventType:
+        "assistant_recommendation_shown",
+
+      trialNumber:
+        taskNumber,
+
+      condition:
+        expectedCondition,
+
+      phase:
+        "pre_probe",
+
+      renderedText,
+
+      messageId:
+        `${taskId}-recommendation-${level}-${contentVersion}`,
+
+      contentVersion,
+
+      metadata: {
+        page:
+          taskPageId,
+
+        taskNumber,
+
+        taskVersion:
+          taskDefinition.taskVersion,
+
+        aiArtifactVersion:
+          taskDefinition.artifactVersion,
+
+        aiMessageVersion:
+          taskDefinition.messageVersion,
+      },
+    });
+  }, [
+    addEvent,
+    assistantContentVersion,
+    assistantReady,
+    conditionOrder,
+    expectedCondition,
+    globalOptionNumber,
+    globalTrialNumber,
+    isFirstTrial,
+    level,
+    probeExposureNumber,
+    probeNaive,
+    renderedAssistantText,
+    taskDefinition.artifactVersion,
+    taskDefinition.messageVersion,
+    taskDefinition.taskVersion,
+    taskId,
+    taskNumber,
+    taskPageId,
+    trialId,
+    trialOrder,
   ]);
 
   useEffect(() => {
@@ -1106,6 +1334,11 @@ function SymposiumSchedulerTrial({
 
     trialStartedAtRef.current =
       trialStartedAt;
+
+    idleLastActivityAtRef.current =
+      trialAlreadyStarted
+        ? getCurrentTimeMs()
+        : trialStartedAt;
 
     startEventTrial({
       taskId,
@@ -1163,12 +1396,9 @@ function SymposiumSchedulerTrial({
         ],
       ]);
 
-    if (
-      !trialAlreadyStarted
-    ) {
-      addEvent({
+    addEvent({
 
-        ...eventIdentity,
+      ...eventIdentity,
         eventType:
           "trial_start",
 
@@ -1274,6 +1504,16 @@ function SymposiumSchedulerTrial({
 
         taskNumber,
 
+        trialResumed:
+          trialAlreadyStarted,
+
+        timerStartedAtIso:
+          trialProgress
+            ?.timerStartedAtIso ??
+          new Date(
+            trialStartedAt,
+          ).toISOString(),
+
         totalTrials:
           TOTAL_STUDY_TRIALS,
 
@@ -1377,7 +1617,6 @@ function SymposiumSchedulerTrial({
             initialSnapshot.structurallyLegal,
         },
       });
-    }
   }, [
     addEvent,
     assistantReady,
@@ -1410,7 +1649,10 @@ function SymposiumSchedulerTrial({
     }
 
     const updateRemainingTime =
-      () => {
+      (
+        now =
+          getCurrentTimeMs(),
+      ) => {
         const startedAt =
           trialStartedAtRef.current;
 
@@ -1424,7 +1666,7 @@ function SymposiumSchedulerTrial({
           Math.floor(
             Math.max(
               0,
-              getCurrentTimeMs() -
+              now -
                 startedAt,
             ) /
               1000,
@@ -1437,9 +1679,76 @@ function SymposiumSchedulerTrial({
               elapsedSeconds,
           ),
         );
+
+        probeDeadlineCheckRef.current(
+          now,
+        );
+
+        collapseDeadlineCheckRef.current(
+          now,
+        );
+      };
+
+    const handleVisibilityChange =
+      () => {
+        const now =
+          getCurrentTimeMs();
+
+        updateRemainingTime(
+          now,
+        );
+
+        if (
+          document.visibilityState ===
+            "visible"
+        ) {
+          recordActivityRef.current(
+            now,
+          );
+        }
       };
 
     updateRemainingTime();
+
+    const startedAt =
+      trialStartedAtRef.current;
+
+    const probeDeadlineTimeoutId =
+      startedAt !==
+          null &&
+        probeShownAtRef.current ===
+          null
+        ? window.setTimeout(
+            updateRemainingTime,
+            Math.max(
+              0,
+              startedAt +
+                PROBE_ONSET_SECONDS *
+                  1000 -
+                getCurrentTimeMs(),
+            ),
+          )
+        : null;
+
+    const probeShownAt =
+      probeShownAtRef.current;
+
+    const collapseDeadlineTimeoutId =
+      probeShownAt !==
+          null &&
+        !probeAcknowledged &&
+        !probeCollapsed
+        ? window.setTimeout(
+            updateRemainingTime,
+            Math.max(
+              0,
+              probeShownAt +
+                PROBE_COLLAPSE_SECONDS *
+                  1000 -
+                getCurrentTimeMs(),
+            ),
+          )
+        : null;
 
     const intervalId =
       window.setInterval(
@@ -1447,14 +1756,47 @@ function SymposiumSchedulerTrial({
         250,
       );
 
+    document.addEventListener(
+      "visibilitychange",
+      handleVisibilityChange,
+    );
+
     return () => {
       window.clearInterval(
         intervalId,
       );
+
+      if (
+        probeDeadlineTimeoutId !==
+          null
+      ) {
+        window.clearTimeout(
+          probeDeadlineTimeoutId,
+        );
+      }
+
+      if (
+        collapseDeadlineTimeoutId !==
+          null
+      ) {
+        window.clearTimeout(
+          collapseDeadlineTimeoutId,
+        );
+      }
+
+      document.removeEventListener(
+        "visibilitychange",
+        handleVisibilityChange,
+      );
     };
   }, [
     assistantReady,
+    probeAcknowledged,
+    probeCollapsed,
+    probeVisible,
     trialSubmitted,
+    PROBE_COLLAPSE_SECONDS,
+    PROBE_ONSET_SECONDS,
     TRIAL_DURATION_SECONDS,
   ]);
 
@@ -1466,60 +1808,78 @@ function SymposiumSchedulerTrial({
       return;
     }
 
-    const warningLevel =
-      remainingSeconds === 300
-        ? "amber"
-        : remainingSeconds === 180
-          ? "red"
-          : null;
+    const warningThresholds =
+      [
+        {
+          level:
+            "amber" as const,
+          remainingSeconds:
+            300,
+        },
+        {
+          level:
+            "red" as const,
+          remainingSeconds:
+            180,
+        },
+      ];
 
-    if (
-      warningLevel === null ||
-      timerWarningLoggedRef.current[
-        warningLevel
-      ]
+    for (
+      const warning of
+      warningThresholds
     ) {
-      return;
+      if (
+        remainingSeconds >
+          warning.remainingSeconds ||
+        timerWarningLoggedRef.current[
+          warning.level
+        ]
+      ) {
+        continue;
+      }
+
+      timerWarningLoggedRef.current[
+        warning.level
+      ] = true;
+
+      addEvent({
+
+        ...eventIdentity,
+        eventType:
+          "timer_warning",
+
+        trialNumber:
+          taskNumber,
+
+        condition:
+          expectedCondition,
+
+        phase:
+          probeShownAtRef.current ===
+          null
+            ? "pre_probe"
+            : "post_probe",
+
+        remainingMs:
+          remainingSeconds *
+          1000,
+
+        timerWarningLevel:
+          warning.level,
+
+        metadata: {
+          taskId:
+            taskId,
+
+          taskNumber,
+
+          remainingSeconds,
+
+          thresholdSeconds:
+            warning.remainingSeconds,
+        },
+      });
     }
-
-    timerWarningLoggedRef.current[
-      warningLevel
-    ] = true;
-
-    addEvent({
-
-      ...eventIdentity,
-      eventType:
-        "timer_warning",
-
-      trialNumber:
-        taskNumber,
-
-      condition:
-        expectedCondition,
-
-      phase:
-        probeShownAtRef.current ===
-        null
-          ? "pre_probe"
-          : "post_probe",
-
-      remainingMs:
-        remainingSeconds *
-        1000,
-
-      timerWarningLevel:
-        warningLevel,
-
-      metadata: {
-        taskId:
-          taskId,
-
-        taskNumber,
-
-        remainingSeconds,
-      },
-    });
   }, [
     addEvent,
     assistantReady,
@@ -1538,6 +1898,10 @@ function SymposiumSchedulerTrial({
     ) {
       return;
     }
+
+    recordActivityRef.current(
+      getCurrentTimeMs(),
+    );
 
     timerExpiredLoggedRef.current =
       true;
@@ -1760,7 +2124,10 @@ function SymposiumSchedulerTrial({
     taskNumber,
   ]);
 
-  useEffect(() => {
+  probeDeadlineCheckRef.current = (
+    now:
+      number,
+  ) => {
     if (
       !assistantReady
     ) {
@@ -1779,7 +2146,7 @@ function SymposiumSchedulerTrial({
     const elapsedMs =
       Math.max(
         0,
-        getCurrentTimeMs() -
+        now -
           trialStartedAt,
       );
 
@@ -1790,12 +2157,13 @@ function SymposiumSchedulerTrial({
     if (
       elapsedMs >=
         configuredProbeOnsetMs &&
-      !probeVisible &&
+      probeShownAtRef.current ===
+        null &&
       !probeAcknowledged &&
       !trialSubmitted
     ) {
       const shownAt =
-        getCurrentTimeMs();
+        now;
 
       probeShownAtRef.current =
         shownAt;
@@ -1890,6 +2258,9 @@ function SymposiumSchedulerTrial({
         probeAcknowledged:
           false,
 
+        probeDisplayMode:
+          semanticProbe.displayMode,
+
         integrationConsistentEdit:
           false,
 
@@ -1927,7 +2298,15 @@ function SymposiumSchedulerTrial({
 
           taskNumber,
 
-          remainingSeconds,
+          remainingSeconds:
+            Math.max(
+              0,
+              TRIAL_DURATION_SECONDS -
+                Math.floor(
+                  elapsedMs /
+                    1000,
+                ),
+            ),
 
           elapsedSeconds:
             elapsedMs /
@@ -1997,100 +2376,84 @@ function SymposiumSchedulerTrial({
         },
       });
     }
-  }, [
-    addEvent,
-    assistantReady,
-    expectedCondition,
-    markProbeShown,
-    probeAcknowledged,
-    probeVisible,
-    remainingSeconds,
-    taskId,
-    taskNumber,
-    trialSubmitted,
-  ]);
+  };
 
-  useEffect(() => {
+  collapseDeadlineCheckRef.current = (
+    now:
+      number,
+  ) => {
+    const probeShownAt =
+      probeShownAtRef.current;
+
     if (
       semanticProbe.displayMode !==
         "transient" ||
-      !probeVisible ||
+      probeShownAt ===
+        null ||
       probeAcknowledged ||
       probeCollapsed ||
-      trialSubmitted
+      probeCollapsedLoggedRef.current ||
+      trialSubmitted ||
+      now <
+        probeShownAt +
+          PROBE_COLLAPSE_SECONDS *
+            1000
     ) {
       return;
     }
 
-    const timeoutId =
-      window.setTimeout(
-        () => {
-          markProbeCollapsed(
-            taskNumber,
-          );
+    probeCollapsedLoggedRef.current =
+      true;
 
-          addEvent({
+    markProbeCollapsed(
+      taskNumber,
+    );
 
-            ...eventIdentity,
-            eventType:
-              "probe_collapsed",
+    addEvent({
 
-            trialNumber:
-              taskNumber,
+      ...eventIdentity,
+      eventType:
+        "probe_collapsed",
 
-            condition:
-              expectedCondition,
+      trialNumber:
+        taskNumber,
 
-            phase:
-              "post_probe",
+      condition:
+        expectedCondition,
 
-            probeVisible:
-              true,
+      phase:
+        "post_probe",
 
-            probeAcknowledged:
-              false,
+      probeVisible:
+        true,
 
-            metadata: {
-              taskId:
-                taskId,
+      probeAcknowledged:
+        false,
 
-              taskNumber,
+      probeDisplayMode:
+        semanticProbe.displayMode,
 
-              probeId:
-                semanticProbe.id,
+      metadata: {
+        taskId:
+          taskId,
 
-              probeVersion:
-                semanticProbe.version,
+        taskNumber,
 
-              displayMode:
-                semanticProbe.displayMode,
-            },
-          });
+        probeId:
+          semanticProbe.id,
 
-          setProbeCollapsed(
-            true,
-          );
-        },
-        PROBE_COLLAPSE_SECONDS *
-          1000,
-      );
+        probeVersion:
+          semanticProbe.version,
 
-    return () => {
-      window.clearTimeout(
-        timeoutId,
-      );
-    };
-  }, [
-    addEvent,
-    expectedCondition,
-    markProbeCollapsed,
-    probeAcknowledged,
-    probeCollapsed,
-    probeVisible,
-    taskId,
-    taskNumber,
-    trialSubmitted,
-  ]);
+        displayMode:
+          semanticProbe.displayMode,
+      },
+    });
+
+    setProbeCollapsed(
+      true,
+    );
+  };
 
   function handleAnalyzeTask() {
     if (
@@ -2288,6 +2651,9 @@ function SymposiumSchedulerTrial({
       probeAcknowledged:
         true,
 
+      probeDisplayMode:
+        semanticProbe.displayMode,
+
       probeIntegrationDetected:
         probeIntegrated,
 
@@ -2396,8 +2762,8 @@ function SymposiumSchedulerTrial({
 
       probeAcknowledged,
 
-      probeAcknowledgmentSource:
-        "bell",
+      probeDisplayMode:
+        semanticProbe.displayMode,
 
       probeIntegrationDetected:
         probeIntegrated,
@@ -3638,17 +4004,6 @@ function SymposiumSchedulerTrial({
     const isBacktracking =
       statePreviouslyVisited;
 
-    const historyAnalysis:
-      EditHistoryAnalysis = {
-        statePreviouslyVisited,
-
-        visitCountBefore,
-
-        isImmediateReversal,
-
-        isBacktracking,
-      };
-
     const firstStrategySwitch =
       metrics.strategySwitchTriggered &&
       !strategySwitchDetectedRef.current;
@@ -3748,7 +4103,6 @@ function SymposiumSchedulerTrial({
         targetPlacement,
         targetRoom,
         talkId,
-        historyAnalysis,
         taskId,
       );
 
@@ -4864,6 +5218,15 @@ function SymposiumSchedulerTrial({
       <div
         className={`scheduler-page scheduler-page-${taskId}`}
         data-task-id={taskId}
+        onPointerDownCapture={() => {
+          recordActivityRef.current();
+        }}
+        onKeyDownCapture={() => {
+          recordActivityRef.current();
+        }}
+        onWheelCapture={() => {
+          recordActivityRef.current();
+        }}
       >
         <header className="scheduler-header">
           <div>

@@ -534,6 +534,10 @@ export function isInsideAIFamily(
   placements: Placement[],
   taskId: SupportedStudyTaskId = "symposium",
 ): boolean {
+  if (!hasCompleteAssignment(placements, taskId)) {
+    return false;
+  }
+
   return ROOMS.every(
     (room) =>
       getDominantTopicForRoom(
