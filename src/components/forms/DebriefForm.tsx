@@ -126,10 +126,10 @@ const influenceOptions: ResponseOption<Exclude<
 ];
 
 const POST_EXPERIMENT_LIKERT_MIN =
-  0;
+  1;
 
 const POST_EXPERIMENT_LIKERT_MAX =
-  10;
+  5;
 
 function isValidPostExperimentLikertValue(
   value: number | null,
@@ -210,7 +210,7 @@ export function getDebriefValidationMessage(
       values.perceivedAiCompetence,
     )
   ) {
-    return "Please answer all decision attribution questions using the 0 to 10 response scale.";
+    return "Please answer all decision attribution questions using the 1 to 5 response scale.";
   }
 
   if (
@@ -473,7 +473,7 @@ export default function DebriefForm({
             min={POST_EXPERIMENT_LIKERT_MIN}
             max={POST_EXPERIMENT_LIKERT_MAX}
             required
-            ariaLabel="AI influence, rated from 0 strongly disagree to 10 strongly agree"
+            ariaLabel="AI influence, rated from 1 strongly disagree to 5 strongly agree"
             disabled={disabled}
             onChange={(value) =>
               updateValue(
@@ -493,7 +493,7 @@ export default function DebriefForm({
             min={POST_EXPERIMENT_LIKERT_MIN}
             max={POST_EXPERIMENT_LIKERT_MAX}
             required
-            ariaLabel="Reliance on the AI, rated from 0 strongly disagree to 10 strongly agree"
+            ariaLabel="Reliance on the AI, rated from 1 strongly disagree to 5 strongly agree"
             disabled={disabled}
             onChange={(value) =>
               updateValue(
@@ -513,7 +513,7 @@ export default function DebriefForm({
             min={POST_EXPERIMENT_LIKERT_MIN}
             max={POST_EXPERIMENT_LIKERT_MAX}
             required
-            ariaLabel="Decision confidence, rated from 0 strongly disagree to 10 strongly agree"
+            ariaLabel="Decision confidence, rated from 1 strongly disagree to 5 strongly agree"
             disabled={disabled}
             onChange={(value) =>
               updateValue(
@@ -535,7 +535,7 @@ export default function DebriefForm({
             min={POST_EXPERIMENT_LIKERT_MIN}
             max={POST_EXPERIMENT_LIKERT_MAX}
             required
-            ariaLabel="Overall AI competence, rated from 0 strongly disagree to 10 strongly agree"
+            ariaLabel="Overall AI competence, rated from 1 strongly disagree to 5 strongly agree"
             disabled={disabled}
             onChange={(value) =>
               updateValue(

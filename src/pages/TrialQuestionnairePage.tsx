@@ -14,6 +14,7 @@ import {
 } from "react";
 
 import type {
+  ChangeEvent,
   FormEvent,
   ReactNode,
 } from "react";
@@ -27,7 +28,7 @@ import LikertScale from "../components/forms/LikertScale";
 import NasaTlxForm from "../components/forms/NasaTlxForm";
 
 import {
-  SEMANTIC_PROBE,
+  getSemanticProbe,
 } from "../data/symposium";
 
 import {
@@ -53,6 +54,7 @@ import type {
 
 import {
   MANIPULATION_CHECK_DIMENSIONS,
+  isLikertRating,
   isTrialQuestionnaireComplete,
 } from "../types/questionnaire";
 
@@ -66,7 +68,13 @@ import type {
 } from "../types/questionnaire";
 
 import {
+  TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
+  TOTAL_STUDY_TRIALS,
+  createCompositeTrialId,
+  getGlobalOptionNumber,
+  isStudyTaskId,
   isStudyTrialNumber,
+  isStudyTrialOrder,
 } from "../types/scheduler";
 
 import type {
@@ -149,16 +157,42 @@ interface TaskQuestionnaireCopy {
     noUpdate:
       string;
   };
+
+  recognitionValues: {
+    correct:
+      Exclude<
+        ProbeRecognitionChoice,
+        ""
+      >;
+
+    alternativeA:
+      Exclude<
+        ProbeRecognitionChoice,
+        ""
+      >;
+
+    alternativeB:
+      Exclude<
+        ProbeRecognitionChoice,
+        ""
+      >;
+
+    timeChanged:
+      Exclude<
+        ProbeRecognitionChoice,
+        ""
+      >;
+
+    noUpdate:
+      Exclude<
+        ProbeRecognitionChoice,
+        ""
+      >;
+  };
 }
 
-const TOTAL_TRIALS =
-  3;
-
-const TOTAL_STUDY_TRIALS =
-  9;
-
 const TASK_QUESTIONNAIRE_COPY: Record<
-  string,
+  StudyTaskId,
   TaskQuestionnaireCopy
 > = {
   symposium: {
@@ -191,7 +225,9 @@ const TASK_QUESTIONNAIRE_COPY: Record<
 
     recognitionLabels: {
       correct:
-        SEMANTIC_PROBE.message,
+        getSemanticProbe(
+          "symposium",
+        ).message,
 
       alternativeA:
         "The projector in Room A broke for the rest of the day",
@@ -204,6 +240,23 @@ const TASK_QUESTIONNAIRE_COPY: Record<
 
       noUpdate:
         "No facilities update was shown",
+    },
+
+    recognitionValues: {
+      correct:
+        "room_c_projector_failure",
+
+      alternativeA:
+        "room_a_projector_failure",
+
+      alternativeB:
+        "room_b_unavailable",
+
+      timeChanged:
+        "session_time_changed",
+
+      noUpdate:
+        "no_update",
     },
   },
 
@@ -237,7 +290,9 @@ const TASK_QUESTIONNAIRE_COPY: Record<
 
     recognitionLabels: {
       correct:
-        "The refrigeration unit in Van C failed for the rest of the day",
+        getSemanticProbe(
+          "delivery",
+        ).message,
 
       alternativeA:
         "The refrigeration unit in Van A failed for the rest of the day",
@@ -251,6 +306,23 @@ const TASK_QUESTIONNAIRE_COPY: Record<
       noUpdate:
         "No vehicle update was shown",
     },
+
+    recognitionValues: {
+      correct:
+        "van_c_refrigeration_failure",
+
+      alternativeA:
+        "van_a_refrigeration_failure",
+
+      alternativeB:
+        "van_b_unavailable",
+
+      timeChanged:
+        "shipment_route_window_changed",
+
+      noUpdate:
+        "no_update",
+    },
   },
 
   clinic: {
@@ -261,13 +333,13 @@ const TASK_QUESTIONNAIRE_COPY: Record<
       "roster",
 
     updateLabel:
-      "staffing update",
+      "ward update",
 
     affectedLocationTitle:
       "Affected ward",
 
     affectedLocationQuestion:
-      "Which ward was affected by the staffing update?",
+      "Which ward was affected by the ward update?",
 
     recallConfidenceDescription:
       "How confident are you that your answer about the affected ward is correct?",
@@ -283,7 +355,9 @@ const TASK_QUESTIONNAIRE_COPY: Record<
 
     recognitionLabels: {
       correct:
-        "Ward C lost ICU certification for the rest of the day",
+        getSemanticProbe(
+          "clinic",
+        ).message,
 
       alternativeA:
         "Ward A lost ICU certification for the rest of the day",
@@ -295,74 +369,66 @@ const TASK_QUESTIONNAIRE_COPY: Record<
         "The shift time of one duty changed",
 
       noUpdate:
-        "No staffing update was shown",
+        "No ward update was shown",
+    },
+
+    recognitionValues: {
+      correct:
+        "ward_c_icu_certification_loss",
+
+      alternativeA:
+        "ward_a_icu_certification_loss",
+
+      alternativeB:
+        "ward_b_unavailable",
+
+      timeChanged:
+        "duty_shift_changed",
+
+      noUpdate:
+        "no_update",
     },
   },
 };
-
-function isStudyTaskId(
-  value:
-    unknown,
-): value is StudyTaskId {
-  return (
-    value ===
-      "symposium" ||
-    value ===
-      "delivery" ||
-    value ===
-      "clinic"
-  );
-}
 
 function getTaskQuestionnaireCopy(
   taskId:
     StudyTaskId,
 ): TaskQuestionnaireCopy {
-  return (
-    TASK_QUESTIONNAIRE_COPY[
-      taskId as string
-    ] ??
-    TASK_QUESTIONNAIRE_COPY
-      .symposium
-  );
-}
+  return {
+    ...TASK_QUESTIONNAIRE_COPY[
+      taskId
+    ],
 
-function getGlobalTrialNumber(
-  taskId:
-    StudyTaskId,
+    locationLabels: [
+      ...TASK_QUESTIONNAIRE_COPY[
+        taskId
+      ].locationLabels,
+    ],
 
-  trialNumber:
-    StudyTrialNumber,
-): number {
-  const normalizedTaskId =
-    String(
-      taskId,
-    );
+    recognitionLabels: {
+      ...TASK_QUESTIONNAIRE_COPY[
+        taskId
+      ].recognitionLabels,
+    },
 
-  const taskOffset =
-    normalizedTaskId ===
-      "delivery"
-      ? 3
-      : normalizedTaskId ===
-          "clinic"
-        ? 6
-        : 0;
-
-  return (
-    taskOffset +
-    trialNumber
-  );
+    recognitionValues: {
+      ...TASK_QUESTIONNAIRE_COPY[
+        taskId
+      ].recognitionValues,
+    },
+  };
 }
 
 function getParticipantTaskNumber(
   trial:
     StudyTrialProgress,
-): StudyTrialOrder {
-  return isStudyTrialNumber(
+): StudyTrialOrder | null {
+  return isStudyTrialOrder(
     trial.trialOrder,
   )
     ? trial.trialOrder
-    : trial.trialNumber;
+    : null;
 }
 
 function getExperienceQuestions(
@@ -501,7 +567,9 @@ function getProbeRecognitionOptions(
   return [
     {
       value:
-        "room_c_projector_failure",
+        taskCopy
+          .recognitionValues
+          .correct,
 
       label:
         taskCopy
@@ -511,7 +579,9 @@ function getProbeRecognitionOptions(
 
     {
       value:
-        "room_a_projector_failure",
+        taskCopy
+          .recognitionValues
+          .alternativeA,
 
       label:
         taskCopy
@@ -521,7 +591,9 @@ function getProbeRecognitionOptions(
 
     {
       value:
-        "room_b_unavailable",
+        taskCopy
+          .recognitionValues
+          .alternativeB,
 
       label:
         taskCopy
@@ -531,7 +603,9 @@ function getProbeRecognitionOptions(
 
     {
       value:
-        "session_time_changed",
+        taskCopy
+          .recognitionValues
+          .timeChanged,
 
       label:
         taskCopy
@@ -541,7 +615,9 @@ function getProbeRecognitionOptions(
 
     {
       value:
-        "no_update",
+        taskCopy
+          .recognitionValues
+          .noUpdate,
 
       label:
         taskCopy
@@ -835,13 +911,13 @@ export default function TrialQuestionnairePage() {
           taskId,
         );
 
-  const globalTrialNumber =
+  const globalOptionNumber =
     taskId ===
       null ||
     trialNumber ===
       null
       ? null
-      : getGlobalTrialNumber(
+      : getGlobalOptionNumber(
           taskId,
           trialNumber,
         );
@@ -1027,6 +1103,31 @@ export default function TrialQuestionnairePage() {
   const trialCondition =
     trial?.condition;
 
+  const participantTaskNumber =
+    trial
+      ? getParticipantTaskNumber(
+          trial,
+        )
+      : null;
+
+  const trialId =
+    taskId !==
+      null &&
+    trialNumber !==
+      null
+      ? trial?.trialId ??
+        createCompositeTrialId(
+          taskId,
+          trialNumber,
+        )
+      : null;
+
+  const trialExportsComplete =
+    trial?.eventsCsvExportStatus ===
+      "exported" &&
+    trial.summaryCsvExportStatus ===
+      "exported";
+
   useEffect(() => {
     if (
       !procedureAccepted
@@ -1051,7 +1152,9 @@ export default function TrialQuestionnairePage() {
         null ||
       !taskCopy ||
       !trialStatus ||
-      !trialCondition
+      !trialCondition ||
+      participantTaskNumber ===
+        null
     ) {
       navigate(
         "/tasks",
@@ -1068,13 +1171,24 @@ export default function TrialQuestionnairePage() {
       trialStatus ===
       "questionnaire_complete"
     ) {
-      navigate(
-        `/tasks/${taskId}`,
-        {
-          replace:
-            true,
-        },
-      );
+      if (
+        trialExportsComplete
+      ) {
+        const allTrialsComplete =
+          useStudySessionStore
+            .getState()
+            .areAllTrialsComplete();
+
+        navigate(
+          allTrialsComplete
+            ? "/post-experiment"
+            : "/tasks",
+          {
+            replace:
+              true,
+          },
+        );
+      }
 
       return;
     }
@@ -1084,7 +1198,7 @@ export default function TrialQuestionnairePage() {
       "submitted"
     ) {
       navigate(
-        `/tasks/${taskId}`,
+        "/tasks",
         {
           replace:
             true,
@@ -1104,15 +1218,7 @@ export default function TrialQuestionnairePage() {
     pageInitializedRef.current =
       taskKey;
 
-    (
-      openTrialQuestionnaire as unknown as (
-        trialNumber:
-          StudyTrialNumber,
-
-        taskId:
-          StudyTaskId,
-      ) => boolean
-    )(
+    openTrialQuestionnaire(
       trialNumber,
       taskId,
     );
@@ -1126,14 +1232,17 @@ export default function TrialQuestionnairePage() {
     initializeTrialResponse,
     navigate,
     openTrialQuestionnaire,
+    participantTaskNumber,
     procedureAccepted,
     taskCopy,
     taskId,
     taskKey,
     trialCondition,
+    trialExportsComplete,
     trialNumber,
     trialStatus,
   ]);
+
 
   useEffect(() => {
     if (
@@ -1169,13 +1278,19 @@ export default function TrialQuestionnairePage() {
         null ||
       taskKey ===
         null ||
-      globalTrialNumber ===
+      globalOptionNumber ===
         null ||
       trialNumber ===
+        null ||
+      participantTaskNumber ===
+        null ||
+      trialId ===
         null ||
       !taskCopy ||
       !trial ||
       !response ||
+      trialStatus !==
+        "submitted" ||
       questionnaireStartedRef.current ===
         taskKey
     ) {
@@ -1189,12 +1304,25 @@ export default function TrialQuestionnairePage() {
       eventType:
         "questionnaire_started",
 
+      taskId,
+
+      trialId,
+
       trialNumber,
 
       trialOrder:
-        getParticipantTaskNumber(
-          trial,
-        ),
+        participantTaskNumber,
+
+      globalOptionNumber,
+
+      globalTrialNumber:
+        globalOptionNumber,
+
+      outerTaskNumber:
+        trial.outerTaskNumber,
+
+      innerTaskNumber:
+        trialNumber,
 
       condition:
         trial.condition,
@@ -1221,29 +1349,35 @@ export default function TrialQuestionnairePage() {
           taskCopy.taskTitle,
 
         taskNumber:
+          participantTaskNumber,
+
+        conditionOptionNumber:
           trialNumber,
 
         innerTaskNumber:
           trialNumber,
 
-        globalTrialNumber,
+        globalOptionNumber,
 
-        participantTaskNumber:
-          getParticipantTaskNumber(
-            trial,
-          ),
+        globalTrialNumber:
+          globalOptionNumber,
+
+        participantTaskNumber,
 
         totalTrials:
-          TOTAL_TRIALS,
+          TOTAL_STUDY_TRIALS,
 
         totalStudyTrials:
           TOTAL_STUDY_TRIALS,
+
+        totalSelectableTaskConditionOptions:
+          TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
 
         page:
           "trial_questionnaire",
 
         trialOrder:
-          trial.trialOrder,
+          participantTaskNumber,
 
         conditionOrder:
           trial.conditionOrder,
@@ -1260,14 +1394,18 @@ export default function TrialQuestionnairePage() {
     });
   }, [
     addEvent,
-    globalTrialNumber,
+    globalOptionNumber,
+    participantTaskNumber,
     response,
     taskCopy,
     taskId,
     taskKey,
     trial,
+    trialId,
     trialNumber,
+    trialStatus,
   ]);
+
 
   function handleSubmit(
     event:
@@ -1278,7 +1416,11 @@ export default function TrialQuestionnairePage() {
     if (
       taskId ===
         null ||
-      globalTrialNumber ===
+      globalOptionNumber ===
+        null ||
+      participantTaskNumber ===
+        null ||
+      trialId ===
         null ||
       trialNumber ===
         null ||
@@ -1327,95 +1469,65 @@ export default function TrialQuestionnairePage() {
     submissionStartedRef.current =
       true;
 
-    const submittedResponse =
-      (
-        submitTrialQuestionnaire as unknown as (
-          trialNumber:
-            StudyTrialNumber,
-
-          taskId:
-            StudyTaskId,
-        ) => ReturnType<
-          typeof submitTrialQuestionnaire
-        >
-      )(
-        trialNumber,
-        taskId,
-      );
+    let submittedResponse =
+      currentResponse;
 
     if (
-      !submittedResponse
+      submittedResponse.submittedAtIso ===
+      null
     ) {
-      submissionStartedRef.current =
-        false;
+      const submitted =
+        submitTrialQuestionnaire(
+          trialNumber,
+          taskId,
+        );
 
-      setSubmitting(
-        false,
-      );
+      if (
+        !submitted
+      ) {
+        submissionStartedRef.current =
+          false;
 
-      setValidationMessage(
-        "Please answer every questionnaire item before continuing.",
-      );
+        setSubmitting(
+          false,
+        );
 
-      return;
-    }
+        setValidationMessage(
+          "Please answer every questionnaire item before continuing.",
+        );
 
-    addEvent({
-      eventType:
-        "questionnaire_submitted",
+        return;
+      }
 
-      trialNumber,
+      submittedResponse =
+        submitted;
 
-      trialOrder:
-        getParticipantTaskNumber(
-          trial,
-        ),
+      addEvent({
+        eventType:
+          "questionnaire_submitted",
 
-      condition:
-        trial.condition,
-
-      conditionOrder:
-        trial.conditionOrder,
-
-      isFirstTrial:
-        trial.isFirstTrial,
-
-      probeExposureNumber:
-        trial.probeExposureNumber,
-
-      probeNaive:
-        trial.probeNaive,
-
-      phase:
-        "questionnaire",
-
-      metadata: {
         taskId,
 
-        taskTitle:
-          taskCopy.taskTitle,
+        trialId,
 
-        taskNumber:
-          trialNumber,
+        trialNumber,
+
+        trialOrder:
+          participantTaskNumber,
+
+        globalOptionNumber,
+
+        globalTrialNumber:
+          globalOptionNumber,
+
+        outerTaskNumber:
+          trial.outerTaskNumber,
 
         innerTaskNumber:
           trialNumber,
 
-        globalTrialNumber,
-
-        participantTaskNumber:
-          getParticipantTaskNumber(
-            trial,
-          ),
-
-        totalTrials:
-          TOTAL_TRIALS,
-
-        totalStudyTrials:
-          TOTAL_STUDY_TRIALS,
-
-        trialOrder:
-          trial.trialOrder,
+        condition:
+          trial.condition,
 
         conditionOrder:
           trial.conditionOrder,
@@ -1429,329 +1541,300 @@ export default function TrialQuestionnairePage() {
         probeNaive:
           trial.probeNaive,
 
-        nasaTlx: {
-          ...submittedResponse
-            .nasaTlx,
+        phase:
+          "questionnaire",
+
+        metadata: {
+          taskId,
+
+          taskTitle:
+            taskCopy.taskTitle,
+
+          taskNumber:
+            participantTaskNumber,
+
+          conditionOptionNumber:
+            trialNumber,
+
+          innerTaskNumber:
+            trialNumber,
+
+          globalOptionNumber,
+
+          globalTrialNumber:
+            globalOptionNumber,
+
+          participantTaskNumber,
+
+          totalTrials:
+            TOTAL_STUDY_TRIALS,
+
+          totalStudyTrials:
+            TOTAL_STUDY_TRIALS,
+
+          totalSelectableTaskConditionOptions:
+            TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
+
+          trialOrder:
+            participantTaskNumber,
+
+          conditionOrder:
+            trial.conditionOrder,
+
+          isFirstTrial:
+            trial.isFirstTrial,
+
+          probeExposureNumber:
+            trial.probeExposureNumber,
+
+          probeNaive:
+            trial.probeNaive,
+
+          nasaTlx: {
+            ...submittedResponse
+              .nasaTlx,
+          },
+
+          experienceRatings: {
+            ...submittedResponse
+              .experienceRatings,
+          },
+
+          manipulationCheck: {
+            ...submittedResponse
+              .manipulationCheck,
+          },
+
+          probeRecall: {
+            ...submittedResponse
+              .probeRecall,
+          },
+
+          questionnaireStartedAtIso:
+            submittedResponse
+              .startedAtIso,
+
+          questionnaireSubmittedAtIso:
+            submittedResponse
+              .submittedAtIso,
         },
-
-        experienceRatings: {
-          ...submittedResponse
-            .experienceRatings,
-        },
-
-        manipulationCheck: {
-          ...submittedResponse
-            .manipulationCheck,
-        },
-
-        probeRecall: {
-          ...submittedResponse
-            .probeRecall,
-        },
-
-        questionnaireStartedAtIso:
-          submittedResponse
-            .startedAtIso,
-
-        questionnaireSubmittedAtIso:
-          submittedResponse
-            .submittedAtIso,
-      },
-    });
-
-    const sessionUpdated =
-      (
-        completeTrialQuestionnaire as unknown as (
-          trialNumber:
-            StudyTrialNumber,
-
-          taskId:
-            StudyTaskId,
-        ) => boolean
-      )(
-        trialNumber,
-        taskId,
-      );
+      });
+    }
 
     if (
-      !sessionUpdated
+      trial.status !==
+      "questionnaire_complete"
     ) {
-      submissionStartedRef.current =
-        false;
+      const sessionUpdated =
+        completeTrialQuestionnaire(
+          trialNumber,
+          taskId,
+        );
 
-      setSubmitting(
-        false,
-      );
+      if (
+        !sessionUpdated
+      ) {
+        submissionStartedRef.current =
+          false;
 
-      setValidationMessage(
-        "The questionnaire could not be completed. Please return to task selection and try again.",
-      );
+        setSubmitting(
+          false,
+        );
 
-      return;
+        setValidationMessage(
+          "The questionnaire could not be completed. Please return to task selection and try again.",
+        );
+
+        return;
+      }
     }
 
     const completedTrial =
-      (
-        useStudySessionStore
-          .getState()
-          .getTrialProgress as unknown as (
-            trialNumber:
-              StudyTrialNumber,
-
-            taskId:
-              StudyTaskId,
-          ) =>
-            | StudyTrialProgress
-            | undefined
-      )(
-        trialNumber,
-        taskId,
-      ) ??
+      useStudySessionStore
+        .getState()
+        .getTrialProgress(
+          trialNumber,
+          taskId,
+        ) ??
       trial;
 
     const eventsFileName =
-      `${taskId}_${getTrialEventsCsvFileName(
+      getTrialEventsCsvFileName(
         participantId,
         trialNumber,
         trial.condition,
-      )}`;
+        taskId,
+      );
 
     const summaryFileName =
-      `${taskId}_${getTrialSummaryCsvFileName(
+      getTrialSummaryCsvFileName(
         participantId,
         trialNumber,
         trial.condition,
-      )}`;
+        taskId,
+      );
 
     const exportErrors:
       string[] = [];
 
     let eventsExported =
-      false;
+      completedTrial
+        .eventsCsvExportStatus ===
+      "exported";
 
     let summaryExported =
-      false;
+      completedTrial
+        .summaryCsvExportStatus ===
+      "exported";
 
-    (
-      setTrialCsvExportStatus as unknown as (
-        trialNumber:
-          StudyTrialNumber,
-
-        exportType:
-          "events" | "summary",
-
-        status:
-          "exporting" | "exported" | "failed",
-
-        errorMessage?:
-          string,
-
-        taskId?:
-          StudyTaskId,
-      ) => boolean
-    )(
-      trialNumber,
-      "events",
-      "exporting",
-      undefined,
-      taskId,
-    );
-
-    (
-      setTrialCsvExportStatus as unknown as (
-        trialNumber:
-          StudyTrialNumber,
-
-        exportType:
-          "events" | "summary",
-
-        status:
-          "exporting" | "exported" | "failed",
-
-        errorMessage?:
-          string,
-
-        taskId?:
-          StudyTaskId,
-      ) => boolean
-    )(
-      trialNumber,
-      "summary",
-      "exporting",
-      undefined,
-      taskId,
-    );
+    const exportAttemptAtIso =
+      new Date()
+        .toISOString();
 
     const trialEvents =
-      (
-        getEventsForTrial as unknown as (
-          trialNumber:
-            StudyTrialNumber,
-
-          taskId:
-            StudyTaskId,
-        ) => ReturnType<
-          typeof getEventsForTrial
-        >
-      )(
+      getEventsForTrial(
         trialNumber,
         taskId,
       );
 
-    try {
-      const eventRows =
-        buildTrialEventRows(
-          trialEvents,
-        );
-
-      downloadCsv(
-        eventsFileName,
-        eventRows,
-      );
-
-      (
-        markTrialEventsCsvExported as unknown as (
-          trialNumber:
-            StudyTrialNumber,
-
-          taskId:
-            StudyTaskId,
-        ) => boolean
-      )(
-        trialNumber,
-        taskId,
-      );
-
-      eventsExported =
-        true;
-    } catch (
-      error
+    if (
+      !eventsExported
     ) {
-      const errorMessage =
-        getErrorMessage(
-          error,
-        );
-
-      exportErrors.push(
-        `Events CSV: ${errorMessage}`,
-      );
-
-      (
-        setTrialCsvExportStatus as unknown as (
-          trialNumber:
-            StudyTrialNumber,
-
-          exportType:
-            "events" | "summary",
-
-          status:
-            "exporting" | "exported" | "failed",
-
-          errorMessage?:
-            string,
-
-          taskId?:
-            StudyTaskId,
-        ) => boolean
-      )(
+      setTrialCsvExportStatus(
         trialNumber,
         "events",
-        "failed",
-        errorMessage,
+        "exporting",
+        undefined,
         taskId,
       );
-    }
 
-    try {
-      const summaryRows =
-        buildTrialSummaryRows({
-          participantId,
-
-          sessionId,
-
-          trial:
-            completedTrial,
-
-          questionnaireResponse:
-            submittedResponse,
-
-          events:
+      try {
+        const eventRows =
+          buildTrialEventRows(
             trialEvents,
-        });
+          );
 
-      downloadCsv(
-        summaryFileName,
-        summaryRows,
-      );
-
-      (
-        markTrialSummaryCsvExported as unknown as (
-          trialNumber:
-            StudyTrialNumber,
-
-          taskId:
-            StudyTaskId,
-        ) => boolean
-      )(
-        trialNumber,
-        taskId,
-      );
-
-      summaryExported =
-        true;
-    } catch (
-      error
-    ) {
-      const errorMessage =
-        getErrorMessage(
-          error,
+        downloadCsv(
+          eventsFileName,
+          eventRows,
         );
 
-      exportErrors.push(
-        `Summary CSV: ${errorMessage}`,
-      );
+        const statusMarked =
+          markTrialEventsCsvExported(
+            trialNumber,
+            taskId,
+            exportAttemptAtIso,
+          );
 
-      (
-        setTrialCsvExportStatus as unknown as (
-          trialNumber:
-            StudyTrialNumber,
+        if (
+          !statusMarked
+        ) {
+          throw new Error(
+            "The event CSV download started, but its export status could not be recorded.",
+          );
+        }
 
-          exportType:
-            "events" | "summary",
+        eventsExported =
+          true;
+      } catch (
+        error
+      ) {
+        const errorMessage =
+          getErrorMessage(
+            error,
+          );
 
-          status:
-            "exporting" | "exported" | "failed",
+        exportErrors.push(
+          `Events CSV: ${errorMessage}`,
+        );
 
-          errorMessage?:
-            string,
+        setTrialCsvExportStatus(
+          trialNumber,
+          "events",
+          "failed",
+          errorMessage,
+          taskId,
+        );
+      }
+    }
 
-          taskId?:
-            StudyTaskId,
-        ) => boolean
-      )(
+    if (
+      !summaryExported
+    ) {
+      setTrialCsvExportStatus(
         trialNumber,
         "summary",
-        "failed",
-        errorMessage,
+        "exporting",
+        undefined,
         taskId,
       );
+
+      try {
+        const summaryRows =
+          buildTrialSummaryRows({
+            participantId,
+
+            sessionId,
+
+            trial:
+              completedTrial,
+
+            questionnaireResponse:
+              submittedResponse,
+
+            events:
+              trialEvents,
+          });
+
+        downloadCsv(
+          summaryFileName,
+          summaryRows,
+        );
+
+        const statusMarked =
+          markTrialSummaryCsvExported(
+            trialNumber,
+            taskId,
+            exportAttemptAtIso,
+          );
+
+        if (
+          !statusMarked
+        ) {
+          throw new Error(
+            "The summary CSV download started, but its export status could not be recorded.",
+          );
+        }
+
+        summaryExported =
+          true;
+      } catch (
+        error
+      ) {
+        const errorMessage =
+          getErrorMessage(
+            error,
+          );
+
+        exportErrors.push(
+          `Summary CSV: ${errorMessage}`,
+        );
+
+        setTrialCsvExportStatus(
+          trialNumber,
+          "summary",
+          "failed",
+          errorMessage,
+          taskId,
+        );
+      }
     }
 
     if (
       eventsExported &&
       summaryExported
     ) {
-      (
-        markTrialQuestionnaireExported as unknown as (
-          trialNumber:
-            StudyTrialNumber,
-
-          taskId:
-            StudyTaskId,
-        ) => ReturnType<
-          typeof markTrialQuestionnaireExported
-        >
-      )(
+      markTrialQuestionnaireExported(
         trialNumber,
         taskId,
       );
@@ -1761,12 +1844,25 @@ export default function TrialQuestionnairePage() {
       eventType:
         "trial_csv_exported",
 
+      taskId,
+
+      trialId,
+
       trialNumber,
 
       trialOrder:
-        getParticipantTaskNumber(
-          trial,
-        ),
+        participantTaskNumber,
+
+      globalOptionNumber,
+
+      globalTrialNumber:
+        globalOptionNumber,
+
+      outerTaskNumber:
+        trial.outerTaskNumber,
+
+      innerTaskNumber:
+        trialNumber,
 
       condition:
         trial.condition,
@@ -1786,6 +1882,10 @@ export default function TrialQuestionnairePage() {
       phase:
         "questionnaire",
 
+      accepted:
+        eventsExported &&
+        summaryExported,
+
       metadata: {
         taskId,
 
@@ -1793,23 +1893,29 @@ export default function TrialQuestionnairePage() {
           taskCopy.taskTitle,
 
         taskNumber:
+          participantTaskNumber,
+
+        conditionOptionNumber:
           trialNumber,
 
         innerTaskNumber:
           trialNumber,
 
-        globalTrialNumber,
+        globalOptionNumber,
 
-        participantTaskNumber:
-          getParticipantTaskNumber(
-            trial,
-          ),
+        globalTrialNumber:
+          globalOptionNumber,
+
+        participantTaskNumber,
 
         totalTrials:
-          TOTAL_TRIALS,
+          TOTAL_STUDY_TRIALS,
 
         totalStudyTrials:
           TOTAL_STUDY_TRIALS,
+
+        totalSelectableTaskConditionOptions:
+          TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
 
         eventsFileName,
 
@@ -1822,8 +1928,7 @@ export default function TrialQuestionnairePage() {
         exportErrors,
 
         exportedAtIso:
-          new Date()
-            .toISOString(),
+          exportAttemptAtIso,
       },
     });
 
@@ -1831,23 +1936,43 @@ export default function TrialQuestionnairePage() {
       exportErrors.length >
       0
     ) {
+      submissionStartedRef.current =
+        false;
+
+      setSubmitting(
+        false,
+      );
+
+      setValidationMessage(
+        "The questionnaire was saved, but one or more study files could not be downloaded. Select the button again to retry only the missing file download.",
+      );
+
       window.alert(
         [
-          "The task was completed, but one or more CSV files could not be downloaded.",
+          "The questionnaire was saved, but one or more CSV files could not be downloaded.",
           "",
           ...exportErrors,
           "",
-          "Check whether your browser is blocking multiple automatic downloads.",
+          "Check whether your browser is blocking automatic downloads, then select the button again to retry.",
         ].join(
           "\n",
         ),
       );
+
+      return;
     }
+
+    const allTrialsComplete =
+      useStudySessionStore
+        .getState()
+        .areAllTrialsComplete();
 
     window.setTimeout(
       () => {
         navigate(
-          `/tasks/${taskId}`,
+          allTrialsComplete
+            ? "/post-experiment"
+            : "/tasks",
           {
             replace:
               true,
@@ -1864,16 +1989,17 @@ export default function TrialQuestionnairePage() {
       null ||
     trialNumber ===
       null ||
+    participantTaskNumber ===
+      null ||
+    globalOptionNumber ===
+      null ||
+    trialId ===
+      null ||
     !taskCopy ||
     !trial
   ) {
     return null;
   }
-
-  const participantTaskNumber =
-    getParticipantTaskNumber(
-      trial,
-    );
 
   const experienceQuestions =
     getExperienceQuestions(
@@ -1918,7 +2044,7 @@ export default function TrialQuestionnairePage() {
 
           <div className="study-progress-label">
             Task {participantTaskNumber} of{" "}
-            {TOTAL_TRIALS}
+            {TOTAL_STUDY_TRIALS}
           </div>
         </header>
 
@@ -1937,6 +2063,12 @@ export default function TrialQuestionnairePage() {
       </main>
     );
   }
+
+  const questionnaireSubmitted =
+    response.submittedAtIso !==
+      null ||
+    trialStatus ===
+      "questionnaire_complete";
 
   const manipulationDimensions:
     readonly ManipulationDimension[] =
@@ -1965,10 +2097,10 @@ export default function TrialQuestionnairePage() {
 
         <div
           className="study-progress-label"
-          aria-label={`Questionnaire for task ${participantTaskNumber} of ${TOTAL_TRIALS}`}
+          aria-label={`Questionnaire for task ${participantTaskNumber} of ${TOTAL_STUDY_TRIALS}`}
         >
           Task {participantTaskNumber} of{" "}
-          {TOTAL_TRIALS}
+          {TOTAL_STUDY_TRIALS}
         </div>
       </header>
 
@@ -1986,31 +2118,20 @@ export default function TrialQuestionnairePage() {
             />
           }
           title="Task workload"
-          description="Select one rating for each NASA TLX dimension. Ratings range from 0 to 7 in whole-number steps, where 0 is low and 7 is high."
+          description="Select one rating for each NASA TLX dimension. Ratings range from 1 to 7 in whole-number steps, where 1 is low and 7 is high."
         >
           <NasaTlxForm
             values={
               response.nasaTlx
             }
+            disabled={
+              questionnaireSubmitted
+            }
             onChange={(
               dimension,
               value,
             ) => {
-              (
-                setNasaTlxValue as unknown as (
-                  trialNumber:
-                    StudyTrialNumber,
-
-                  dimension:
-                    typeof dimension,
-
-                  value:
-                    typeof value,
-
-                  taskId:
-                    StudyTaskId,
-                ) => void
-              )(
+              setNasaTlxValue(
                 trialNumber,
                 dimension,
                 value,
@@ -2028,7 +2149,7 @@ export default function TrialQuestionnairePage() {
             />
           }
           title="Task and AI ratings"
-          description="Select one response on each 0 to 5 agreement scale."
+          description="Select one response on each 1 to 5 agreement scale."
         >
           <div className="likert-list">
             {experienceQuestions.map(
@@ -2055,30 +2176,27 @@ export default function TrialQuestionnairePage() {
                       .experienceRatings,
                     question.id,
                   )}
-                  min={0}
+                  min={1}
                   max={5}
                   required
+                  disabled={
+                    questionnaireSubmitted
+                  }
                   onChange={(
                     value,
                   ) => {
-                    (
-                      setExperienceRating as unknown as (
-                        trialNumber:
-                          StudyTrialNumber,
+                    if (
+                      !isLikertRating(
+                        value,
+                      )
+                    ) {
+                      return;
+                    }
 
-                        dimension:
-                          ExperienceDimension,
-
-                        value:
-                          LikertRating,
-
-                        taskId:
-                          StudyTaskId,
-                      ) => void
-                    )(
+                    setExperienceRating(
                       trialNumber,
                       question.id,
-                      value as LikertRating,
+                      value,
                       taskId,
                     );
                   }}
@@ -2098,7 +2216,7 @@ export default function TrialQuestionnairePage() {
               />
             }
             title="AI presentation ratings"
-            description="Rate the AI assistance on the required 0 to 5 manipulation check scales."
+            description="Rate the AI assistance on the required 1 to 5 manipulation check scales."
           >
             <div className="likert-list">
               {manipulationDimensions.map(
@@ -2132,30 +2250,27 @@ export default function TrialQuestionnairePage() {
                           dimension
                         ]
                       }
-                      min={0}
+                      min={1}
                       max={5}
                       required
+                      disabled={
+                        questionnaireSubmitted
+                      }
                       onChange={(
                         value,
                       ) => {
-                        (
-                          setManipulationCheckValue as unknown as (
-                            trialNumber:
-                              StudyTrialNumber,
+                        if (
+                          !isLikertRating(
+                            value,
+                          )
+                        ) {
+                          return;
+                        }
 
-                            dimension:
-                              ManipulationDimension,
-
-                            value:
-                              LikertRating,
-
-                            taskId:
-                              StudyTaskId,
-                          ) => void
-                        )(
+                        setManipulationCheckValue(
                           trialNumber,
                           dimension,
-                          value as LikertRating,
+                          value,
                           taskId,
                         );
                       }}
@@ -2251,8 +2366,11 @@ export default function TrialQuestionnairePage() {
                             .noticedUpdate ===
                           option.value
                         }
+                        disabled={
+                          questionnaireSubmitted
+                        }
                         onChange={() => {
-                          (setProbeRecallValue as unknown as (...args: unknown[]) => void)(
+                          setProbeRecallValue(
                             trialNumber,
                             "noticedUpdate",
                             option.value,
@@ -2294,8 +2412,14 @@ export default function TrialQuestionnairePage() {
                       .probeRecall
                       .updateDescription
                   }
-                  onChange={(event) => {
-                    (setProbeRecallValue as unknown as (...args: unknown[]) => void)(
+                  disabled={
+                    questionnaireSubmitted
+                  }
+                  onChange={(
+                    event:
+                      ChangeEvent<HTMLTextAreaElement>,
+                  ) => {
+                    setProbeRecallValue(
                       trialNumber,
                       "updateDescription",
                       event.target.value,
@@ -2356,8 +2480,11 @@ export default function TrialQuestionnairePage() {
                             .affectedRoom ===
                           option.value
                         }
+                        disabled={
+                          questionnaireSubmitted
+                        }
                         onChange={() => {
-                          (setProbeRecallValue as unknown as (...args: unknown[]) => void)(
+                          setProbeRecallValue(
                             trialNumber,
                             "affectedRoom",
                             option.value,
@@ -2388,14 +2515,25 @@ export default function TrialQuestionnairePage() {
                   .probeRecall
                   .recallConfidence
               }
-              min={0}
+              min={1}
               max={5}
               required
+              disabled={
+                questionnaireSubmitted
+              }
               onChange={(value) => {
-                (setProbeRecallValue as unknown as (...args: unknown[]) => void)(
+                if (
+                  !isLikertRating(
+                    value,
+                  )
+                ) {
+                  return;
+                }
+
+                setProbeRecallValue(
                   trialNumber,
                   "recallConfidence",
-                  value as LikertRating,
+                  value,
                   taskId,
                 );
               }}
@@ -2449,8 +2587,11 @@ export default function TrialQuestionnairePage() {
                             .recognitionChoice ===
                           option.value
                         }
+                        disabled={
+                          questionnaireSubmitted
+                        }
                         onChange={() => {
-                          (setProbeRecallValue as unknown as (...args: unknown[]) => void)(
+                          setProbeRecallValue(
                             trialNumber,
                             "recognitionChoice",
                             option.value,
@@ -2486,9 +2627,9 @@ export default function TrialQuestionnairePage() {
           />
 
           <p>
-            Your responses are recorded after you select the
-            button below. Two study data files will also be
-            downloaded for this task.
+            {questionnaireSubmitted
+              ? "Your questionnaire responses are saved. Select the button below to retry any study file that has not yet been downloaded."
+              : "Your responses will be saved after you select the button below. One event CSV and one summary CSV will then be downloaded for this task."}
           </p>
         </section>
 
@@ -2502,7 +2643,9 @@ export default function TrialQuestionnairePage() {
           >
             {submitting
               ? "Preparing study files"
-              : "Submit and return to task selection"}
+              : questionnaireSubmitted
+                ? "Retry missing study file downloads"
+                : "Submit and continue"}
 
             {!submitting && (
               <ArrowRight

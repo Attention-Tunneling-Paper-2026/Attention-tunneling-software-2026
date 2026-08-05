@@ -33,10 +33,16 @@ import type {
   StudyTrialProgress,
 } from "../types/study";
 
-type TaskDomainId =
-  | "symposium"
-  | "delivery"
-  | "clinic";
+import {
+  STUDY_TASK_IDS,
+  STUDY_TRIAL_NUMBERS,
+  TOTAL_STUDY_TRIALS,
+  isStudyTaskId,
+} from "../types/scheduler";
+
+import type {
+  StudyTaskId,
+} from "../types/scheduler";
 
 type ExperimentTaskNumber =
   | 1
@@ -45,7 +51,7 @@ type ExperimentTaskNumber =
 
 interface TaskDomainDefinition {
   id:
-    TaskDomainId;
+    StudyTaskId;
 
   taskNumber:
     ExperimentTaskNumber;
@@ -91,13 +97,13 @@ interface TaskDomainProgress
 }
 
 const TOTAL_EXPERIMENT_TASKS =
-  3;
+  STUDY_TASK_IDS.length;
 
 const SUBTASKS_PER_TASK =
-  3;
+  STUDY_TRIAL_NUMBERS.length;
 
 const TOTAL_REQUIRED_STUDY_TASKS =
-  TOTAL_EXPERIMENT_TASKS;
+  TOTAL_STUDY_TRIALS;
 
 const TASK_DOMAINS:
   TaskDomainDefinition[] = [
@@ -355,7 +361,7 @@ export default function TaskSelectionPage() {
               hasOpenSubtask,
 
               completed:
-                completedSubtaskCount >=
+                completedSubtaskCount ===
                   1,
             };
           },
@@ -377,10 +383,25 @@ export default function TaskSelectionPage() {
     ).length;
 
   const allTrialsComplete =
-    completedTrialCount >=
+    completedTrialCount ===
       TOTAL_REQUIRED_STUDY_TASKS &&
     completedTaskCount ===
-      TOTAL_EXPERIMENT_TASKS;
+      TOTAL_EXPERIMENT_TASKS &&
+    STUDY_TASK_IDS.every(
+      (taskId) =>
+        trials.filter(
+          (trial) =>
+            trialIsComplete(
+              trial,
+            ) &&
+            isStudyTaskId(
+              trial.taskId,
+            ) &&
+            trial.taskId ===
+              taskId,
+        ).length ===
+        1,
+    );
 
   const openTrial =
     trials.find(
@@ -450,10 +471,25 @@ export default function TaskSelectionPage() {
     }
 
     if (
-      openTrial &&
-      openTrial.taskId !==
-        task.id
+      openTrial
     ) {
+      if (
+        !isStudyTaskId(
+          openTrial.taskId,
+        ) ||
+        openTrial.taskId !==
+          task.id
+      ) {
+        return;
+      }
+
+      navigate(
+        openTrial.status ===
+          "submitted"
+          ? `/trial-questionnaire/${task.id}/${openTrial.trialNumber}`
+          : `/task/${task.id}/${openTrial.trialNumber}`,
+      );
+
       return;
     }
 

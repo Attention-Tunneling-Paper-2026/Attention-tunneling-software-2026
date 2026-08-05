@@ -28,13 +28,14 @@ import type {
   ScheduleMoveAction,
   Slot,
   StudyTrialNumber,
+  StudyTrialOrderValue,
 } from "../types/scheduler";
 
 interface ScheduleState {
   taskId: SupportedStudyTaskId;
   level: ConcretizationLevel;
   trialNumber: StudyTrialNumber;
-  trialOrder: StudyTrialNumber;
+  trialOrder: StudyTrialOrderValue;
   conditionOrder: ConditionOrder;
   placements: Placement[];
   unassignedTalkIds: string[];
@@ -54,14 +55,14 @@ interface SchedulerStore extends ScheduleState {
   initializeTrial: (
     trialNumber: StudyTrialNumber,
     conditionOrder?: ConditionOrder,
-    trialOrder?: StudyTrialNumber,
+    trialOrder?: StudyTrialOrderValue,
     taskId?: SupportedStudyTaskId,
   ) => void;
 
   initializeSchedule: (
     level: ConcretizationLevel,
     trialNumber?: StudyTrialNumber,
-    trialOrder?: StudyTrialNumber,
+    trialOrder?: StudyTrialOrderValue,
     conditionOrder?: ConditionOrder,
     taskId?: SupportedStudyTaskId,
   ) => void;
@@ -94,7 +95,11 @@ interface SchedulerStore extends ScheduleState {
 
 const INITIAL_TASK_ID: SupportedStudyTaskId = "symposium";
 const INITIAL_TRIAL_NUMBER: StudyTrialNumber = 1;
-const INITIAL_TRIAL_ORDER: StudyTrialNumber = 1;
+/*
+ * No chronological trial exists before the researcher-selected option starts.
+ * The study-session store supplies 1, 2, or 3 at actual trial start.
+ */
+const INITIAL_TRIAL_ORDER: StudyTrialOrderValue = 0;
 
 /*
  * Keeping this false preserves the verified swap neighborhood for the
@@ -177,26 +182,11 @@ function getUnassignedTalkIds(
     .map((talk) => talk.id);
 }
 
-function getTrialOrderForCondition(
-  level: ConcretizationLevel,
-  conditionOrder: ConditionOrder,
-): StudyTrialNumber {
-  const index = conditionOrder.indexOf(level);
-
-  if (index < 0) {
-    throw new Error(
-      `Condition ${level} is missing from order ${conditionOrder}.`,
-    );
-  }
-
-  return (index + 1) as StudyTrialNumber;
-}
-
 function createScheduleState(
   taskId: SupportedStudyTaskId,
   level: ConcretizationLevel,
   trialNumber: StudyTrialNumber,
-  trialOrder: StudyTrialNumber,
+  trialOrder: StudyTrialOrderValue,
   conditionOrder: ConditionOrder,
   scheduleRevision = 0,
   allowTrayUnplace = DEFAULT_ALLOW_TRAY_UNPLACE,
@@ -229,23 +219,16 @@ function createTrialScheduleState(
   trialNumber: StudyTrialNumber,
   conditionOrder: ConditionOrder =
     DEFAULT_CONDITION_ORDER,
-  trialOrder?: StudyTrialNumber,
+  trialOrder: StudyTrialOrderValue = 0,
   scheduleRevision = 0,
   allowTrayUnplace = DEFAULT_ALLOW_TRAY_UNPLACE,
 ): ScheduleState {
   const level = getConditionForTrial(trialNumber);
-  const resolvedTrialOrder =
-    trialOrder ??
-    getTrialOrderForCondition(
-      level,
-      conditionOrder,
-    );
-
   return createScheduleState(
     taskId,
     level,
     trialNumber,
-    resolvedTrialOrder,
+    trialOrder,
     conditionOrder,
     scheduleRevision,
     allowTrayUnplace,
@@ -452,10 +435,7 @@ export const useSchedulerStore =
         trialNumber ?? state.trialNumber;
       const resolvedTrialOrder =
         trialOrder ??
-        getTrialOrderForCondition(
-          level,
-          resolvedConditionOrder,
-        );
+        state.trialOrder;
 
       set(
         createScheduleState(
@@ -478,10 +458,7 @@ export const useSchedulerStore =
           state.taskId,
           level,
           state.trialNumber,
-          getTrialOrderForCondition(
-            level,
-            state.conditionOrder,
-          ),
+          state.trialOrder,
           state.conditionOrder,
           state.scheduleRevision + 1,
           state.allowTrayUnplace,

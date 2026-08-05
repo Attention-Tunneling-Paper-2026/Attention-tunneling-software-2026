@@ -88,7 +88,7 @@ export interface SymposiumTrialContent {
 
 export interface SymposiumTaskDefinition {
   id: "symposium";
-  routePattern: "/task/:trialNumber";
+  routePattern: "/task/:taskId/:trialNumber";
   title: string;
   shortTitle: string;
   description: string;
@@ -117,6 +117,8 @@ export interface SymposiumTaskDefinition {
   trials: SymposiumTrialContent[];
   update: SymposiumTaskUpdate;
 }
+
+const SYMPOSIUM_TASK_ID = "symposium" as const;
 
 const CONSTRAINT_TITLES: Record<
   SymposiumConstraintDefinition["id"],
@@ -178,6 +180,12 @@ function createAssistantContent(
   };
 }
 
+export function getSymposiumTrialRoute(
+  trialNumber: StudyTrialNumber,
+): string {
+  return `/task/${SYMPOSIUM_TASK_ID}/${trialNumber}`;
+}
+
 /*
  * The recommendation content is identical across A, B, and C.
  * Only the acknowledgement of the condition-specific prefill may differ.
@@ -201,16 +209,19 @@ const initialPlacements: Record<
 };
 
 /*
- * trialNumber remains the stable internal condition identity:
- * 1 = A, 2 = B, 3 = C. Participant-visible task order is supplied by
- * the study session assignment when counterbalancing is active.
+ * trialNumber is the stable condition-option identity:
+ * 1 = A, 2 = B, 3 = C.
+ *
+ * It is not the participant's chronological trial order. The study-session
+ * store assigns chronological order only when the researcher-selected option
+ * is actually started.
  */
 const trials: SymposiumTrialContent[] = [
   {
     trialNumber: 1,
     participantLabel: "Task 1",
     condition: "A",
-    route: "/task/1",
+    route: getSymposiumTrialRoute(1),
     assistant: cloneAssistantContent(
       assistantByCondition.A,
     ),
@@ -222,7 +233,7 @@ const trials: SymposiumTrialContent[] = [
     trialNumber: 2,
     participantLabel: "Task 2",
     condition: "B",
-    route: "/task/2",
+    route: getSymposiumTrialRoute(2),
     assistant: cloneAssistantContent(
       assistantByCondition.B,
     ),
@@ -234,7 +245,7 @@ const trials: SymposiumTrialContent[] = [
     trialNumber: 3,
     participantLabel: "Task 3",
     condition: "C",
-    route: "/task/3",
+    route: getSymposiumTrialRoute(3),
     assistant: cloneAssistantContent(
       assistantByCondition.C,
     ),
@@ -246,8 +257,8 @@ const trials: SymposiumTrialContent[] = [
 
 export const SYMPOSIUM_TASK_DATA:
   SymposiumTaskDefinition = {
-    id: "symposium",
-    routePattern: "/task/:trialNumber",
+    id: SYMPOSIUM_TASK_ID,
+    routePattern: "/task/:taskId/:trialNumber",
     title: SYMPOSIUM_TASK.title,
     shortTitle: SYMPOSIUM_TASK.shortTitle,
     description: SYMPOSIUM_TASK.description,
@@ -330,7 +341,7 @@ export function getSymposiumTrialContent(
 
   if (!trial) {
     throw new Error(
-      `No Symposium configuration exists for Task ${trialNumber}.`,
+      `No Symposium condition option exists for trial number ${trialNumber}.`,
     );
   }
 
@@ -343,12 +354,6 @@ export function getSymposiumTrialContent(
       trial.initialPlacements,
     ),
   };
-}
-
-export function getSymposiumTrialRoute(
-  trialNumber: StudyTrialNumber,
-): string {
-  return `/task/${trialNumber}`;
 }
 
 export {

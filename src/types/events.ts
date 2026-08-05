@@ -7,7 +7,7 @@ import type {
   Slot,
   StudyTaskId,
   StudyTrialNumber,
-  StudyTrialOrder,
+  StudyTrialOrderValue,
 } from "./scheduler";
 
 export const STUDY_EVENT_TYPES = [
@@ -69,6 +69,8 @@ export type StudyEventType =
   (typeof STUDY_EVENT_TYPES)[number];
 
 export const STUDY_PHASES = [
+  "session",
+  "consent",
   "pre_ai",
   "pre_probe",
   "post_probe",
@@ -301,15 +303,29 @@ export interface StudyEvent
   trialId: string;
   compositeTrialId?: string;
 
-  /* Inner trial number within a task domain: 1, 2, or 3. */
+  /* Condition-option identity within a task domain: 1, 2, or 3. */
   trialNumber: StudyTrialNumber;
 
-  /* Global study order when available: 1 through 9. */
-  trialOrder: StudyTrialOrder | number;
+  /*
+   * Actual participant chronology: 1, 2, or 3.
+   * Zero is reserved for session-level events emitted before any trial starts.
+   */
+  trialOrder: StudyTrialOrderValue;
+
+  /*
+   * Stable 1–9 task-condition option identifier retained for compatibility.
+   * This is not the participant's chronological trial order.
+   */
   trialIndex?: number;
+  globalOptionNumber?: number;
 
   outerTaskNumber?: number;
   innerTaskNumber?: StudyTrialNumber;
+
+  /*
+   * Compatibility name for the stable 1–9 option identifier.
+   * Prefer globalOptionNumber in new code.
+   */
   globalTrialNumber?: number;
 
   condition: ConcretizationLevel;
@@ -347,8 +363,14 @@ export interface CreateStudyEventInput
   compositeTrialId?: string;
 
   trialNumber?: StudyTrialNumber;
-  trialOrder?: StudyTrialOrder | number;
+  trialOrder?: StudyTrialOrderValue;
+
+  /*
+   * Stable task-condition option identifiers. They are separate from the
+   * participant's actual 1–3 chronological trial order.
+   */
   trialIndex?: number;
+  globalOptionNumber?: number;
 
   outerTaskNumber?: number;
   innerTaskNumber?: StudyTrialNumber;

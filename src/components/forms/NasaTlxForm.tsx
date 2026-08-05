@@ -308,9 +308,15 @@ export default function NasaTlxForm({
                 </div>
 
                 <div
-                  className="nasa-likert-scale questionnaire-rating-options questionnaire-rating-options-eight"
+                  className="nasa-likert-scale questionnaire-rating-options questionnaire-rating-options-seven"
                   role="radiogroup"
-                  aria-label={`${title} rating from 0 to 7`}
+                  aria-label={`${title} rating from 1 to 7`}
+                  aria-required="true"
+                  data-scale-min="1"
+                  data-scale-max="7"
+                  data-option-count={
+                    NASA_TLX_RATINGS.length
+                  }
                 >
                   {NASA_TLX_RATINGS.map(
                     (
@@ -361,6 +367,7 @@ export default function NasaTlxForm({
                             checked={
                               selected
                             }
+                            required
                             disabled={
                               disabled
                             }
@@ -398,7 +405,7 @@ export default function NasaTlxForm({
                 >
                   <span>
                     <strong>
-                      0
+                      1
                     </strong>
 
                     <small>

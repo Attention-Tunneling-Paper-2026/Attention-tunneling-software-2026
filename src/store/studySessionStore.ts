@@ -2,16 +2,29 @@ import {
   create,
 } from "zustand";
 
+/*
+ * Study allocation invariant:
+ * - 9 selectable options exist (3 problems x 3 conditions).
+ * - Each participant completes exactly 3 trials (one option per problem).
+ * - Problem/condition allocation is supplied externally by the researcher.
+ * - trialOrder, isFirstTrial, and probe exposure are assigned chronologically
+ *   when the selected option starts; option number is never used as order.
+ */
+
 import {
   DEFAULT_CONDITION_ORDER,
+  createCompositeTrialId,
   createSymposiumTrials,
+  getGlobalOptionNumber,
   isConditionOrder,
+  isStudyTrialOrder,
 } from "../types/scheduler";
 
 import type {
   ConditionOrder,
   StudyTaskId,
   StudyTrialNumber,
+  StudyTrialOrder,
 } from "../types/scheduler";
 
 import type {
@@ -90,9 +103,19 @@ export const TOTAL_TASK_DOMAINS =
 export const TRIALS_PER_TASK =
   3;
 
-export const TOTAL_STUDY_TRIALS =
+/*
+ * The interface exposes three condition options for each problem, but a
+ * participant completes exactly one externally assigned option per problem.
+ */
+export const TOTAL_AVAILABLE_TRIAL_OPTIONS =
   TOTAL_TASK_DOMAINS *
   TRIALS_PER_TASK;
+
+export const TOTAL_STUDY_TRIALS =
+  TOTAL_TASK_DOMAINS;
+
+export const STUDY_ASSIGNMENT_METHOD =
+  "external_excel" as const;
 
 interface StudySessionState {
   participantId:
@@ -311,6 +334,9 @@ interface StudySessionStore
 
     taskId?:
       StudyTaskId,
+
+    exportedAtIso?:
+      string,
   ) => boolean;
 
   markTrialEventsCsvExported: (
@@ -319,6 +345,9 @@ interface StudySessionStore
 
     taskId?:
       StudyTaskId,
+
+    exportedAtIso?:
+      string,
   ) => boolean;
 
   markTrialSummaryCsvExported: (
@@ -327,6 +356,9 @@ interface StudySessionStore
 
     taskId?:
       StudyTaskId,
+
+    exportedAtIso?:
+      string,
   ) => boolean;
 
   openPostExperiment:
@@ -338,10 +370,15 @@ interface StudySessionStore
   setPostExperimentCsvExportStatus: (
     status:
       TrialExportStatus,
+
+    exportedAtIso?:
+      string,
   ) => boolean;
 
-  markPostExperimentCsvExported:
-    () => boolean;
+  markPostExperimentCsvExported: (
+    exportedAtIso?:
+      string,
+  ) => boolean;
 
   markDisclosureViewed:
     () => boolean;
@@ -371,6 +408,9 @@ interface StudySessionStore
 
   getCompletedTrialCount:
     () => number;
+
+  getObservedConditionOrder:
+    () => ConditionOrder | undefined;
 
   areAllTrialsComplete:
     () => boolean;
@@ -409,6 +449,12 @@ const LEGACY_STORAGE_KEYS = [
 
 const DEFAULT_PARTICIPANT_ID =
   "P001";
+
+const NEXT_PARTICIPANT_STORAGE_KEY =
+  "attention-tunneling-next-participant-number";
+
+const PARTICIPANT_ID_PATTERN =
+  /^P(\d+)$/i;
 
 function isSupportedStudyTaskId(
   value:
@@ -478,30 +524,6 @@ function trialMatchesIdentity(
   );
 }
 
-function getGlobalTrialNumber(
-  taskId:
-    SupportedStudyTaskId,
-
-  trialNumber:
-    StudyTrialNumber,
-): number {
-  const taskIndex =
-    STUDY_TASKS.findIndex(
-      (task) =>
-        task.taskId ===
-        taskId,
-    );
-
-  return (
-    Math.max(
-      0,
-      taskIndex,
-    ) *
-      TRIALS_PER_TASK +
-    trialNumber
-  );
-}
-
 function removeLegacyPersistedState():
   void {
   if (
@@ -538,6 +560,150 @@ function normalizeParticipantId(
     0
     ? normalized
     : DEFAULT_PARTICIPANT_ID;
+}
+
+function getParticipantNumber(
+  participantId:
+    string,
+): number | null {
+  const match =
+    PARTICIPANT_ID_PATTERN.exec(
+      participantId.trim(),
+    );
+
+  if (
+    !match
+  ) {
+    return null;
+  }
+
+  const parsed =
+    Number.parseInt(
+      match[
+        1
+      ],
+      10,
+    );
+
+  return Number.isFinite(
+    parsed,
+  )
+    ? parsed
+    : null;
+}
+
+function formatParticipantId(
+  participantNumber:
+    number,
+): string {
+  return `P${Math.max(
+    1,
+    Math.floor(
+      participantNumber,
+    ),
+  )
+    .toString()
+    .padStart(
+      3,
+      "0",
+    )}`;
+}
+
+function readStoredNextParticipantNumber():
+  number | null {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return null;
+  }
+
+  const parsed =
+    Number.parseInt(
+      window.localStorage.getItem(
+        NEXT_PARTICIPANT_STORAGE_KEY,
+      ) ??
+        "",
+      10,
+    );
+
+  return Number.isFinite(
+    parsed,
+  ) &&
+    parsed >
+      0
+    ? parsed
+    : null;
+}
+
+function rememberNextParticipantNumber(
+  participantId:
+    string,
+): void {
+  if (
+    typeof window ===
+    "undefined"
+  ) {
+    return;
+  }
+
+  const currentNumber =
+    getParticipantNumber(
+      participantId,
+    );
+
+  if (
+    currentNumber ===
+    null
+  ) {
+    return;
+  }
+
+  const nextNumber =
+    currentNumber +
+    1;
+
+  const storedNumber =
+    readStoredNextParticipantNumber();
+
+  window.localStorage.setItem(
+    NEXT_PARTICIPANT_STORAGE_KEY,
+    String(
+      Math.max(
+        nextNumber,
+        storedNumber ??
+          nextNumber,
+      ),
+    ),
+  );
+}
+
+function getNextParticipantId(
+  currentParticipantId:
+    string,
+): string {
+  const currentNumber =
+    getParticipantNumber(
+      currentParticipantId,
+    );
+
+  const storedNumber =
+    readStoredNextParticipantNumber();
+
+  const nextNumber =
+    Math.max(
+      currentNumber ===
+        null
+        ? 1
+        : currentNumber +
+          1,
+      storedNumber ??
+        1,
+    );
+
+  return formatParticipantId(
+    nextNumber,
+  );
 }
 
 function createSessionId():
@@ -601,9 +767,14 @@ function createAssignments(
     (task) =>
       innerTrialDefinitions.map(
         (definition) => {
-          const globalTrialNumber =
-            getGlobalTrialNumber(
+          const taskId =
+            toStudyTaskId(
               task.taskId,
+            );
+
+          const globalOptionNumber =
+            getGlobalOptionNumber(
+              taskId,
               definition.trialNumber,
             );
 
@@ -611,13 +782,15 @@ function createAssignments(
             trialNumber:
               definition.trialNumber,
 
+            /*
+             * Pending task-condition options are not chronological trials.
+             * startTrial assigns 1, 2, or 3 only when the researcher-selected
+             * option actually starts.
+             */
             trialOrder:
-              globalTrialNumber,
+              0,
 
-            taskId:
-              toStudyTaskId(
-                task.taskId,
-              ),
+            taskId,
 
             condition:
               definition.condition,
@@ -626,18 +799,37 @@ function createAssignments(
               definition.conditionOrder,
 
             participantLabel:
-              `Task ${definition.trialNumber}`,
+              `Task ${task.outerTaskNumber}`,
 
             isFirstTrial:
-              globalTrialNumber ===
-              1,
+              false,
 
             probeExposureNumber:
-              globalTrialNumber,
+              0,
 
             probeNaive:
-              globalTrialNumber ===
-              1,
+              false,
+
+            trialId:
+              createCompositeTrialId(
+                taskId,
+                definition.trialNumber,
+              ),
+
+            outerTaskNumber:
+              task.outerTaskNumber,
+
+            innerTaskNumber:
+              definition.trialNumber,
+
+            globalOptionNumber,
+
+            /*
+             * Compatibility name retained for existing exports.
+             * This is a stable 1–9 option identifier, not trial chronology.
+             */
+            globalTrialNumber:
+              globalOptionNumber,
           } satisfies StudyTrialAssignment;
         },
       ),
@@ -800,52 +992,105 @@ function createStateForParticipant(
   };
 }
 
+function trialHasStarted(
+  trial:
+    StudyTrialProgress,
+): boolean {
+  return (
+    trial.startedAtIso !==
+      null ||
+    trial.status !==
+      "pending"
+  );
+}
+
+function getSelectedTrials(
+  trials:
+    StudyTrialProgress[],
+): StudyTrialProgress[] {
+  return trials
+    .filter(
+      trialHasStarted,
+    )
+    .sort(
+      (
+        first,
+        second,
+      ) =>
+        Number(
+          first.trialOrder,
+        ) -
+        Number(
+          second.trialOrder,
+        ),
+    );
+}
+
 function getCompletedTrialCountFromTrials(
   trials:
     StudyTrialProgress[],
 ): number {
-  return trials.filter(
-    (trial) =>
-      trial.status ===
-      "questionnaire_complete",
+  return STUDY_TASKS.filter(
+    (task) =>
+      trials.some(
+        (trial) =>
+          getTaskIdFromAssignment(
+            trial,
+          ) ===
+            task.taskId &&
+          trial.status ===
+            "questionnaire_complete",
+      ),
   ).length;
+}
+
+function getObservedConditionOrderFromTrials(
+  trials:
+    StudyTrialProgress[],
+): ConditionOrder | undefined {
+  const selectedTrials =
+    getSelectedTrials(
+      trials,
+    );
+
+  if (
+    selectedTrials.length !==
+    TOTAL_STUDY_TRIALS
+  ) {
+    return undefined;
+  }
+
+  const observedOrder =
+    selectedTrials
+      .map(
+        (trial) =>
+          trial.condition,
+      )
+      .join(
+        "",
+      );
+
+  return isConditionOrder(
+    observedOrder,
+  )
+    ? observedOrder
+    : undefined;
 }
 
 function areAllTrialsCompleteFromTrials(
   trials:
     StudyTrialProgress[],
 ): boolean {
-  if (
-    trials.length !==
-    TOTAL_STUDY_TRIALS
-  ) {
-    return false;
-  }
-
   return STUDY_TASKS.every(
     (task) =>
-      (
-        [
-          1,
-          2,
-          3,
-        ] as const
-      ).every(
-        (trialNumber) =>
-          trials.some(
-            (trial) =>
-              trialMatchesIdentity(
-                trial,
-                {
-                  taskId:
-                    task.taskId,
-
-                  trialNumber,
-                },
-              ) &&
-              trial.status ===
-                "questionnaire_complete",
-          ),
+      trials.some(
+        (trial) =>
+          getTaskIdFromAssignment(
+            trial,
+          ) ===
+            task.taskId &&
+          trial.status ===
+            "questionnaire_complete",
       ),
   );
 }
@@ -889,53 +1134,6 @@ function getTrialForIdentity(
   );
 }
 
-function getNextPendingAssignment(
-  assignments:
-    StudyTrialAssignment[],
-
-  trials:
-    StudyTrialProgress[],
-): StudyTrialAssignment | undefined {
-  const pendingTrial =
-    [...trials]
-      .sort(
-        (
-          first,
-          second,
-        ) =>
-          Number(
-            first.trialOrder,
-          ) -
-          Number(
-            second.trialOrder,
-          ),
-      )
-      .find(
-        (trial) =>
-          trial.status ===
-          "pending",
-      );
-
-  if (
-    !pendingTrial
-  ) {
-    return undefined;
-  }
-
-  return getAssignmentForIdentity(
-    assignments,
-    {
-      taskId:
-        getTaskIdFromAssignment(
-          pendingTrial,
-        ),
-
-      trialNumber:
-        pendingTrial.trialNumber,
-    },
-  );
-}
-
 function sessionConfigurationIsValid(
   assignments:
     StudyTrialAssignment[],
@@ -948,9 +1146,9 @@ function sessionConfigurationIsValid(
 ): boolean {
   if (
     assignments.length !==
-      TOTAL_STUDY_TRIALS ||
+      TOTAL_AVAILABLE_TRIAL_OPTIONS ||
     trials.length !==
-      TOTAL_STUDY_TRIALS
+      TOTAL_AVAILABLE_TRIAL_OPTIONS
   ) {
     return false;
   }
@@ -960,64 +1158,106 @@ function sessionConfigurationIsValid(
       conditionOrder,
     );
 
-  return definitions.every(
-    (definition) => {
-      const identity:
-        TrialIdentity = {
-          taskId:
-            getTaskIdFromAssignment(
-              definition,
-            ),
+  const definitionsArePresent =
+    definitions.every(
+      (definition) => {
+        const identity:
+          TrialIdentity = {
+            taskId:
+              getTaskIdFromAssignment(
+                definition,
+              ),
 
-          trialNumber:
-            definition.trialNumber,
-        };
+            trialNumber:
+              definition.trialNumber,
+          };
 
-      const assignment =
-        assignments.find(
-          (item) =>
-            trialMatchesIdentity(
-              item,
-              identity,
-            ),
+        const assignment =
+          assignments.find(
+            (item) =>
+              trialMatchesIdentity(
+                item,
+                identity,
+              ),
+          );
+
+        const trial =
+          trials.find(
+            (item) =>
+              trialMatchesIdentity(
+                item,
+                identity,
+              ),
+          );
+
+        return (
+          assignment?.condition ===
+            definition.condition &&
+          assignment?.conditionOrder ===
+            definition.conditionOrder &&
+          trial?.condition ===
+            definition.condition &&
+          trial?.conditionOrder ===
+            definition.conditionOrder
         );
+      },
+    );
 
-      const trial =
-        trials.find(
-          (item) =>
-            trialMatchesIdentity(
-              item,
-              identity,
-            ),
-        );
+  if (
+    !definitionsArePresent
+  ) {
+    return false;
+  }
 
-      return (
-        assignment?.condition ===
-          definition.condition &&
-        assignment?.participantLabel ===
-          definition.participantLabel &&
+  const selectedTrials =
+    getSelectedTrials(
+      trials,
+    );
+
+  const selectedTaskIds =
+    selectedTrials.map(
+      getTaskIdFromAssignment,
+    );
+
+  if (
+    new Set(
+      selectedTaskIds,
+    ).size !==
+    selectedTaskIds.length
+  ) {
+    return false;
+  }
+
+  const chronologicalOrders =
+    selectedTrials.map(
+      (trial) =>
         Number(
-          assignment?.trialOrder,
-        ) ===
-          Number(
-            definition.trialOrder,
-          ) &&
-        assignment?.conditionOrder ===
-          definition.conditionOrder &&
-        trial?.condition ===
-          definition.condition &&
-        trial?.participantLabel ===
-          definition.participantLabel &&
-        Number(
-          trial?.trialOrder,
-        ) ===
-          Number(
-            definition.trialOrder,
-          ) &&
-        trial?.conditionOrder ===
-          definition.conditionOrder
-      );
-    },
+          trial.trialOrder,
+        ),
+    );
+
+  return chronologicalOrders.every(
+    (
+      order,
+      index,
+    ) =>
+      order ===
+        index +
+          1 &&
+      selectedTrials[
+        index
+      ].probeExposureNumber ===
+        order &&
+      selectedTrials[
+        index
+      ].isFirstTrial ===
+        (order ===
+          1) &&
+      selectedTrials[
+        index
+      ].probeNaive ===
+        (order ===
+          1),
   );
 }
 
@@ -1111,13 +1351,7 @@ export const useStudySessionStore =
           };
         }
 
-        return {
-          taskId:
-            "symposium",
-
-          trialNumber:
-            resolvedTrialNumber,
-        };
+        return null;
       }
 
       function markTrialTimestamp(
@@ -1325,28 +1559,13 @@ export const useStudySessionStore =
             });
           },
 
+        /*
+         * Deliberately disabled: task and condition allocation comes from the
+         * researcher's external Excel sheet, never from application logic.
+         */
         startNextTrial:
-          () => {
-            const state =
-              get();
-
-            const assignment =
-              getNextPendingAssignment(
-                state.assignments,
-                state.trials,
-              );
-
-            if (
-              !assignment
-            ) {
-              return undefined;
-            }
-
-            return get().startTrial(
-              assignment.trialNumber,
-              assignment.taskId,
-            );
-          },
+          () =>
+            undefined,
 
         startTrial: (
           trialNumber,
@@ -1364,10 +1583,21 @@ export const useStudySessionStore =
           }
 
           const resolvedTaskId =
-            normalizeTaskId(
+            isSupportedStudyTaskId(
               taskId,
-              "symposium",
-            );
+            )
+              ? taskId
+              : isSupportedStudyTaskId(
+                    state.currentTaskId,
+                  )
+                ? state.currentTaskId
+                : null;
+
+          if (
+            !resolvedTaskId
+          ) {
+            return undefined;
+          }
 
           const identity:
             TrialIdentity = {
@@ -1377,14 +1607,14 @@ export const useStudySessionStore =
               trialNumber,
             };
 
-          const currentAssignment =
+          const storedAssignment =
             getAssignmentForIdentity(
               state.assignments,
               identity,
             );
 
           if (
-            !currentAssignment
+            !storedAssignment
           ) {
             return undefined;
           }
@@ -1399,6 +1629,28 @@ export const useStudySessionStore =
             !requestedTrial ||
             requestedTrial.status ===
               "questionnaire_complete"
+          ) {
+            return undefined;
+          }
+
+          const anotherOptionForThisProblemStarted =
+            state.trials.some(
+              (trial) =>
+                !trialMatchesIdentity(
+                  trial,
+                  identity,
+                ) &&
+                getTaskIdFromAssignment(
+                  trial,
+                ) ===
+                  resolvedTaskId &&
+                trialHasStarted(
+                  trial,
+                ),
+            );
+
+          if (
+            anotherOptionForThisProblemStarted
           ) {
             return undefined;
           }
@@ -1424,6 +1676,55 @@ export const useStudySessionStore =
             return undefined;
           }
 
+          const isNewSelection =
+            !trialHasStarted(
+              requestedTrial,
+            );
+
+          const chronologicalTrialOrderCandidate =
+            isNewSelection
+              ? getSelectedTrials(
+                  state.trials,
+                ).length +
+                1
+              : Number(
+                  requestedTrial.trialOrder,
+                );
+
+          if (
+            !isStudyTrialOrder(
+              chronologicalTrialOrderCandidate,
+            )
+          ) {
+            return undefined;
+          }
+
+          const chronologicalTrialOrder:
+            StudyTrialOrder =
+              chronologicalTrialOrderCandidate;
+
+          const runtimeAssignment:
+            StudyTrialAssignment = {
+              ...storedAssignment,
+
+              trialOrder:
+                chronologicalTrialOrder,
+
+              participantLabel:
+                `Task ${chronologicalTrialOrder}`,
+
+              isFirstTrial:
+                chronologicalTrialOrder ===
+                1,
+
+              probeExposureNumber:
+                chronologicalTrialOrder,
+
+              probeNaive:
+                chronologicalTrialOrder ===
+                1,
+            };
+
           const startedAtIso =
             requestedTrial.startedAtIso ??
             new Date()
@@ -1431,7 +1732,7 @@ export const useStudySessionStore =
 
           set({
             currentTaskId:
-              currentAssignment.taskId,
+              runtimeAssignment.taskId,
 
             currentTrialNumber:
               trialNumber,
@@ -1441,6 +1742,21 @@ export const useStudySessionStore =
                 "submitted"
                 ? "trial_questionnaire"
                 : "task",
+
+            assignments:
+              state.assignments.map(
+                (assignment) =>
+                  trialMatchesIdentity(
+                    assignment,
+                    identity,
+                  )
+                    ? {
+                        ...assignment,
+
+                        ...runtimeAssignment,
+                      }
+                    : assignment,
+              ),
 
             trials:
               state.trials.map(
@@ -1452,7 +1768,7 @@ export const useStudySessionStore =
                     ? {
                         ...trial,
 
-                        ...currentAssignment,
+                        ...runtimeAssignment,
 
                         status:
                           trial.status ===
@@ -1467,7 +1783,7 @@ export const useStudySessionStore =
           });
 
           return cloneAssignment(
-            currentAssignment,
+            runtimeAssignment,
           );
         },
 
@@ -1586,6 +1902,18 @@ export const useStudySessionStore =
               trial.status !==
                 "submitted"
             )
+          ) {
+            return false;
+          }
+
+          /*
+           * Early submission is rejected at the session-state boundary.
+           * The caller may log submit_attempt, but no submitted state,
+           * trial end, or questionnaire navigation is created before probe.
+           */
+          if (
+            trial.probeShownAtIso ===
+            null
           ) {
             return false;
           }
@@ -1827,6 +2155,7 @@ export const useStudySessionStore =
           status,
           errorMessage,
           taskId,
+          exportedAtIso,
         ) => {
           const state =
             get();
@@ -1837,17 +2166,32 @@ export const useStudySessionStore =
               taskId,
             );
 
+          const trial =
+            identity
+              ? getTrialForIdentity(
+                  state.trials,
+                  identity,
+                )
+              : undefined;
+
           if (
             !identity ||
-            !getTrialForIdentity(
-              state.trials,
-              identity,
-            )
+            !trial
+          ) {
+            return false;
+          }
+
+          if (
+            status !==
+              "not_ready" &&
+            trial.status !==
+              "questionnaire_complete"
           ) {
             return false;
           }
 
           const timestampIso =
+            exportedAtIso ??
             new Date()
               .toISOString();
 
@@ -1920,6 +2264,7 @@ export const useStudySessionStore =
         markTrialEventsCsvExported: (
           trialNumber,
           taskId,
+          exportedAtIso,
         ) =>
           get().setTrialCsvExportStatus(
             trialNumber,
@@ -1927,11 +2272,13 @@ export const useStudySessionStore =
             "exported",
             undefined,
             taskId,
+            exportedAtIso,
           ),
 
         markTrialSummaryCsvExported: (
           trialNumber,
           taskId,
+          exportedAtIso,
         ) =>
           get().setTrialCsvExportStatus(
             trialNumber,
@@ -1939,6 +2286,7 @@ export const useStudySessionStore =
             "exported",
             undefined,
             taskId,
+            exportedAtIso,
           ),
 
         openPostExperiment:
@@ -2036,6 +2384,7 @@ export const useStudySessionStore =
 
         setPostExperimentCsvExportStatus: (
           status,
+          exportedAtIso,
         ) => {
           const state =
             get();
@@ -2053,10 +2402,11 @@ export const useStudySessionStore =
             return false;
           }
 
-          const exportedAtIso =
+          const resolvedExportedAtIso =
             status ===
             "exported"
               ? state.postExperimentCsvExportedAtIso ??
+                exportedAtIso ??
                 new Date()
                   .toISOString()
               : state.postExperimentCsvExportedAtIso;
@@ -2066,17 +2416,19 @@ export const useStudySessionStore =
               status,
 
             postExperimentCsvExportedAtIso:
-              exportedAtIso,
+              resolvedExportedAtIso,
           });
 
           return true;
         },
 
-        markPostExperimentCsvExported:
-          () =>
-            get().setPostExperimentCsvExportStatus(
-              "exported",
-            ),
+        markPostExperimentCsvExported: (
+          exportedAtIso,
+        ) =>
+          get().setPostExperimentCsvExportStatus(
+            "exported",
+            exportedAtIso,
+          ),
 
         markDisclosureViewed:
           () => {
@@ -2119,6 +2471,15 @@ export const useStudySessionStore =
               return false;
             }
 
+            const studyCompletedAtIso =
+              state.studyCompletedAtIso ??
+              new Date()
+                .toISOString();
+
+            rememberNextParticipantNumber(
+              state.participantId,
+            );
+
             set({
               studyCompleted:
                 true,
@@ -2126,10 +2487,7 @@ export const useStudySessionStore =
               stage:
                 "complete",
 
-              studyCompletedAtIso:
-                state.studyCompletedAtIso ??
-                new Date()
-                  .toISOString(),
+              studyCompletedAtIso,
             });
 
             return true;
@@ -2163,15 +2521,8 @@ export const useStudySessionStore =
           },
 
         getNextAssignment:
-          () => {
-            const state =
-              get();
-
-            return getNextPendingAssignment(
-              state.assignments,
-              state.trials,
-            );
-          },
+          () =>
+            undefined,
 
         getTrialProgress: (
           trialNumber,
@@ -2208,6 +2559,12 @@ export const useStudySessionStore =
               get().trials,
             ),
 
+        getObservedConditionOrder:
+          () =>
+            getObservedConditionOrderFromTrials(
+              get().trials,
+            ),
+
         areAllTrialsComplete:
           () =>
             areAllTrialsCompleteFromTrials(
@@ -2240,10 +2597,20 @@ export const useStudySessionStore =
         ) => {
           removeLegacyPersistedState();
 
+          const state =
+            get();
+
+          const nextParticipantId =
+            participantId ??
+            (state.studyCompleted
+              ? getNextParticipantId(
+                  state.participantId,
+                )
+              : state.participantId);
+
           set(
             createStateForParticipant(
-              participantId ??
-                DEFAULT_PARTICIPANT_ID,
+              nextParticipantId,
               conditionOrder,
             ),
           );

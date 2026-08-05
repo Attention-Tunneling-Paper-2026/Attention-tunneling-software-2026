@@ -5,7 +5,6 @@ import type {
 } from "./scheduler";
 
 export type LikertRating =
-  | 0
   | 1
   | 2
   | 3
@@ -14,7 +13,6 @@ export type LikertRating =
 
 export const LIKERT_RATINGS:
   readonly LikertRating[] = [
-    0,
     1,
     2,
     3,
@@ -47,7 +45,6 @@ export const NASA_TLX_DIMENSIONS:
   ];
 
 export type NasaTlxRating =
-  | 0
   | 1
   | 2
   | 3
@@ -62,7 +59,6 @@ export const NASA_TLX_RATINGS:
     NasaTlxRating,
     null
   >[] = [
-    0,
     1,
     2,
     3,
@@ -633,7 +629,7 @@ export function isLikertRating(
       value,
     ) &&
     value >=
-      0 &&
+      1 &&
     value <=
       5
   );
@@ -653,7 +649,7 @@ export function isNasaTlxValue(
       value,
     ) &&
     value >=
-      0 &&
+      1 &&
     value <=
       7
   );

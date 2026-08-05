@@ -36,6 +36,27 @@ export type TrialMetricRow =
     string | number | boolean | null
   >;
 
+/*
+ * CSV exports use numeric binary coding for JASP compatibility.
+ * Text and numeric values are preserved, while booleans become 1 or 0.
+ */
+function normalizeTrialMetricRow(
+  row: TrialMetricRow,
+): TrialMetricRow {
+  return Object.fromEntries(
+    Object.entries(row).map(
+      ([key, value]) => [
+        key,
+        typeof value === "boolean"
+          ? value
+            ? 1
+            : 0
+          : value,
+      ],
+    ),
+  ) as TrialMetricRow;
+}
+
 interface BuildTrialSummaryRowsInput {
   participantId:
     string;
@@ -585,6 +606,51 @@ function getLastEvent(
   return undefined;
 }
 
+function getLastAcceptedSubmitAttempt(
+  events:
+    StudyEvent[],
+): StudyEvent | undefined {
+  for (
+    let index =
+      events.length -
+      1;
+    index >=
+      0;
+    index -=
+      1
+  ) {
+    const event =
+      events[
+        index
+      ];
+
+    if (
+      event.eventType !==
+        "submit_attempt"
+    ) {
+      continue;
+    }
+
+    const accepted =
+      event.accepted ??
+      toBooleanValue(
+        readMetadataValue(
+          event,
+          "accepted",
+        ),
+      );
+
+    if (
+      accepted ===
+      true
+    ) {
+      return event;
+    }
+  }
+
+  return undefined;
+}
+
 function getFinalSubmissionEvent(
   events:
     StudyEvent[],
@@ -598,9 +664,8 @@ function getFinalSubmissionEvent(
       events,
       "trial_submitted",
     ) ??
-    getLastEvent(
+    getLastAcceptedSubmitAttempt(
       events,
-      "submit_attempt",
     )
   );
 }
@@ -1546,6 +1611,11 @@ export function buildTrialEventRows(
       probeShownEvent,
       "affectedRoom",
       "affectedRoom",
+    ) ||
+    eventString(
+      probeShownEvent,
+      "affectedResource",
+      "affectedResource",
     );
 
   const requiredProjectorRoom =
@@ -1553,6 +1623,11 @@ export function buildTrialEventRows(
       probeShownEvent,
       "requiredProjectorRoom",
       "requiredProjectorRoom",
+    ) ||
+    eventString(
+      probeShownEvent,
+      "requiredEquipmentResource",
+      "requiredEquipmentResource",
     );
 
   const requiredTalkIds =
@@ -1565,6 +1640,16 @@ export function buildTrialEventRows(
       readMetadataValue(
         probeShownEvent,
         "requiredTalkIds",
+      ),
+
+      readEventValue(
+        probeShownEvent,
+        "requiredItemIds",
+      ),
+
+      readMetadataValue(
+        probeShownEvent,
+        "requiredItemIds",
       ),
     );
 
@@ -1620,7 +1705,7 @@ export function buildTrialEventRows(
           event.trialNumber,
         );
 
-      return {
+      return normalizeTrialMetricRow({
         participant_id:
           event.participantId,
         participant_token:
@@ -1638,7 +1723,11 @@ export function buildTrialEventRows(
         innerTaskNumber,
       outer_task_number:
         outerTaskNumber,
+      global_option_number:
+        event.globalOptionNumber ??
+        globalTrialNumber,
       global_trial_number:
+        event.globalTrialNumber ??
         globalTrialNumber,
       trial_order:
         event.trialOrder,
@@ -1696,12 +1785,38 @@ export function buildTrialEventRows(
           acceptedEditAnnotation
             ?.cumulativeAcceptedEditsAfter ??
           null,
-        talk_id:
+        item_id:
+          event.itemId ??
           event.talkId ??
-        "",
-        displaced_talk_id:
+          "",
+        displaced_item_id:
+          event.displacedItemId ??
           event.displacedTalkId ??
           "",
+        talk_id:
+          event.talkId ??
+          event.itemId ??
+          "",
+        displaced_talk_id:
+          event.displacedTalkId ??
+          event.displacedItemId ??
+          "",
+      from_resource:
+        event.fromResource ??
+        event.fromRoom ??
+        "",
+      from_period:
+        event.fromPeriod ??
+        event.fromSlot ??
+        null,
+      to_resource:
+        event.toResource ??
+        event.toRoom ??
+        "",
+      to_period:
+        event.toPeriod ??
+        event.toSlot ??
+        null,
       from_room:
         event.fromRoom ??
         "",
@@ -1774,6 +1889,28 @@ export function buildTrialEventRows(
           "roomCompositionSignatureAfter",
           "roomCompositionSignature",
         ),
+      resource_composition_signature_before:
+        eventString(
+          event,
+          "resourceCompositionSignatureBefore",
+          "resourceCompositionSignatureBefore",
+        ) ||
+        eventString(
+          event,
+          "roomCompositionSignatureBefore",
+          "previousRoomCompositionSignature",
+        ),
+      resource_composition_signature_after:
+        eventString(
+          event,
+          "resourceCompositionSignatureAfter",
+          "resourceCompositionSignatureAfter",
+        ) ||
+        eventString(
+          event,
+          "roomCompositionSignatureAfter",
+          "roomCompositionSignature",
+        ),
       state_hash_definition:
         STATE_HASH_DEFINITION_BY_TASK[
           taskId
@@ -1816,8 +1953,18 @@ export function buildTrialEventRows(
         ),
       speaker_conflicts_before:
         event.speakerConflictsBefore ??
+        event.actorConflictsBefore ??
         null,
       speaker_conflicts_after:
+        event.speakerConflictsAfter ??
+        event.actorConflictsAfter ??
+        null,
+      actor_conflicts_before:
+        event.actorConflictsBefore ??
+        event.speakerConflictsBefore ??
+        null,
+      actor_conflicts_after:
+        event.actorConflictsAfter ??
         event.speakerConflictsAfter ??
         null,
       hamming_distance_from_ai_before:
@@ -2067,13 +2214,42 @@ export function buildTrialEventRows(
               )
             : null
         ),
-      affected_room:
+      affected_resource:
+        eventString(
+          event,
+          "affectedResource",
+          "affectedResource",
+        ) ||
         eventString(
           event,
           "affectedRoom",
           "affectedRoom",
         ) ||
         affectedRoom,
+      affected_room:
+        eventString(
+          event,
+          "affectedRoom",
+          "affectedRoom",
+        ) ||
+        eventString(
+          event,
+          "affectedResource",
+          "affectedResource",
+        ) ||
+        affectedRoom,
+      required_equipment_resource:
+        eventString(
+          event,
+          "requiredEquipmentResource",
+          "requiredEquipmentResource",
+        ) ||
+        eventString(
+          event,
+          "requiredProjectorRoom",
+          "requiredProjectorRoom",
+        ) ||
+        requiredProjectorRoom,
       required_projector_room:
         eventString(
           event,
@@ -2081,6 +2257,32 @@ export function buildTrialEventRows(
           "requiredProjectorRoom",
         ) ||
         requiredProjectorRoom,
+      required_item_ids_json:
+        serializeValue(
+          firstDefined(
+            readEventValue(
+              event,
+              "requiredItemIds",
+            ),
+
+            readMetadataValue(
+              event,
+              "requiredItemIds",
+            ),
+
+            readEventValue(
+              event,
+              "requiredTalkIds",
+            ),
+
+            readMetadataValue(
+              event,
+              "requiredTalkIds",
+            ),
+
+            requiredTalkIds,
+          ),
+        ),
       required_talk_ids_json:
         serializeValue(
           firstDefined(
@@ -2092,6 +2294,16 @@ export function buildTrialEventRows(
             readMetadataValue(
               event,
               "requiredTalkIds",
+            ),
+
+            readEventValue(
+              event,
+              "requiredItemIds",
+            ),
+
+            readMetadataValue(
+              event,
+              "requiredItemIds",
             ),
 
             requiredTalkIds,
@@ -2169,14 +2381,32 @@ export function buildTrialEventRows(
         null,
       unresolved_demo_talk_ids_json:
         serializeValue(
-          event.unresolvedDemoTalkIds,
+          event.unresolvedDemoTalkIds ??
+          event.unresolvedRequiredItemIds,
         ),
       unresolved_demo_talk_ids_before_json:
         serializeValue(
-          event.unresolvedDemoTalkIdsBefore,
+          event.unresolvedDemoTalkIdsBefore ??
+          event.unresolvedRequiredItemIdsBefore,
         ),
       unresolved_demo_talk_ids_after_json:
         serializeValue(
+          event.unresolvedDemoTalkIdsAfter ??
+          event.unresolvedRequiredItemIdsAfter,
+        ),
+      unresolved_required_item_ids_json:
+        serializeValue(
+          event.unresolvedRequiredItemIds ??
+          event.unresolvedDemoTalkIds,
+        ),
+      unresolved_required_item_ids_before_json:
+        serializeValue(
+          event.unresolvedRequiredItemIdsBefore ??
+          event.unresolvedDemoTalkIdsBefore,
+        ),
+      unresolved_required_item_ids_after_json:
+        serializeValue(
+          event.unresolvedRequiredItemIdsAfter ??
           event.unresolvedDemoTalkIdsAfter,
         ),
       room_a_demo_count:
@@ -2253,7 +2483,7 @@ export function buildTrialEventRows(
           serializeValue(
             event.payload,
           ),
-      };
+      });
     },
   );
 }
@@ -2364,11 +2594,17 @@ export function buildTrialSummaryRows({
   const outerTaskNumber =
     getOuterTaskNumber(taskId);
 
-  const globalTrialNumber =
+  const globalOptionNumber =
+    trial.globalOptionNumber ??
+    trial.globalTrialNumber ??
     getGlobalTrialNumber(
       taskId,
       trial.trialNumber,
     );
+
+  const globalTrialNumber =
+    trial.globalTrialNumber ??
+    globalOptionNumber;
 
   const compositeTrialId =
     finalEvent?.trialId ||
@@ -2692,6 +2928,51 @@ export function buildTrialSummaryRows({
         finalEvent,
         "unresolvedDemoTalkIdsAfter",
       ),
+
+      readEventValue(
+        finalEvent,
+        "unresolvedRequiredItemIds",
+      ),
+
+      readMetadataValue(
+        finalEvent,
+        "unresolvedRequiredItemIds",
+      ),
+
+      readEventValue(
+        finalEvent,
+        "unresolvedRequiredItemIdsAfter",
+      ),
+
+      readMetadataValue(
+        finalEvent,
+        "unresolvedRequiredItemIdsAfter",
+      ),
+    );
+
+  const finalUnresolvedRequiredItemIds =
+    firstDefined(
+      readEventValue(
+        finalEvent,
+        "unresolvedRequiredItemIds",
+      ),
+
+      readMetadataValue(
+        finalEvent,
+        "unresolvedRequiredItemIds",
+      ),
+
+      readEventValue(
+        finalEvent,
+        "unresolvedRequiredItemIdsAfter",
+      ),
+
+      readMetadataValue(
+        finalEvent,
+        "unresolvedRequiredItemIdsAfter",
+      ),
+
+      finalUnresolvedDemoTalkIds,
     );
 
   const finalPlacements =
@@ -2732,14 +3013,25 @@ export function buildTrialSummaryRows({
 
   const finalSpeakerConflictCount =
     toNumberValue(
-      readMetadataValue(
-        finalEvent,
-        "finalSpeakerConflictPairs",
+      firstDefined(
+        readMetadataValue(
+          finalEvent,
+          "finalSpeakerConflictPairs",
+        ),
+
+        readMetadataValue(
+          finalEvent,
+          "finalActorConflictPairs",
+        ),
       ),
     ) ??
     eventNumber(
       finalEvent,
       "speakerConflictsAfter",
+    ) ??
+    eventNumber(
+      finalEvent,
+      "actorConflictsAfter",
     );
 
   const finalCompleteAssignment =
@@ -2931,6 +3223,7 @@ export function buildTrialSummaryRows({
     getProbeRecallCorrect(
       questionnaireResponse
         .probeRecall,
+      taskId,
     );
 
   const recognitionChoice =
@@ -2945,6 +3238,7 @@ export function buildTrialSummaryRows({
       ? getProbeRecognitionCorrect(
           questionnaireResponse
             .probeRecall,
+          taskId,
         )
       : null;
 
@@ -3086,6 +3380,8 @@ export function buildTrialSummaryRows({
         innerTaskNumber,
       outer_task_number:
         outerTaskNumber,
+      global_option_number:
+        globalOptionNumber,
       global_trial_number:
         globalTrialNumber,
       trial_order:
@@ -3722,6 +4018,8 @@ export function buildTrialSummaryRows({
         ),
       final_speaker_conflict_count:
         finalSpeakerConflictCount,
+      final_actor_conflict_count:
+        finalSpeakerConflictCount,
       final_fully_feasible:
         finalFullyFeasible,
       final_distance_to_best_post_probe_solution:
@@ -3781,6 +4079,10 @@ export function buildTrialSummaryRows({
       unresolved_demo_talk_ids_json:
         serializeValue(
           finalUnresolvedDemoTalkIds,
+        ),
+      unresolved_required_item_ids_json:
+        serializeValue(
+          finalUnresolvedRequiredItemIds,
         ),
       final_placements_json:
         serializeValue(
@@ -3972,6 +4274,8 @@ export function buildTrialSummaryRows({
         questionnaireResponse.probeRecall.noticedUpdate,
       probe_recall_description:
         questionnaireResponse.probeRecall.updateDescription,
+      probe_recall_affected_resource:
+        questionnaireResponse.probeRecall.affectedRoom,
       probe_recall_affected_room:
         questionnaireResponse.probeRecall.affectedRoom,
       probe_recall_correct:
@@ -4024,6 +4328,27 @@ export function buildTrialSummaryRows({
           "roomCompositionSignature",
           "roomCompositionSignature",
         ),
+      final_resource_composition_signature:
+        eventString(
+          finalEvent,
+          "resourceCompositionSignatureAfter",
+          "resourceCompositionSignature",
+        ) ||
+        eventString(
+          finalEvent,
+          "resourceCompositionSignature",
+          "resourceCompositionSignature",
+        ) ||
+        eventString(
+          finalEvent,
+          "roomCompositionSignatureAfter",
+          "roomCompositionSignature",
+        ) ||
+        eventString(
+          finalEvent,
+          "roomCompositionSignature",
+          "roomCompositionSignature",
+        ),
       events_csv_export_status:
         trial.eventsCsvExportStatus,
       summary_csv_export_status:
@@ -4040,6 +4365,8 @@ export function buildTrialSummaryRows({
     };
 
   return [
-    summaryRow,
+    normalizeTrialMetricRow(
+      summaryRow,
+    ),
   ];
 }

@@ -5,6 +5,7 @@ import {
 
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -143,17 +144,110 @@ function getTrialTaskId(
   trial:
     StudyTrialProgress,
 ): SupportedStudyTaskId {
-  const taskId =
-    (
-      trial as
-        StudyTrialWithIdentity
-    ).taskId;
+  const trialWithIdentity =
+    trial as
+      StudyTrialWithIdentity;
 
-  return isStudyTaskId(
+  const {
     taskId,
-  )
-    ? taskId
-    : "symposium";
+    outerTaskNumber,
+    globalTrialNumber,
+    trialId,
+  } = trialWithIdentity;
+
+  if (
+    isStudyTaskId(
+      taskId,
+    )
+  ) {
+    return taskId;
+  }
+
+  if (
+    outerTaskNumber ===
+      2
+  ) {
+    return "delivery";
+  }
+
+  if (
+    outerTaskNumber ===
+      3
+  ) {
+    return "clinic";
+  }
+
+  if (
+    outerTaskNumber ===
+      1
+  ) {
+    return "symposium";
+  }
+
+  if (
+    typeof globalTrialNumber ===
+      "number" &&
+    Number.isInteger(
+      globalTrialNumber,
+    ) &&
+    globalTrialNumber >=
+      1 &&
+    globalTrialNumber <=
+      TOTAL_STUDY_TRIALS
+  ) {
+    if (
+      globalTrialNumber <=
+        TRIALS_PER_TASK
+    ) {
+      return "symposium";
+    }
+
+    if (
+      globalTrialNumber <=
+        TRIALS_PER_TASK *
+          2
+    ) {
+      return "delivery";
+    }
+
+    return "clinic";
+  }
+
+  if (
+    typeof trialId ===
+      "string"
+  ) {
+    const normalizedTrialId =
+      trialId
+        .trim()
+        .toLowerCase();
+
+    if (
+      normalizedTrialId.startsWith(
+        "delivery",
+      )
+    ) {
+      return "delivery";
+    }
+
+    if (
+      normalizedTrialId.startsWith(
+        "clinic",
+      )
+    ) {
+      return "clinic";
+    }
+
+    if (
+      normalizedTrialId.startsWith(
+        "symposium",
+      )
+    ) {
+      return "symposium";
+    }
+  }
+
+  return "symposium";
 }
 
 function getOuterTaskNumber(
@@ -195,20 +289,82 @@ function getInnerTaskNumber(
   trial:
     StudyTrialProgress,
 ): number {
-  const explicitTaskNumber =
-    (
-      trial as
-        StudyTrialWithIdentity
-    ).innerTaskNumber;
+  const trialWithIdentity =
+    trial as
+      StudyTrialWithIdentity;
 
-  return explicitTaskNumber ===
+  const explicitTaskNumber =
+    trialWithIdentity
+      .innerTaskNumber;
+
+  if (
+    explicitTaskNumber ===
       1 ||
     explicitTaskNumber ===
       2 ||
     explicitTaskNumber ===
       3
-    ? explicitTaskNumber
-    : trial.trialNumber;
+  ) {
+    return explicitTaskNumber;
+  }
+
+  const explicitGlobalTrialNumber =
+    trialWithIdentity
+      .globalTrialNumber;
+
+  if (
+    typeof explicitGlobalTrialNumber ===
+      "number" &&
+    Number.isInteger(
+      explicitGlobalTrialNumber,
+    ) &&
+    explicitGlobalTrialNumber >=
+      1 &&
+    explicitGlobalTrialNumber <=
+      TOTAL_STUDY_TRIALS
+  ) {
+    return (
+      (
+        explicitGlobalTrialNumber -
+        1
+      ) %
+        TRIALS_PER_TASK
+    ) +
+      1;
+  }
+
+  if (
+    Number.isInteger(
+      trial.trialNumber,
+    ) &&
+    trial.trialNumber >=
+      1 &&
+    trial.trialNumber <=
+      TRIALS_PER_TASK
+  ) {
+    return trial.trialNumber;
+  }
+
+  if (
+    Number.isInteger(
+      trial.trialNumber,
+    ) &&
+    trial.trialNumber >=
+      1 &&
+    trial.trialNumber <=
+      TOTAL_STUDY_TRIALS
+  ) {
+    return (
+      (
+        trial.trialNumber -
+        1
+      ) %
+        TRIALS_PER_TASK
+    ) +
+      1;
+  }
+
+  return 1;
 }
 
 function getGlobalTrialNumber(
@@ -458,17 +614,21 @@ export default function PostExperimentPage() {
       TOTAL_TASKS;
 
   const orderedTrials =
-    [...trials].sort(
-      (
-        first,
-        second,
-      ) =>
-        getGlobalTrialNumber(
-          first,
-        ) -
-        getGlobalTrialNumber(
-          second,
+    useMemo(
+      () =>
+        [...trials].sort(
+          (
+            first,
+            second,
+          ) =>
+            getGlobalTrialNumber(
+              first,
+            ) -
+            getGlobalTrialNumber(
+              second,
+            ),
         ),
+      [trials],
     );
 
   const finalTrial =

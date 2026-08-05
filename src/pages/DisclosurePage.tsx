@@ -11,6 +11,7 @@ import {
 
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
@@ -27,15 +28,301 @@ import {
   useStudySessionStore,
 } from "../store/studySessionStore";
 
+import {
+  downloadCsv,
+} from "../utils/csvExport";
+
+import {
+  STUDY_TASK_IDS,
+  STUDY_TRIAL_ORDERS,
+  TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
+  TOTAL_STUDY_TRIALS,
+  isStudyTrialOrder,
+} from "../types/scheduler";
+
 const TOTAL_EXPERIMENT_TASKS =
-  3;
+  STUDY_TASK_IDS.length;
 
-const TRIALS_PER_TASK =
-  3;
+type CsvCell =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined;
 
-const TOTAL_STUDY_TRIALS =
-  TOTAL_EXPERIMENT_TASKS *
-  TRIALS_PER_TASK;
+type SessionEventCsvRow =
+  Record<
+    string,
+    CsvCell
+  >;
+
+function sanitizeFilePart(
+  value:
+    string,
+): string {
+  const normalized =
+    value
+      .trim()
+      .replace(
+        /[^a-zA-Z0-9_]/g,
+        "_",
+      )
+      .replace(
+        /_+/g,
+        "_",
+      )
+      .replace(
+        /^_+|_+$/g,
+        "",
+      );
+
+  return normalized.length >
+    0
+    ? normalized
+    : "participant";
+}
+
+function getErrorMessage(
+  error:
+    unknown,
+): string {
+  if (
+    error instanceof
+      Error &&
+    error.message
+      .trim()
+      .length >
+      0
+  ) {
+    return error.message;
+  }
+
+  return "The session CSV could not be downloaded.";
+}
+
+function isPlainRecord(
+  value:
+    unknown,
+): value is Record<
+  string,
+  unknown
+> {
+  return (
+    typeof value ===
+      "object" &&
+    value !==
+      null &&
+    !Array.isArray(
+      value,
+    )
+  );
+}
+
+function toCsvCell(
+  value:
+    unknown,
+): CsvCell {
+  if (
+    value ===
+      null ||
+    value ===
+      undefined
+  ) {
+    return "";
+  }
+
+  if (
+    typeof value ===
+      "string" ||
+    typeof value ===
+      "number" ||
+    typeof value ===
+      "boolean"
+  ) {
+    return value;
+  }
+
+  return JSON.stringify(
+    value,
+  );
+}
+
+function flattenCsvObject(
+  target:
+    SessionEventCsvRow,
+
+  prefix:
+    string,
+
+  value:
+    unknown,
+): void {
+  if (
+    !isPlainRecord(
+      value,
+    )
+  ) {
+    target[
+      prefix
+    ] =
+      toCsvCell(
+        value,
+      );
+
+    return;
+  }
+
+  for (
+    const [
+      key,
+      nestedValue,
+    ] of
+    Object.entries(
+      value,
+    )
+  ) {
+    const nestedKey =
+      `${prefix}.${key}`;
+
+    if (
+      isPlainRecord(
+        nestedValue,
+      )
+    ) {
+      flattenCsvObject(
+        target,
+        nestedKey,
+        nestedValue,
+      );
+    } else {
+      target[
+        nestedKey
+      ] =
+        toCsvCell(
+          nestedValue,
+        );
+    }
+  }
+}
+
+function createSessionEventCsvRow(
+  event:
+    unknown,
+): SessionEventCsvRow {
+  const source =
+    isPlainRecord(
+      event,
+    )
+      ? event
+      : {};
+
+  const row:
+    SessionEventCsvRow = {
+      event_id:
+        toCsvCell(
+          source.eventId,
+        ),
+
+      session_id:
+        toCsvCell(
+          source.sessionId,
+        ),
+
+      participant_id:
+        toCsvCell(
+          source.participantId,
+        ),
+
+      participant_token:
+        toCsvCell(
+          source.participantToken,
+        ),
+
+      trial_index:
+        toCsvCell(
+          source.trialIndex ??
+          source.globalOptionNumber ??
+          source.globalTrialNumber,
+        ),
+
+      trial_id:
+        toCsvCell(
+          source.trialId ??
+          source.compositeTrialId,
+        ),
+
+      trial_number:
+        toCsvCell(
+          source.trialNumber,
+        ),
+
+      trial_order:
+        toCsvCell(
+          source.trialOrder,
+        ),
+
+      task_id:
+        toCsvCell(
+          source.taskId,
+        ),
+
+      condition:
+        toCsvCell(
+          source.condition,
+        ),
+
+      skin:
+        toCsvCell(
+          source.skin ??
+          source.taskId,
+        ),
+
+      build_hash:
+        toCsvCell(
+          source.buildHash,
+        ),
+
+      t_ms:
+        toCsvCell(
+          source.tMs ??
+          source.elapsedMs,
+        ),
+
+      iso_time:
+        toCsvCell(
+          source.timestampIso,
+        ),
+
+      event_type:
+        toCsvCell(
+          source.eventType,
+        ),
+
+      phase:
+        toCsvCell(
+          source.phase,
+        ),
+
+      event_index:
+        toCsvCell(
+          source.eventIndex,
+        ),
+    };
+
+  flattenCsvObject(
+    row,
+    "payload",
+    source.payload,
+  );
+
+  flattenCsvObject(
+    row,
+    "metadata",
+    source.metadata,
+  );
+
+  return row;
+}
 
 export default function DisclosurePage() {
   const navigate =
@@ -113,39 +400,121 @@ export default function DisclosurePage() {
         state.addEvent,
     );
 
-  const downloadEvents =
-    useEventLogStore(
-      (state) =>
-        state.downloadEvents,
-    );
-
   const [
     recordDownloaded,
     setRecordDownloaded,
   ] = useState(false);
 
+  const [
+    exportErrorMessage,
+    setExportErrorMessage,
+  ] = useState(
+    "",
+  );
+
   const disclosureLogged =
     useRef(false);
 
+  const completedTrials =
+    useMemo(
+      () =>
+        trials.filter(
+          (trial) =>
+            trial.status ===
+            "questionnaire_complete",
+        ),
+      [
+        trials,
+      ],
+    );
+
   const completedTrialCount =
-    trials.filter(
-      (trial) =>
-        trial.status ===
-        "questionnaire_complete",
-    ).length;
+    completedTrials.length;
 
   const completedTaskCount =
-    Math.min(
-      TOTAL_EXPERIMENT_TASKS,
-      Math.floor(
-        completedTrialCount /
-          TRIALS_PER_TASK,
-      ),
-    );
+    STUDY_TASK_IDS.filter(
+      (taskId) =>
+        completedTrials.filter(
+          (trial) =>
+            trial.taskId ===
+            taskId,
+        ).length ===
+        1,
+    ).length;
+
+  const chronologicalTrialOrders =
+    completedTrials
+      .map(
+        (trial) =>
+          trial.trialOrder,
+      )
+      .filter(
+        isStudyTrialOrder,
+      );
 
   const allStudyTrialsComplete =
     completedTrialCount ===
-    TOTAL_STUDY_TRIALS;
+      TOTAL_STUDY_TRIALS &&
+    completedTaskCount ===
+      TOTAL_EXPERIMENT_TASKS &&
+    chronologicalTrialOrders.length ===
+      TOTAL_STUDY_TRIALS &&
+    new Set(
+      chronologicalTrialOrders,
+    ).size ===
+      TOTAL_STUDY_TRIALS &&
+    STUDY_TRIAL_ORDERS.every(
+      (trialOrder) =>
+        chronologicalTrialOrders.includes(
+          trialOrder,
+        ),
+    );
+
+  const orderedCompletedTrials =
+    useMemo(
+      () =>
+        [
+          ...completedTrials,
+        ].sort(
+          (
+            first,
+            second,
+          ) =>
+            Number(
+              first.trialOrder,
+            ) -
+            Number(
+              second.trialOrder,
+            ),
+        ),
+      [
+        completedTrials,
+      ],
+    );
+
+  const completedTaskOrder =
+    useMemo(
+      () =>
+        orderedCompletedTrials.map(
+          (trial) =>
+            trial.taskId,
+        ),
+      [
+        orderedCompletedTrials,
+      ],
+    );
+
+  const completedConditionOrder =
+    useMemo(
+      () =>
+        orderedCompletedTrials.map(
+          (trial) =>
+            trial.condition,
+        ),
+      [
+        orderedCompletedTrials,
+      ],
+    );
 
   useEffect(() => {
     if (
@@ -231,18 +600,27 @@ export default function DisclosurePage() {
 
         completedTrialCount,
 
-        trialsPerTask:
-          TRIALS_PER_TASK,
-
         totalTrials:
           TOTAL_STUDY_TRIALS,
+
+        totalSelectableTaskConditionOptions:
+          TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
+
+        completedTaskOrder,
+
+        completedConditionOrder,
+
+        chronologicalTrialOrders,
       },
     });
   }, [
     addEvent,
     allStudyTrialsComplete,
+    completedConditionOrder,
     completedTaskCount,
+    completedTaskOrder,
     completedTrialCount,
+    chronologicalTrialOrders,
     disclosureViewed,
     events,
     markDisclosureViewed,
@@ -251,11 +629,136 @@ export default function DisclosurePage() {
   ]);
 
   function handleDownload() {
-    downloadEvents();
+    if (
+      !studyCompleted
+    ) {
+      return;
+    }
 
-    setRecordDownloaded(
-      true,
+    setExportErrorMessage(
+      "",
     );
+
+    const sessionEventsBeforeExport =
+      useEventLogStore
+        .getState()
+        .events
+        .filter(
+          (event) =>
+            event.sessionId ===
+            sessionId,
+        );
+
+    addEvent({
+      eventType:
+        "export_downloaded",
+
+      phase:
+        "complete",
+
+      metadata: {
+        page:
+          "disclosure",
+
+        by:
+          "completion_screen",
+
+        fileFormat:
+          "csv",
+
+        rowCount:
+          sessionEventsBeforeExport.length +
+          1,
+
+        completedTaskCount,
+
+        completedTrialCount,
+
+        totalTrials:
+          TOTAL_STUDY_TRIALS,
+
+        totalSelectableTaskConditionOptions:
+          TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
+      },
+    });
+
+    const sessionEvents =
+      useEventLogStore
+        .getState()
+        .events
+        .filter(
+          (event) =>
+            event.sessionId ===
+            sessionId,
+        )
+        .sort(
+          (
+            first,
+            second,
+          ) =>
+            Number(
+              first.tMs ??
+              first.elapsedMs ??
+              0,
+            ) -
+              Number(
+                second.tMs ??
+                second.elapsedMs ??
+                0,
+              ) ||
+            Number(
+              first.eventIndex ??
+              0,
+            ) -
+              Number(
+                second.eventIndex ??
+                0,
+              ),
+        );
+
+    const rows =
+      sessionEvents.map(
+        createSessionEventCsvRow,
+      );
+
+    const fileName =
+      `${sanitizeFilePart(
+        participantId,
+      )}_${sanitizeFilePart(
+        sessionId,
+      )}_session_events.csv`;
+
+    try {
+      downloadCsv(
+        fileName,
+        rows,
+      );
+
+      const sessionStore =
+        useStudySessionStore
+          .getState() as
+          ReturnType<
+            typeof useStudySessionStore.getState
+          > & {
+            markSessionCsvExported?:
+              () => boolean;
+          };
+
+      sessionStore
+        .markSessionCsvExported?.();
+
+      setRecordDownloaded(
+        true,
+      );
+    } catch (
+      error
+    ) {
+      setExportErrorMessage(
+        getErrorMessage(
+          error,
+        ),
+      );
+    }
   }
 
   function handleCompleteStudy() {
@@ -285,38 +788,94 @@ export default function DisclosurePage() {
       );
 
     if (
-      completionAlreadyLogged
+      !completionAlreadyLogged
     ) {
-      return;
+      addEvent({
+        eventType:
+          "study_completed",
+
+        phase:
+          "complete",
+
+        metadata: {
+          page:
+            "disclosure",
+
+          completedTaskCount,
+
+          totalExperimentTasks:
+            TOTAL_EXPERIMENT_TASKS,
+
+          completedTrialCount,
+
+          totalTrials:
+            TOTAL_STUDY_TRIALS,
+
+          totalSelectableTaskConditionOptions:
+            TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
+
+          completedTaskOrder,
+
+          completedConditionOrder,
+
+          chronologicalTrialOrders,
+
+          disclosureViewed:
+            true,
+
+          recordDownloaded,
+        },
+      });
     }
 
-    addEvent({
-      eventType:
-        "study_completed",
+    const sessionEndAlreadyLogged =
+      events.some(
+        (event) =>
+          event.sessionId ===
+            sessionId &&
+          event.eventType ===
+            "session_end",
+      );
 
-      metadata: {
-        page:
-          "disclosure",
+    if (
+      !sessionEndAlreadyLogged
+    ) {
+      addEvent({
+        eventType:
+          "session_end",
 
-        completedTaskCount,
+        phase:
+          "complete",
 
-        totalExperimentTasks:
-          TOTAL_EXPERIMENT_TASKS,
+        metadata: {
+          page:
+            "disclosure",
 
-        completedTrialCount,
+          completedTaskCount,
 
-        trialsPerTask:
-          TRIALS_PER_TASK,
+          completedTrialCount,
 
-        totalTrials:
-          TOTAL_STUDY_TRIALS,
+          totalTrials:
+            TOTAL_STUDY_TRIALS,
 
-        disclosureViewed:
-          true,
+          totalSelectableTaskConditionOptions:
+            TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
 
-        recordDownloaded,
-      },
-    });
+          completedTaskOrder,
+
+          completedConditionOrder,
+
+          chronologicalTrialOrders,
+
+          eventCountBeforeSessionEnd:
+            events.filter(
+              (event) =>
+                event.sessionId ===
+                sessionId,
+            ).length,
+        },
+      });
+    }
   }
 
   if (
@@ -406,8 +965,8 @@ export default function DisclosurePage() {
             <p>
               The three problem domains were symposium
               scheduling, delivery dispatch, and clinic roster
-              allocation. Each domain was completed using
-              three different forms of AI assistance.
+              allocation. You completed one assigned AI
+              assistance condition in each domain.
             </p>
 
             <p>
@@ -459,8 +1018,9 @@ export default function DisclosurePage() {
             </p>
 
             <p>
-              Participants received three forms of assistance
-              within each problem domain:
+              Across the experiment, the recommendation was
+              presented in three forms. Within this session,
+              one form was assigned to each problem domain:
             </p>
 
             <div className="disclosure-condition-list">
@@ -500,9 +1060,12 @@ export default function DisclosurePage() {
             </div>
 
             <p>
-              The apparent analysis delay and assistant
-              presentation were included to make the
-              interaction feel consistent across participants.
+              The condition-to-domain pairing and serial order
+              were counterbalanced across participants. The
+              apparent analysis delay and assistant presentation
+              were held consistent so that the manipulation
+              concerned solution concretization rather than
+              conversational style.
             </p>
           </div>
         </section>
@@ -646,12 +1209,12 @@ export default function DisclosurePage() {
 
             <div>
               <h2 id="record-title">
-                Save the local study record
+                Researcher session export
               </h2>
 
               <p>
-                Download the recorded study events as a JSON
-                file before closing the browser.
+                After the study is finished, download the
+                complete session event log as one CSV file.
               </p>
             </div>
           </div>
@@ -662,6 +1225,9 @@ export default function DisclosurePage() {
             onClick={
               handleDownload
             }
+            disabled={
+              !studyCompleted
+            }
           >
             <Download
               size={18}
@@ -669,10 +1235,21 @@ export default function DisclosurePage() {
             />
 
             {recordDownloaded
-              ? "Download again"
-              : "Download study data"}
+              ? "Download session CSV again"
+              : studyCompleted
+                ? "Download session CSV"
+                : "Finish study before export"}
           </button>
         </section>
+
+        {exportErrorMessage && (
+          <div
+            className="questionnaire-validation-message"
+            role="alert"
+          >
+            {exportErrorMessage}
+          </div>
+        )}
 
         {studyCompleted ? (
           <section
@@ -691,8 +1268,9 @@ export default function DisclosurePage() {
               </h2>
 
               <p>
-                Thank you for your participation. You may now
-                close this browser window.
+                Thank you for your participation. The
+                researcher may now export the complete session
+                CSV before this browser window is closed.
               </p>
             </div>
           </section>

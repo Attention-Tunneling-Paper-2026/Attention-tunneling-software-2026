@@ -230,15 +230,14 @@ interface QuestionnaireStore
     () => void;
 }
 
-const TRIALS_PER_TASK =
+/*
+ * Each participant submits exactly three trial questionnaires:
+ * one for Symposium, one for Delivery, and one for Clinic.
+ * The other six task-condition options are selectable alternatives,
+ * not additional required questionnaire responses.
+ */
+const TOTAL_REQUIRED_TRIAL_QUESTIONNAIRES =
   3;
-
-const TOTAL_TASKS =
-  3;
-
-const TOTAL_TRIALS =
-  TRIALS_PER_TASK *
-  TOTAL_TASKS;
 
 const STUDY_TASK_IDS = [
   "symposium",
@@ -706,44 +705,26 @@ function hasEveryExpectedSubmittedResponse(
   responses:
     TrialQuestionnaireResponse[],
 ): boolean {
-  const submittedResponseKeys =
-    new Set(
-      responses
-        .filter(
-          responseIsSubmitted,
-        )
-        .map(
-          (response) =>
-            getTrialResponseKey(
-              normalizeTaskId(
-                response.taskId,
-              ),
-              response.trialNumber,
-            ),
-        ),
+  const submittedResponses =
+    responses.filter(
+      responseIsSubmitted,
     );
 
   if (
-    submittedResponseKeys.size !==
-    TOTAL_TRIALS
+    submittedResponses.length !==
+    TOTAL_REQUIRED_TRIAL_QUESTIONNAIRES
   ) {
     return false;
   }
 
   return STUDY_TASK_IDS.every(
     (taskId) =>
-      (
-        [
-          1,
-          2,
-          3,
-        ] as const
-      ).every(
-        (trialNumber) =>
-          submittedResponseKeys.has(
-            `${taskId}:${trialNumber}`,
-          ),
-      ),
+      submittedResponses.filter(
+        (response) =>
+          normalizeTaskId(
+            response.taskId,
+          ) === taskId,
+      ).length === 1,
   );
 }
 
@@ -1388,8 +1369,19 @@ export const useQuestionnaireStore =
 
       submitFinalQuestionnaire:
         () => {
+          const state =
+            get();
+
+          if (
+            !hasEveryExpectedSubmittedResponse(
+              state.trialResponses,
+            )
+          ) {
+            return undefined;
+          }
+
           const response =
-            get().finalQuestionnaire;
+            state.finalQuestionnaire;
 
           if (
             finalResponseIsSubmitted(

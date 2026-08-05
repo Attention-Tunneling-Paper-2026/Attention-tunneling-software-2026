@@ -14,13 +14,22 @@ import {
 } from "../../store/studySessionStore";
 
 import {
+  STUDY_TASK_IDS,
+  STUDY_TRIAL_ORDERS,
+  TOTAL_STUDY_TRIALS,
+  isStudyTaskId,
   isStudyTrialNumber,
+  isStudyTrialOrder,
 } from "../../types/scheduler";
 
 import type {
   StudyTaskId,
   StudyTrialNumber,
 } from "../../types/scheduler";
+
+import type {
+  StudyTrialProgress,
+} from "../../types/study";
 
 export type ProtectedStudyStage =
   | "tasks"
@@ -36,18 +45,13 @@ interface ProtectedStudyRouteProps {
   children?:
     ReactNode;
 
+  /*
+   * Retained only so older route declarations that pass this prop continue
+   * to type-check. Study completion is always exactly three trials:
+   * one Symposium, one Delivery, and one Clinic.
+   */
   totalTrials?:
     number;
-}
-
-function isStudyTaskId(
-  value: unknown,
-): value is StudyTaskId {
-  return (
-    value === "symposium" ||
-    value === "delivery" ||
-    value === "clinic"
-  );
 }
 
 function getTrialTaskId(
@@ -76,10 +80,72 @@ function getTrialTaskId(
     : null;
 }
 
+function hasExactlyOneCompletedTrialPerTask(
+  trials:
+    StudyTrialProgress[],
+): boolean {
+  const completedTrials =
+    trials.filter(
+      (trial) =>
+        trial.status ===
+        "questionnaire_complete",
+    );
+
+  if (
+    completedTrials.length !==
+    TOTAL_STUDY_TRIALS
+  ) {
+    return false;
+  }
+
+  const hasEachTaskExactlyOnce =
+    STUDY_TASK_IDS.every(
+      (taskId) =>
+        completedTrials.filter(
+          (trial) =>
+            getTrialTaskId(
+              trial,
+            ) ===
+            taskId,
+        ).length ===
+        1,
+    );
+
+  if (
+    !hasEachTaskExactlyOnce
+  ) {
+    return false;
+  }
+
+  const completedTrialOrders =
+    completedTrials
+      .map(
+        (trial) =>
+          trial.trialOrder,
+      )
+      .filter(
+        isStudyTrialOrder,
+      );
+
+  return (
+    completedTrialOrders.length ===
+      TOTAL_STUDY_TRIALS &&
+    new Set(
+      completedTrialOrders,
+    ).size ===
+      TOTAL_STUDY_TRIALS &&
+    STUDY_TRIAL_ORDERS.every(
+      (trialOrder) =>
+        completedTrialOrders.includes(
+          trialOrder,
+        ),
+    )
+  );
+}
+
 export default function ProtectedStudyRoute({
   stage,
   children,
-  totalTrials = 9,
 }: ProtectedStudyRouteProps) {
   const location =
     useLocation();
@@ -143,8 +209,10 @@ export default function ProtectedStudyRoute({
         : null;
 
   const routeTrial =
-    routeTaskId === null ||
-    routeTrialNumber === null
+    routeTaskId ===
+        null ||
+      routeTrialNumber ===
+        null
       ? undefined
       : trials.find(
           (trial) =>
@@ -172,18 +240,10 @@ export default function ProtectedStudyRoute({
         )
       : null;
 
-  const completedTrialCount =
-    trials.filter(
-      (trial) =>
-        trial.status ===
-        "questionnaire_complete",
-    ).length;
-
   const allTrialsComplete =
-    trials.length ===
-      totalTrials &&
-    completedTrialCount ===
-      totalTrials;
+    hasExactlyOneCompletedTrialPerTask(
+      trials,
+    );
 
   function renderRoute() {
     return (
@@ -264,7 +324,7 @@ export default function ProtectedStudyRoute({
       !allTrialsComplete
     ) {
       return redirect(
-        "/tasks",
+        getOpenTrialPath(),
       );
     }
 
@@ -291,6 +351,22 @@ export default function ProtectedStudyRoute({
       );
     }
 
+    if (
+      allTrialsComplete
+    ) {
+      return redirect(
+        "/post-experiment",
+      );
+    }
+
+    if (
+      openTrial
+    ) {
+      return redirect(
+        getOpenTrialPath(),
+      );
+    }
+
     return renderRoute();
   }
 
@@ -298,6 +374,14 @@ export default function ProtectedStudyRoute({
     stage ===
     "task"
   ) {
+    if (
+      allTrialsComplete
+    ) {
+      return redirect(
+        "/post-experiment",
+      );
+    }
+
     if (
       routeTaskId ===
         null
@@ -376,6 +460,14 @@ export default function ProtectedStudyRoute({
     stage ===
     "trial-questionnaire"
   ) {
+    if (
+      allTrialsComplete
+    ) {
+      return redirect(
+        "/post-experiment",
+      );
+    }
+
     if (
       routeTaskId ===
         null

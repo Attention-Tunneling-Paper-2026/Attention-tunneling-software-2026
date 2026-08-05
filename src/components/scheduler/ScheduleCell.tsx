@@ -111,18 +111,18 @@ const DELIVERY_TITLE_BY_ID: Readonly<
 const CLINIC_TITLE_BY_ID: Readonly<
   Record<string, string>
 > = {
-  N1: "Emergency intake coverage",
-  N2: "Medication round",
-  N3: "Critical patient monitoring",
-  N4: "Discharge review",
-  H1: "Postoperative observation",
-  H2: "Wound-care round",
-  H3: "Patient assessment",
-  H4: "Evening handover",
-  R1: "Respiratory support",
-  R2: "ICU medication review",
-  R3: "Rapid-response coverage",
-  R4: "Rehabilitation assessment",
+  N1: "Emergency ICU Intake",
+  N2: "Emergency Medication Round",
+  N3: "Emergency High-Demand Duty",
+  N4: "Emergency Follow-Up",
+  H1: "General Medicine Intake",
+  H2: "General Medicine Round",
+  H3: "General Ward Support",
+  H4: "General Discharge Review",
+  R1: "Critical Care Assessment",
+  R2: "Critical Care Monitoring",
+  R3: "Critical Care Procedure",
+  R4: "Critical Care Follow-Up",
 };
 
 const DELIVERY_REGION_BY_TOPIC: Readonly<
@@ -136,9 +136,9 @@ const DELIVERY_REGION_BY_TOPIC: Readonly<
 const CLINIC_SPECIALTY_BY_TOPIC: Readonly<
   Record<string, string>
 > = {
-  NLP: "Emergency care",
-  Health: "General medicine",
-  Robotics: "Critical care",
+  NLP: "Emergency Care",
+  Health: "General Medicine",
+  Robotics: "Critical Care",
 };
 
 function isTaskDomainId(

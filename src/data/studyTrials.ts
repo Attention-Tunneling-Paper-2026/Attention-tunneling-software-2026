@@ -48,6 +48,17 @@ export {
   TOTAL_STUDY_TRIALS,
 };
 
+/**
+ * Each participant completes one condition per task domain, so three
+ * trials are required in total. The nine entries in the study catalog
+ * are the selectable task-condition options, not completed trials.
+ */
+export const REQUIRED_TRIAL_COUNT =
+  TOTAL_TASK_DOMAINS;
+
+export const AVAILABLE_TASK_OPTION_COUNT =
+  TOTAL_STUDY_TRIALS;
+
 export interface StudyTaskTrialDefinition {
   taskId: StudyTaskId;
   trialNumber: StudyTrialNumber;
@@ -542,61 +553,36 @@ export function getCompletedTaskTrialCount(
   ).length;
 }
 
+/**
+ * A task domain is complete once one selected condition in that domain
+ * reaches questionnaire_complete. The remaining conditions in the domain
+ * are unselected options and must not block progression.
+ */
 export function isTaskDomainComplete(
   trials: readonly StudyTrialProgress[],
   taskId: StudyTaskId,
 ): boolean {
-  const taskTrials = getTaskTrialProgress(
-    trials,
-    taskId,
-  );
-
   return (
-    taskTrials.length === SUBTASKS_PER_TASK &&
-    taskTrials.every(
-      (trial) =>
-        trial.status ===
-        "questionnaire_complete",
-    )
+    getCompletedTaskTrialCount(
+      trials,
+      taskId,
+    ) >= 1
   );
 }
 
+/**
+ * The participant completes the study after one condition from each of
+ * the three unique task domains, giving REQUIRED_TRIAL_COUNT trials.
+ */
 export function areAllStudyTrialsComplete(
   trials: readonly StudyTrialProgress[],
 ): boolean {
-  if (trials.length !== TOTAL_STUDY_TRIALS) {
-    return false;
-  }
-
-  const expectedTrialIds = new Set(
-    STUDY_TRIAL_DEFINITIONS.map(
-      (trial) => trial.trialId,
-    ),
-  );
-
-  const completedTrialIds = new Set(
-    trials
-      .filter(
-        (trial) =>
-          trial.status ===
-          "questionnaire_complete",
-      )
-      .map(
-        (trial) =>
-          createCompositeTrialId(
-            trial.taskId,
-            trial.trialNumber,
-          ),
+  return STUDY_TASK_SEQUENCE.every(
+    (taskId) =>
+      isTaskDomainComplete(
+        trials,
+        taskId,
       ),
-  );
-
-  return (
-    completedTrialIds.size ===
-      expectedTrialIds.size &&
-    [...expectedTrialIds].every(
-      (trialId) =>
-        completedTrialIds.has(trialId),
-    )
   );
 }
 

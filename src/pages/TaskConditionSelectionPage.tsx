@@ -26,6 +26,10 @@ import {
 } from "../store/studySessionStore";
 
 import {
+  STUDY_TASK_IDS,
+  STUDY_TRIAL_NUMBERS,
+  TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
+  TOTAL_STUDY_TRIALS,
   isStudyTaskId,
 } from "../types/scheduler";
 
@@ -64,24 +68,16 @@ interface TaskOption {
 }
 
 const TOTAL_PROBLEMS =
-  3;
+  STUDY_TASK_IDS.length;
 
 const TASK_OPTIONS_PER_PROBLEM =
-  3;
+  STUDY_TRIAL_NUMBERS.length;
 
 const REQUIRED_TASKS_PER_PROBLEM =
   1;
 
 const TOTAL_REQUIRED_STUDY_TASKS =
-  TOTAL_PROBLEMS *
-  REQUIRED_TASKS_PER_PROBLEM;
-
-const STUDY_TRIAL_NUMBERS:
-  readonly StudyTrialNumber[] = [
-    1,
-    2,
-    3,
-  ];
+  TOTAL_STUDY_TRIALS;
 
 const TASK_DOMAINS: Record<
   StudyTaskId,
@@ -428,7 +424,7 @@ export default function TaskConditionSelectionPage() {
     ).length;
 
   const problemComplete =
-    completedTaskCount >=
+    completedTaskCount ===
     REQUIRED_TASKS_PER_PROBLEM;
 
   const openTrial =
@@ -580,6 +576,12 @@ export default function TaskConditionSelectionPage() {
       conditionOrder:
         assignment.conditionOrder,
 
+      globalOptionNumber:
+        assignment.globalOptionNumber,
+
+      globalTrialNumber:
+        assignment.globalTrialNumber,
+
       isFirstTrial:
         assignment.isFirstTrial,
 
@@ -625,6 +627,15 @@ export default function TaskConditionSelectionPage() {
         totalTrials:
           TOTAL_REQUIRED_STUDY_TASKS,
 
+        availableTaskOptionCount:
+          TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
+
+        globalOptionNumber:
+          assignment.globalOptionNumber,
+
+        globalTrialNumber:
+          assignment.globalTrialNumber,
+
         participantId,
 
         sessionId,
@@ -648,6 +659,12 @@ export default function TaskConditionSelectionPage() {
 
           trialOrder:
             assignment.trialOrder,
+
+          globalOptionNumber:
+            assignment.globalOptionNumber,
+
+          globalTrialNumber:
+            assignment.globalTrialNumber,
 
           totalTrials:
             TOTAL_REQUIRED_STUDY_TASKS,

@@ -64,7 +64,7 @@ export default function LikertScale({
   highLabel,
   value,
   onChange,
-  min = 0,
+  min = 1,
   max = 5,
   required = true,
   disabled = false,

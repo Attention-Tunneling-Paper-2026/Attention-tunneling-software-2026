@@ -19,6 +19,7 @@ import {
 } from "../store/studySessionStore";
 
 import {
+  isStudyTaskId,
   isStudyTrialNumber,
 } from "../types/scheduler";
 
@@ -26,16 +27,6 @@ import type {
   StudyTaskId,
   StudyTrialNumber,
 } from "../types/scheduler";
-
-function isStudyTaskId(
-  value: unknown,
-): value is StudyTaskId {
-  return (
-    value === "symposium" ||
-    value === "delivery" ||
-    value === "clinic"
-  );
-}
 
 interface InvalidTaskPageProps {
   taskId:
@@ -138,6 +129,18 @@ export default function TaskPage() {
         state.procedureAccepted,
     );
 
+  const postExperimentCompleted =
+    useStudySessionStore(
+      (state) =>
+        state.postExperimentCompleted,
+    );
+
+  const studyCompleted =
+    useStudySessionStore(
+      (state) =>
+        state.studyCompleted,
+    );
+
   const trials =
     useStudySessionStore(
       (state) =>
@@ -177,6 +180,28 @@ export default function TaskPage() {
               trialNumber,
         );
 
+  const openTrial =
+    trials.find(
+      (item) =>
+        item.status ===
+          "active" ||
+        item.status ===
+          "submitted",
+    );
+
+  const routeMatchesOpenTrial =
+    Boolean(
+      openTrial &&
+      taskId !==
+        null &&
+      trialNumber !==
+        null &&
+      openTrial.taskId ===
+        taskId &&
+      openTrial.trialNumber ===
+        trialNumber,
+    );
+
   useEffect(() => {
     if (
       !procedureAccepted
@@ -192,10 +217,43 @@ export default function TaskPage() {
     }
 
     if (
-      !taskId ||
-      !trialNumber ||
+      studyCompleted ||
+      postExperimentCompleted
+    ) {
+      navigate(
+        "/disclosure",
+        {
+          replace: true,
+        },
+      );
+
+      return;
+    }
+
+    if (
+      taskId ===
+        null ||
+      trialNumber ===
+        null ||
       !trial
     ) {
+      return;
+    }
+
+    if (
+      openTrial &&
+      !routeMatchesOpenTrial
+    ) {
+      navigate(
+        openTrial.status ===
+          "submitted"
+          ? `/trial-questionnaire/${openTrial.taskId}/${openTrial.trialNumber}`
+          : `/task/${openTrial.taskId}/${openTrial.trialNumber}`,
+        {
+          replace: true,
+        },
+      );
+
       return;
     }
 
@@ -240,15 +298,29 @@ export default function TaskPage() {
     }
   }, [
     navigate,
+    openTrial,
+    postExperimentCompleted,
     procedureAccepted,
+    routeMatchesOpenTrial,
+    studyCompleted,
     taskId,
     trial,
     trialNumber,
   ]);
 
   if (
-    taskId === null ||
-    trialNumber === null ||
+    !procedureAccepted ||
+    postExperimentCompleted ||
+    studyCompleted
+  ) {
+    return null;
+  }
+
+  if (
+    taskId ===
+      null ||
+    trialNumber ===
+      null ||
     !trial
   ) {
     return (
@@ -261,7 +333,10 @@ export default function TaskPage() {
   }
 
   if (
-    !procedureAccepted ||
+    (
+      openTrial &&
+      !routeMatchesOpenTrial
+    ) ||
     trial.status !==
       "active"
   ) {

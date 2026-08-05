@@ -6,10 +6,13 @@ import {
   SYMPOSIUM_TASK_DATA,
 } from "../../data/tasks/symposium";
 
-type SupportedTaskId =
-  | "symposium"
-  | "delivery"
-  | "clinic";
+import {
+  isStudyTaskId,
+} from "../../types/scheduler";
+
+import type {
+  StudyTaskId,
+} from "../../types/scheduler";
 
 interface TaskRule {
   id: string;
@@ -18,7 +21,7 @@ interface TaskRule {
 }
 
 interface ConstraintsPanelProps {
-  taskId?: SupportedTaskId;
+  taskId?: StudyTaskId;
 }
 
 interface TaskRulesContent {
@@ -57,10 +60,10 @@ const DELIVERY_PREFERENCES: readonly TaskRule[] = [
       "Where possible, keep shipments from the same delivery region on the same van.",
   },
   {
-    id: "delivery-preferred-window",
-    title: "Use preferred windows",
+    id: "delivery-priority-placement",
+    title: "Priority shipment placement",
     description:
-      "Where possible, schedule shipments in their preferred route windows.",
+      "Prefer Priority medical supplies (N1) in Van A during Window 1.",
   },
 ];
 
@@ -93,14 +96,17 @@ const CLINIC_PREFERENCES: readonly TaskRule[] = [
       "Where possible, keep duties from the same specialty in the same ward.",
   },
   {
-    id: "clinic-preferred-shift",
-    title: "Use preferred shifts",
+    id: "clinic-priority-placement",
+    title: "Emergency intake placement",
     description:
-      "Where possible, assign duties to their preferred shifts.",
+      "Prefer Emergency ICU Intake (N1) in Ward A during Shift 1.",
   },
 ];
 
-const TASK_RULES: Record<SupportedTaskId, TaskRulesContent> = {
+const TASK_RULES: Record<
+  StudyTaskId,
+  TaskRulesContent
+> = {
   symposium: {
     constraintsTitle:
       "Scheduling Constraints",
@@ -133,16 +139,6 @@ const TASK_RULES: Record<SupportedTaskId, TaskRulesContent> = {
   },
 };
 
-function isSupportedTaskId(
-  value: unknown,
-): value is SupportedTaskId {
-  return (
-    value === "symposium" ||
-    value === "delivery" ||
-    value === "clinic"
-  );
-}
-
 export default function ConstraintsPanel({
   taskId,
 }: ConstraintsPanelProps) {
@@ -152,18 +148,25 @@ export default function ConstraintsPanel({
     taskId?: string;
   }>();
 
-  const resolvedTaskId =
-    taskId ??
-    (isSupportedTaskId(
-      routeTaskId,
-    )
-      ? routeTaskId
-      : "symposium");
+  const resolvedTaskId:
+    StudyTaskId =
+      isStudyTaskId(
+        taskId,
+      )
+        ? taskId
+        : isStudyTaskId(
+              routeTaskId,
+            )
+          ? routeTaskId
+          : "symposium";
 
   const taskRules =
     TASK_RULES[
       resolvedTaskId
     ];
+
+  const panelTitleId =
+    `${resolvedTaskId}-task-rules-title`;
 
   const constraintsTitleId =
     `${resolvedTaskId}-constraints-title`;
@@ -174,13 +177,17 @@ export default function ConstraintsPanel({
   return (
     <aside
       className="panel constraint-panel"
-      aria-labelledby="task-rules-title"
+      aria-labelledby={
+        panelTitleId
+      }
       data-task-id={
         resolvedTaskId
       }
     >
       <div
-        id="task-rules-title"
+        id={
+          panelTitleId
+        }
         className="panel-title"
       >
         Task Rules

@@ -1,6 +1,5 @@
 import {
   STUDY_TASK_IDS,
-  STUDY_TRIAL_NUMBERS,
   TOTAL_STUDY_TRIALS,
   createCompositeTrialId,
 } from "./scheduler";
@@ -12,7 +11,7 @@ import type {
   Room,
   StudyTaskId,
   StudyTrialNumber,
-  StudyTrialOrder,
+  StudyTrialOrderValue,
 } from "./scheduler";
 
 export const STUDY_SESSION_STAGES = [
@@ -67,12 +66,13 @@ export interface StudyParticipant {
 
 /**
  * A trial is identified by the pair (taskId, trialNumber).
- * trialNumber remains the within-task condition identity (1–3), while
- * trialOrder may span the complete nine-trial study (1–9).
+ * trialNumber is the within-task condition identity (1–3).
+ * trialOrder is the participant's actual chronological order (1–3), with
+ * 0 reserved for an option that has not yet been selected and started.
  */
 export interface StudyTrialAssignment {
   trialNumber: StudyTrialNumber;
-  trialOrder: StudyTrialOrder | number;
+  trialOrder: StudyTrialOrderValue;
   taskId: StudyTaskId;
   condition: ConcretizationLevel;
   conditionOrder: ConditionOrder | number;
@@ -85,6 +85,11 @@ export interface StudyTrialAssignment {
   trialId?: string;
   outerTaskNumber?: number;
   innerTaskNumber?: StudyTrialNumber;
+  /*
+   * Stable 1–9 task-condition option identifier. This is not chronology.
+   * globalTrialNumber is retained as a compatibility name.
+   */
+  globalOptionNumber?: number;
   globalTrialNumber?: number;
 }
 
@@ -178,7 +183,7 @@ export interface StudySessionSummary {
 
 export interface ActiveStudyTrial {
   trialNumber: StudyTrialNumber;
-  trialOrder: StudyTrialOrder | number;
+  trialOrder: StudyTrialOrderValue;
   totalTrials: number;
   taskId: StudyTaskId;
   condition: ConcretizationLevel;
@@ -192,12 +197,13 @@ export interface ActiveStudyTrial {
   trialId?: string;
   outerTaskNumber?: number;
   innerTaskNumber?: StudyTrialNumber;
+  globalOptionNumber?: number;
   globalTrialNumber?: number;
 }
 
 export interface TaskRouteState {
   trialNumber: StudyTrialNumber;
-  trialOrder: StudyTrialOrder | number;
+  trialOrder: StudyTrialOrderValue;
   totalTrials: number;
   taskId: StudyTaskId;
   condition: ConcretizationLevel;
@@ -209,12 +215,13 @@ export interface TaskRouteState {
   trialId?: string;
   outerTaskNumber?: number;
   innerTaskNumber?: StudyTrialNumber;
+  globalOptionNumber?: number;
   globalTrialNumber?: number;
 }
 
 export interface TrialQuestionnaireRouteState {
   trialNumber: StudyTrialNumber;
-  trialOrder: StudyTrialOrder | number;
+  trialOrder: StudyTrialOrderValue;
   totalTrials: number;
   taskId: StudyTaskId;
   condition: ConcretizationLevel;
@@ -226,6 +233,7 @@ export interface TrialQuestionnaireRouteState {
   trialId?: string;
   outerTaskNumber?: number;
   innerTaskNumber?: StudyTrialNumber;
+  globalOptionNumber?: number;
   globalTrialNumber?: number;
 }
 
@@ -242,8 +250,8 @@ export interface StudyCompletionSummary {
   totalTrials: number;
 
   /*
-   * Legacy number arrays are retained. Across the complete study they may
-   * contain repeated 1–3 values because each task has three inner trials.
+   * Legacy number arrays are retained. Values may repeat because each of the
+   * three task domains independently selects one condition numbered 1–3.
    */
   completedTrialNumbers: StudyTrialNumber[];
   exportedTrialNumbers: StudyTrialNumber[];
@@ -404,6 +412,7 @@ export function getExportedTrialNumbers(
   return trials
     .filter(
       (trial) =>
+        isTrialComplete(trial) &&
         isTrialCsvExportComplete(trial) &&
         (taskId === undefined || trial.taskId === taskId),
     )
@@ -414,7 +423,11 @@ export function getExportedTrialIds(
   trials: StudyTrialProgress[],
 ): string[] {
   return trials
-    .filter(isTrialCsvExportComplete)
+    .filter(
+      (trial) =>
+        isTrialComplete(trial) &&
+        isTrialCsvExportComplete(trial),
+    )
     .map(getStudyTrialId);
 }
 
@@ -487,34 +500,33 @@ export function getTaskTrials(
   );
 }
 
-function hasEveryExpectedTrial(
+function hasExactlyOneQualifyingTrialPerTask(
   trials: StudyTrialProgress[],
   predicate: (trial: StudyTrialProgress) => boolean,
 ): boolean {
-  if (trials.length !== TOTAL_STUDY_TRIALS) {
+  const qualifyingTrials =
+    trials.filter(predicate);
+
+  if (
+    qualifyingTrials.length !==
+    TOTAL_STUDY_TRIALS
+  ) {
     return false;
   }
 
-  return STUDY_TASK_IDS.every((taskId) =>
-    STUDY_TRIAL_NUMBERS.every((trialNumber) => {
-      const matchingTrials = trials.filter(
+  return STUDY_TASK_IDS.every(
+    (taskId) =>
+      qualifyingTrials.filter(
         (trial) =>
-          trial.taskId === taskId &&
-          trial.trialNumber === trialNumber,
-      );
-
-      return (
-        matchingTrials.length === 1 &&
-        predicate(matchingTrials[0])
-      );
-    }),
+          trial.taskId === taskId,
+      ).length === 1,
   );
 }
 
 export function allTrialsComplete(
   trials: StudyTrialProgress[],
 ): boolean {
-  return hasEveryExpectedTrial(
+  return hasExactlyOneQualifyingTrialPerTask(
     trials,
     isTrialComplete,
   );
@@ -523,33 +535,29 @@ export function allTrialsComplete(
 export function allTrialCsvFilesExported(
   trials: StudyTrialProgress[],
 ): boolean {
-  return hasEveryExpectedTrial(
+  return hasExactlyOneQualifyingTrialPerTask(
     trials,
-    isTrialCsvExportComplete,
+    (trial) =>
+      isTrialComplete(trial) &&
+      isTrialCsvExportComplete(trial),
   );
 }
 
+/*
+ * Compatibility name: a task domain is complete when exactly one of its
+ * three selectable condition options has completed its questionnaire.
+ */
 export function allTaskTrialsComplete(
   trials: StudyTrialProgress[],
   taskId: StudyTaskId,
 ): boolean {
-  const taskTrials = getTaskTrials(
-    trials,
-    taskId,
-  );
-
   return (
-    taskTrials.length === STUDY_TRIAL_NUMBERS.length &&
-    STUDY_TRIAL_NUMBERS.every((trialNumber) => {
-      const matchingTrials = taskTrials.filter(
-        (trial) => trial.trialNumber === trialNumber,
-      );
-
-      return (
-        matchingTrials.length === 1 &&
-        isTrialComplete(matchingTrials[0])
-      );
-    })
+    getTaskTrials(
+      trials,
+      taskId,
+    ).filter(
+      isTrialComplete,
+    ).length === 1
   );
 }
 
@@ -582,7 +590,7 @@ export function createStudySessionSummary(
     stage: session.stage,
     completedTrialCount:
       getCompletedTrialCount(session.trials),
-    totalTrialCount: session.trials.length,
+    totalTrialCount: TOTAL_STUDY_TRIALS,
     currentTrialNumber:
       currentTrial?.trialNumber ??
       session.currentTrialNumber,
@@ -617,7 +625,7 @@ export function createStudyCompletionSummary(
     sessionId: session.sessionId,
     completedTrials:
       getCompletedTrialCount(session.trials),
-    totalTrials: session.trials.length,
+    totalTrials: TOTAL_STUDY_TRIALS,
     completedTrialNumbers:
       getCompletedTrialNumbers(session.trials),
     exportedTrialNumbers:
