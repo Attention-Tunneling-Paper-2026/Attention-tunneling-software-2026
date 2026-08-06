@@ -56,9 +56,12 @@ const TOTAL_TASKS =
 const TRIALS_PER_TASK =
   3;
 
-const TOTAL_STUDY_TRIALS =
+const TOTAL_SELECTABLE_TRIAL_OPTIONS =
   TOTAL_TASKS *
   TRIALS_PER_TASK;
+
+const TOTAL_STUDY_TRIALS =
+  TOTAL_TASKS;
 
 type SupportedStudyTaskId =
   | "symposium"
@@ -193,7 +196,7 @@ function getTrialTaskId(
     globalTrialNumber >=
       1 &&
     globalTrialNumber <=
-      TOTAL_STUDY_TRIALS
+      TOTAL_SELECTABLE_TRIAL_OPTIONS
   ) {
     if (
       globalTrialNumber <=
@@ -321,7 +324,7 @@ function getInnerTaskNumber(
     explicitGlobalTrialNumber >=
       1 &&
     explicitGlobalTrialNumber <=
-      TOTAL_STUDY_TRIALS
+      TOTAL_SELECTABLE_TRIAL_OPTIONS
   ) {
     return (
       (
@@ -352,7 +355,7 @@ function getInnerTaskNumber(
     trial.trialNumber >=
       1 &&
     trial.trialNumber <=
-      TOTAL_STUDY_TRIALS
+      TOTAL_SELECTABLE_TRIAL_OPTIONS
   ) {
     return (
       (
@@ -386,7 +389,7 @@ function getGlobalTrialNumber(
     explicitGlobalTrialNumber >=
       1 &&
     explicitGlobalTrialNumber <=
-      TOTAL_STUDY_TRIALS
+      TOTAL_SELECTABLE_TRIAL_OPTIONS
   ) {
     return explicitGlobalTrialNumber;
   }
@@ -593,21 +596,15 @@ export default function PostExperimentPage() {
               taskId,
           );
 
-        return (
-          taskTrials.length ===
-            TRIALS_PER_TASK &&
-          taskTrials.every(
-            (trial) =>
-              trial.status ===
-              "questionnaire_complete",
-          )
+        return taskTrials.some(
+          (trial) =>
+            trial.status ===
+            "questionnaire_complete",
         );
       },
     ).length;
 
   const allTrialsComplete =
-    trials.length ===
-      TOTAL_STUDY_TRIALS &&
     completedTrialCount ===
       TOTAL_STUDY_TRIALS &&
     completedTaskCount ===
@@ -616,18 +613,24 @@ export default function PostExperimentPage() {
   const orderedTrials =
     useMemo(
       () =>
-        [...trials].sort(
-          (
-            first,
-            second,
-          ) =>
-            getGlobalTrialNumber(
+        trials
+          .filter(
+            (trial) =>
+              trial.status ===
+              "questionnaire_complete",
+          )
+          .sort(
+            (
               first,
-            ) -
-            getGlobalTrialNumber(
               second,
-            ),
-        ),
+            ) =>
+              getGlobalTrialNumber(
+                first,
+              ) -
+              getGlobalTrialNumber(
+                second,
+              ),
+          ),
       [trials],
     );
 

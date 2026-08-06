@@ -15,11 +15,9 @@ import {
 
 import {
   STUDY_TASK_IDS,
-  STUDY_TRIAL_ORDERS,
   TOTAL_STUDY_TRIALS,
   isStudyTaskId,
   isStudyTrialNumber,
-  isStudyTrialOrder,
 } from "../../types/scheduler";
 
 import type {
@@ -111,36 +109,7 @@ function hasExactlyOneCompletedTrialPerTask(
         1,
     );
 
-  if (
-    !hasEachTaskExactlyOnce
-  ) {
-    return false;
-  }
-
-  const completedTrialOrders =
-    completedTrials
-      .map(
-        (trial) =>
-          trial.trialOrder,
-      )
-      .filter(
-        isStudyTrialOrder,
-      );
-
-  return (
-    completedTrialOrders.length ===
-      TOTAL_STUDY_TRIALS &&
-    new Set(
-      completedTrialOrders,
-    ).size ===
-      TOTAL_STUDY_TRIALS &&
-    STUDY_TRIAL_ORDERS.every(
-      (trialOrder) =>
-        completedTrialOrders.includes(
-          trialOrder,
-        ),
-    )
-  );
+  return hasEachTaskExactlyOnce;
 }
 
 export default function ProtectedStudyRoute({

@@ -2976,6 +2976,27 @@ export function buildTrialSummaryRows({
       trialEndElapsedMs,
     );
 
+  const firstEnteredAIFamilyObservation =
+    stateObservations.find(
+      (observation) =>
+        observation.insideAIFamily ===
+        true,
+    );
+
+  const enteredAIFamilyOccurred =
+    Boolean(
+      firstEnteredAIFamilyObservation,
+    );
+
+  const enteredAIFamilyElapsedMs =
+    firstEnteredAIFamilyObservation
+      ? Math.max(
+          0,
+          firstEnteredAIFamilyObservation.elapsedMs -
+            trialStartElapsedMs,
+        )
+      : null;
+
   const acceptedEditsInsideFamily =
     acceptedEdits.filter(
       (event) =>
@@ -3517,29 +3538,59 @@ export function buildTrialSummaryRows({
       : integrationLatencyMs ??
         probeRiskWindowMs;
 
+  const initialAssignmentComplete =
+    toBooleanValue(
+      readMetadataValue(
+        trialStartEvent,
+        "initialCompleteAssignment",
+      ),
+    ) ===
+    true;
+
   const firstCompleteAssignmentEvent =
-    sortedEvents.find(
-      (event) =>
-        eventBoolean(
-          event,
-          "completeAssignment",
-          "completeAssignment",
-        ) ===
-        true,
-    );
+    initialAssignmentComplete
+      ? trialStartEvent
+      : acceptedEdits.find(
+          (event) =>
+            eventBoolean(
+              event,
+              "completeAssignment",
+              "completeAssignment",
+            ) ===
+            true,
+        );
+
+  const firstCompleteAssignmentElapsedMs =
+    initialAssignmentComplete
+      ? 0
+      : firstCompleteAssignmentEvent
+          ?.elapsedMs ??
+        null;
 
   const constructionEditCount =
-    firstCompleteAssignmentEvent
-      ? acceptedEdits.filter(
-          (event) =>
-            event.eventIndex <=
-            firstCompleteAssignmentEvent.eventIndex,
-        ).length
-      : acceptedEdits.length;
+    initialAssignmentComplete
+      ? 0
+      : firstCompleteAssignmentEvent
+          ? acceptedEdits.filter(
+              (event) =>
+                event.eventIndex <
+                firstCompleteAssignmentEvent.eventIndex,
+            ).length
+          : acceptedEdits.length;
 
   const searchEditCount =
     acceptedEdits.length -
     constructionEditCount;
+
+  if (
+    constructionEditCount +
+      searchEditCount !==
+    acceptedEdits.length
+  ) {
+    throw new Error(
+      "Construction and search edit counts must equal accepted edit count.",
+    );
+  }
 
   const idleDurationsMs =
     sortedEvents
@@ -4617,9 +4668,7 @@ export function buildTrialSummaryRows({
           "probeOnsetErrorMs",
         ),
       first_complete_assignment_elapsed_ms:
-        firstCompleteAssignmentEvent
-          ?.elapsedMs ??
-        null,
+        firstCompleteAssignmentElapsedMs,
       construction_edit_count:
         constructionEditCount,
       search_edit_count:
@@ -4630,6 +4679,10 @@ export function buildTrialSummaryRows({
         longestIdleMs,
       strategy_switch_preceded_probe:
         strategySwitchPrecededProbe,
+      entered_ai_family_occurred:
+        enteredAIFamilyOccurred,
+      entered_ai_family_elapsed_ms:
+        enteredAIFamilyElapsedMs,
     };
 
   return [

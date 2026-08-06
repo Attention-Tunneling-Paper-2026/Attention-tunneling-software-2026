@@ -1756,6 +1756,23 @@ function SymposiumSchedulerTrial({
         250,
       );
 
+    const deadlineIntervalId =
+      window.setInterval(
+        () => {
+          const now =
+            getCurrentTimeMs();
+
+          probeDeadlineCheckRef.current(
+            now,
+          );
+
+          collapseDeadlineCheckRef.current(
+            now,
+          );
+        },
+        50,
+      );
+
     document.addEventListener(
       "visibilitychange",
       handleVisibilityChange,
@@ -1764,6 +1781,10 @@ function SymposiumSchedulerTrial({
     return () => {
       window.clearInterval(
         intervalId,
+      );
+
+      window.clearInterval(
+        deadlineIntervalId,
       );
 
       if (
