@@ -131,7 +131,15 @@
   position: relative;
   display: grid;
   min-width: 0;
-  min-height: 66px;
+
+  /*
+   * studyPages.css makes these buttons square, so their height tracked the
+   * column width and rendered ~101px tall on the questionnaire. Release the
+   * ratio and set the height outright: roughly 40% shorter, and no longer
+   * dependent on how wide the page happens to be.
+   */
+  aspect-ratio: auto;
+  min-height: 61px;
   place-items: center;
   align-content: center;
   gap: 7px;
@@ -301,10 +309,18 @@
 .likert-value,
 .questionnaire-rating-value {
   display: grid;
+
+  /*
+   * studyPages.css pins .nasa-scale-value to a one-line height. Release it
+   * so the two-line readout can size itself, and hold a min-height that fits
+   * two lines so the pill does not resize as the participant answers.
+   */
+  height: auto;
   min-width: 118px;
-  min-height: 40px;
-  padding: 8px 12px;
+  min-height: 54px;
+  padding: 9px 14px;
   place-items: center;
+  row-gap: 3px;
   border: 1px solid #bfdbfe;
   border-radius: 999px;
   font-size: 0.9rem;
@@ -313,6 +329,31 @@
   color: var(--study-primary-dark, #1d4ed8);
   background: var(--study-primary-soft, #eff6ff);
   white-space: nowrap;
+}
+
+/*
+ * An unanswered scale reads as outstanding work rather than as a result, so
+ * it stays amber until the participant picks a point.
+ */
+.questionnaire-rating-value-empty {
+  border-color: #fcd34d;
+  background: #fffbeb;
+  color: #b45309;
+}
+
+/*
+ * The verbal label carries the meaning; the numeric rating stays visible
+ * underneath because it is what the response records.
+ */
+.questionnaire-rating-value-label {
+  text-align: center;
+}
+
+.questionnaire-rating-value-count {
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.01em;
+  opacity: 0.72;
 }
 
 .likert-options {

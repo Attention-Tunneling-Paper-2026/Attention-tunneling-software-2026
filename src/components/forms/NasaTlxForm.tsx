@@ -40,8 +40,58 @@ interface NasaTlxScale {
   dimension: NasaTlxDimension;
   title: string;
   question: string;
-  lowLabel: string;
-  highLabel: string;
+
+  /*
+   * One label per scale point, low to high. NASA-TLX itself anchors only the
+   * endpoints; these fill in the intermediate points with the conventional
+   * symmetric intensity wording so a participant can read back what they
+   * chose. The endpoints stay verbatim from the instrument, and the two
+   * anchors printed under the scale are taken from this array so they cannot
+   * drift from the readout. The recorded response is still the 1-7 rating.
+   */
+  ratingLabels: readonly string[];
+}
+
+const INTENSITY_RATING_LABELS:
+  readonly string[] = [
+    "Very low",
+    "Low",
+    "Somewhat low",
+    "Moderate",
+    "Somewhat high",
+    "High",
+    "Very high",
+  ];
+
+/*
+ * Performance runs from "Perfect" to "Failure" on NASA-TLX, so its labels
+ * describe how well the participant performed rather than an intensity.
+ */
+const PERFORMANCE_RATING_LABELS:
+  readonly string[] = [
+    "Perfect",
+    "Very good",
+    "Somewhat good",
+    "Moderate",
+    "Somewhat poor",
+    "Poor",
+    "Failure",
+  ];
+
+function getRatingLabel(
+  ratingLabels:
+    readonly string[],
+
+  rating:
+    number,
+): string {
+  return (
+    ratingLabels[
+      rating -
+      1
+    ] ??
+    ""
+  );
 }
 
 const NASA_TLX_SCALES:
@@ -56,11 +106,8 @@ const NASA_TLX_SCALES:
       question:
         "How mentally demanding was the task?",
 
-      lowLabel:
-        "Very low",
-
-      highLabel:
-        "Very high",
+      ratingLabels:
+        INTENSITY_RATING_LABELS,
     },
 
     {
@@ -73,11 +120,8 @@ const NASA_TLX_SCALES:
       question:
         "How physically demanding was the task?",
 
-      lowLabel:
-        "Very low",
-
-      highLabel:
-        "Very high",
+      ratingLabels:
+        INTENSITY_RATING_LABELS,
     },
 
     {
@@ -90,11 +134,8 @@ const NASA_TLX_SCALES:
       question:
         "How hurried or rushed did you feel while completing the task?",
 
-      lowLabel:
-        "Very low",
-
-      highLabel:
-        "Very high",
+      ratingLabels:
+        INTENSITY_RATING_LABELS,
     },
 
     {
@@ -107,11 +148,8 @@ const NASA_TLX_SCALES:
       question:
         "How unsuccessful do you think you were in accomplishing the task?",
 
-      lowLabel:
-        "Perfect",
-
-      highLabel:
-        "Failure",
+      ratingLabels:
+        PERFORMANCE_RATING_LABELS,
     },
 
     {
@@ -124,11 +162,8 @@ const NASA_TLX_SCALES:
       question:
         "How hard did you have to work to accomplish your level of performance?",
 
-      lowLabel:
-        "Very low",
-
-      highLabel:
-        "Very high",
+      ratingLabels:
+        INTENSITY_RATING_LABELS,
     },
 
     {
@@ -141,11 +176,8 @@ const NASA_TLX_SCALES:
       question:
         "How insecure, discouraged, irritated, stressed, or annoyed did you feel?",
 
-      lowLabel:
-        "Very low",
-
-      highLabel:
-        "Very high",
+      ratingLabels:
+        INTENSITY_RATING_LABELS,
     },
   ];
 
@@ -237,8 +269,7 @@ export default function NasaTlxForm({
             dimension,
             title,
             question,
-            lowLabel,
-            highLabel,
+            ratingLabels,
           }) => {
             const groupId =
               `${generatedId}-${dimension}`;
@@ -260,6 +291,18 @@ export default function NasaTlxForm({
                 values[
                   dimension
                 ],
+              );
+
+            const lowLabel =
+              getRatingLabel(
+                ratingLabels,
+                1,
+              );
+
+            const highLabel =
+              getRatingLabel(
+                ratingLabels,
+                NASA_TLX_RATINGS.length,
               );
 
             return (
@@ -297,13 +340,37 @@ export default function NasaTlxForm({
                     id={
                       statusId
                     }
-                    className="nasa-scale-value questionnaire-rating-value"
+                    className={[
+                      "nasa-scale-value",
+                      "questionnaire-rating-value",
+
+                      selectedValue ===
+                      null
+                        ? "questionnaire-rating-value-empty"
+                        : "questionnaire-rating-value-answered",
+                    ].join(
+                      " ",
+                    )}
                     aria-live="polite"
                   >
                     {selectedValue ===
-                    null
-                      ? "Not selected"
-                      : `${selectedValue} of 7`}
+                    null ? (
+                      "Not selected"
+                    ) : (
+                      <>
+                        <span className="questionnaire-rating-value-label">
+                          {getRatingLabel(
+                            ratingLabels,
+                            selectedValue,
+                          )}
+                        </span>
+
+                        <span className="questionnaire-rating-value-count">
+                          {selectedValue} of{" "}
+                          {NASA_TLX_RATINGS.length}
+                        </span>
+                      </>
+                    )}
                   </output>
                 </div>
 
@@ -329,10 +396,19 @@ export default function NasaTlxForm({
                         selectedValue ===
                         rating;
 
+                      const ratingLabel =
+                        getRatingLabel(
+                          ratingLabels,
+                          rating,
+                        );
+
                       return (
                         <label
                           key={
                             rating
+                          }
+                          title={
+                            ratingLabel
                           }
                           className={[
                             "nasa-likert-option",
@@ -371,7 +447,7 @@ export default function NasaTlxForm({
                             disabled={
                               disabled
                             }
-                            aria-label={`${title}: ${rating} out of 7`}
+                            aria-label={`${title}: ${ratingLabel}, ${rating} of ${NASA_TLX_RATINGS.length}`}
                             onChange={() => {
                               onChange(
                                 dimension,

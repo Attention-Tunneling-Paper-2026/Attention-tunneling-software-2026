@@ -197,7 +197,17 @@ export default function LikertScale({
           id={
             statusId
           }
-          className="likert-value questionnaire-rating-value"
+          className={[
+            "likert-value",
+            "questionnaire-rating-value",
+
+            selectedValue ===
+            null
+              ? "questionnaire-rating-value-empty"
+              : "questionnaire-rating-value-answered",
+          ].join(
+            " ",
+          )}
           aria-live="polite"
         >
           {selectedValue ===
