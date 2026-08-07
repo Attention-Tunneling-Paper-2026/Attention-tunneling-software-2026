@@ -321,16 +321,6 @@ function getTaskOrder(
   }
 }
 
-function getTrialResponseKey(
-  taskId:
-    StudyTaskId,
-
-  trialNumber:
-    StudyTrialNumber,
-): string {
-  return `${taskId}:${trialNumber}`;
-}
-
 function responseMatchesTrial(
   response:
     TrialQuestionnaireResponse,

@@ -1,5 +1,24 @@
 # React + TypeScript + Vite
 
+## Getting started
+
+```bash
+npm ci      # install exactly what package-lock.json pins
+npm run dev # http://localhost:5173
+```
+
+Use `npm ci`, not `npm install`. `npm ci` deletes `node_modules` first and
+installs strictly from the lockfile, so the tree can never end up half-built or
+holding native binaries for the wrong platform. `npm install` mutates whatever
+is already there and leaves empty directories behind for optional dependencies
+it skips, which surfaces later as
+`Cannot find module './rolldown-binding.<platform>.node'`.
+
+If you ever hit that error, `rm -rf node_modules && npm ci` fixes it.
+
+Other scripts: `npm run build` (typecheck + production bundle),
+`npm run preview` (serve the built bundle), `npm run lint`.
+
 This template provides a minimal setup to get React working in Vite with HMR and some Oxlint rules.
 
 Currently, two official plugins are available:

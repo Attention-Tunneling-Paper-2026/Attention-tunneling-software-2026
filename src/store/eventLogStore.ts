@@ -184,21 +184,6 @@ function getCurrentTimeMs(): number {
   return Date.now();
 }
 
-function normalizePositiveInteger(
-  value: number | undefined,
-  fallback: number,
-): number {
-  if (
-    typeof value === "number" &&
-    Number.isFinite(value) &&
-    value > 0
-  ) {
-    return Math.floor(value);
-  }
-
-  return fallback;
-}
-
 function normalizeTrialOrderValue(
   value: number | undefined,
   fallback: StudyTrialOrderValue,
