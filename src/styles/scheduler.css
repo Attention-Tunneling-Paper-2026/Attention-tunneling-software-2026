@@ -5,20 +5,27 @@
   --scheduler-domain-accent-border: #93c5fd;
   --scheduler-domain-accent-rgb: 37, 99, 235;
 
+  /* Bounds for a schedule row; see .room-row. */
+  --schedule-row-min: 82px;
+  --schedule-row-max: 150px;
+  --schedule-row-gap: 10px;
+
   width: 100%;
   min-height: 100vh;
   min-height: 100dvh;
   height: auto;
-  padding: 20px;
+  padding: 16px;
   overflow-x: auto;
   overflow-y: visible;
+  display: flex;
+  flex-direction: column;
   background: #f5f7fb;
 }
 
 .scheduler-header {
-  min-height: 76px;
-  margin-bottom: 18px;
-  padding: 14px 24px;
+  min-height: 68px;
+  margin-bottom: 14px;
+  padding: 12px 22px;
   border: 1px solid #e2e8f0;
   border-radius: 16px;
   display: flex;
@@ -353,7 +360,8 @@
 .scheduler-layout {
   width: 100%;
   height: auto;
-  min-height: 620px;
+  flex: 1 1 auto;
+  min-height: 0;
   display: grid;
   grid-template-columns: 290px minmax(650px, 1fr) 320px;
   align-items: stretch;
@@ -364,7 +372,7 @@
   min-width: 0;
   border: 1px solid #e2e8f0;
   border-radius: 16px;
-  padding: 20px;
+  padding: 18px;
   background: #ffffff;
   box-shadow: 0 4px 16px rgba(15, 23, 42, 0.055);
 }
@@ -383,7 +391,7 @@
   overflow-y: visible;
   display: flex;
   flex-direction: column;
-  gap: 18px;
+  gap: 14px;
 }
 
 .grid-panel[aria-disabled="true"] {
@@ -418,15 +426,39 @@
   line-height: 1.55;
 }
 
+/*
+ * The grid takes whatever vertical space the panel has left over so the
+ * board grows into an otherwise empty viewport. The row track is capped so
+ * it stops expanding once the cells are comfortably sized.
+ */
 .scheduler-grid {
   width: 100%;
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.scheduler-grid > [role="grid"] {
+  flex: 1 1 auto;
+  min-height: 0;
+  max-height:
+    calc(
+      3 *
+      (
+        var(--schedule-row-max) +
+        var(--schedule-row-gap)
+      )
+    );
+  display: flex;
+  flex-direction: column;
 }
 
 .grid-header {
   display: grid;
   grid-template-columns: 120px repeat(4, minmax(110px, 1fr));
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
 }
 
 .slot-label {
@@ -440,10 +472,13 @@
 }
 
 .room-row {
+  flex: 1 1 0;
+  min-height: var(--schedule-row-min);
+  max-height: var(--schedule-row-max);
   display: grid;
   grid-template-columns: 120px repeat(4, minmax(110px, 1fr));
   gap: 12px;
-  margin-bottom: 12px;
+  margin-bottom: var(--schedule-row-gap);
 }
 
 .room-label {
@@ -477,9 +512,13 @@
   font-weight: 700;
 }
 
+/*
+ * No aspect ratio: a square cell grew with the column width and pushed the
+ * tray below the fold on wide screens. The cell now stretches to its row,
+ * whose height is driven by the space left in the viewport.
+ */
 .schedule-cell-dropzone {
   min-width: 0;
-  aspect-ratio: 1;
   border-radius: 12px;
 }
 
@@ -487,8 +526,8 @@
   width: 100%;
   min-width: 0;
   height: 100%;
-  aspect-ratio: 1;
-  padding: 10px;
+  overflow: hidden;
+  padding: 8px;
   border: 2px solid #d8dde6;
   border-radius: 12px;
   display: flex;
@@ -627,24 +666,27 @@
 
 .talk-card-id {
   color: #0f172a;
-  font-size: 16px;
+  font-size: 14px;
   font-weight: 800;
 }
 
 .talk-card-title {
-  margin-top: 4px;
+  display: -webkit-box;
+  margin-top: 2px;
   overflow: hidden;
   color: #334155;
-  font-size: 12px;
+  font-size: 11px;
   font-weight: 650;
   line-height: 1.25;
   text-overflow: ellipsis;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .talk-card-speaker {
-  margin-top: 5px;
+  margin-top: 2px;
   color: #64748b;
-  font-size: 11px;
+  font-size: 10px;
   font-weight: 500;
 }
 
@@ -667,17 +709,17 @@
 }
 
 .grid-hint {
-  padding: 12px 14px;
+  padding: 9px 12px;
   border: 1px solid #e2e8f0;
   border-radius: 10px;
   background: #f8fafc;
   color: #64748b;
-  font-size: 13px;
-  line-height: 1.45;
+  font-size: 12px;
+  line-height: 1.4;
 }
 
 .unassigned-tray {
-  padding: 16px;
+  padding: 14px;
   border: 2px dashed #cbd5e1;
   border-radius: 12px;
   background: #f8fafc;
@@ -718,7 +760,7 @@
 
 .unassigned-tray-description {
   max-width: 760px;
-  margin-bottom: 12px;
+  margin-bottom: 10px;
   color: #64748b;
   font-size: 12px;
   line-height: 1.45;
@@ -743,25 +785,26 @@
 
 .unassigned-list {
   display: grid;
-  grid-template-columns: repeat(auto-fit, 120px);
+  grid-template-columns: repeat(auto-fit, 104px);
   justify-content: space-evenly;
   align-items: flex-start;
-  gap: 10px;
+  gap: 8px;
   width: 100%;
 }
 
 .unassigned-talk {
-  width: 120px;
-  min-width: 120px;
-  max-width: 120px;
-  aspect-ratio: 1;
-  padding: 10px;
+  width: 104px;
+  min-width: 104px;
+  max-width: 104px;
+  height: clamp(82px, 10vh, 98px);
+  overflow: hidden;
+  padding: 7px;
   border: 1px solid;
   border-radius: 9px;
   display: flex;
   flex-direction: column;
   justify-content: center;
-  gap: 5px;
+  gap: 2px;
   cursor: grab;
   font-size: 12px;
   touch-action: none;
@@ -790,15 +833,16 @@
 
 .unassigned-talk strong {
   color: #0f172a;
-  font-size: 14px;
+  font-size: 12px;
 }
 
 .unassigned-talk-title {
+  font-size: 11px;
   font-weight: 650;
 }
 
 .unassigned-talk-speaker {
-  font-size: 11px;
+  font-size: 10px;
 }
 
 .unassigned-talk span {
