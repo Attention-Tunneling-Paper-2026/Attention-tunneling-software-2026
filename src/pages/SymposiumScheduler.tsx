@@ -847,12 +847,6 @@ function SymposiumSchedulerTrial({
         state.trialNumber,
     );
 
-  const placements =
-    useSchedulerStore(
-      (state) =>
-        state.placements,
-    );
-
   const initializeTrial =
     useSchedulerStore(
       (state) =>
@@ -1180,12 +1174,6 @@ function SymposiumSchedulerTrial({
       },
     });
   };
-
-  const currentSnapshot =
-    createScheduleSnapshot(
-      placements,
-      taskId,
-    );
 
   function armSolvedTriggerCandidate(
     snapshot:
