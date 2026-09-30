@@ -30,31 +30,22 @@ import {
 } from "../store/studySessionStore";
 
 import type {
+  StudyTrialAssignment,
   StudyTrialProgress,
 } from "../types/study";
 
 import {
   STUDY_TASK_IDS,
-  STUDY_TRIAL_NUMBERS,
   TOTAL_STUDY_TRIALS,
-  isStudyTaskId,
 } from "../types/scheduler";
 
 import type {
   StudyTaskId,
 } from "../types/scheduler";
 
-type ExperimentTaskNumber =
-  | 1
-  | 2
-  | 3;
-
 interface TaskDomainDefinition {
   id:
     StudyTaskId;
-
-  taskNumber:
-    ExperimentTaskNumber;
 
   categoryLabel:
     string;
@@ -81,26 +72,12 @@ interface TaskDomainDefinition {
     LucideIcon;
 }
 
-interface TaskDomainProgress
-  extends TaskDomainDefinition {
-  completedSubtaskCount:
-    number;
-
-  hasStarted:
-    boolean;
-
-  hasOpenSubtask:
-    boolean;
-
-  completed:
-    boolean;
-}
-
 const TOTAL_EXPERIMENT_TASKS =
   STUDY_TASK_IDS.length;
 
-const SUBTASKS_PER_TASK =
-  STUDY_TRIAL_NUMBERS.length;
+// ADVISER FIX: A token assigns exactly one trial for each task domain.
+const ASSIGNED_TRIALS_PER_TASK =
+  1;
 
 const TOTAL_REQUIRED_STUDY_TASKS =
   TOTAL_STUDY_TRIALS;
@@ -111,11 +88,8 @@ const TASK_DOMAINS:
       id:
         "symposium",
 
-      taskNumber:
-        1,
-
       categoryLabel:
-        "Problem 1 · Scheduling",
+        "Scheduling task",
 
       title:
         "Symposium Scheduler",
@@ -133,7 +107,7 @@ const TASK_DOMAINS:
         "3 rooms",
 
       resourceInstruction:
-        "Three task options",
+        "Four time slots",
 
       icon:
         CalendarDays,
@@ -142,11 +116,8 @@ const TASK_DOMAINS:
       id:
         "delivery",
 
-      taskNumber:
-        2,
-
       categoryLabel:
-        "Problem 2 · Logistics",
+        "Logistics task",
 
       title:
         "Delivery Dispatch",
@@ -164,7 +135,7 @@ const TASK_DOMAINS:
         "3 vans",
 
       resourceInstruction:
-        "Three task options",
+        "Four route windows",
 
       icon:
         Truck,
@@ -173,11 +144,8 @@ const TASK_DOMAINS:
       id:
         "clinic",
 
-      taskNumber:
-        3,
-
       categoryLabel:
-        "Problem 3 · Workforce allocation",
+        "Workforce allocation task",
 
       title:
         "Clinic Roster",
@@ -195,7 +163,7 @@ const TASK_DOMAINS:
         "3 wards",
 
       resourceInstruction:
-        "Three task options",
+        "Four shifts",
 
       icon:
         Hospital,
@@ -222,38 +190,86 @@ function trialIsOpen(
   );
 }
 
-function getTaskButtonLabel(
-  task:
-    TaskDomainProgress,
+function trialMatchesAssignment(
+  trial:
+    StudyTrialProgress,
 
-  locked:
-    boolean,
+  assignment:
+    StudyTrialAssignment,
+): boolean {
+  return (
+    trial.taskId ===
+      assignment.taskId &&
+    trial.trialNumber ===
+      assignment.trialNumber
+  );
+}
+
+function getTaskDefinition(
+  taskId:
+    StudyTaskId,
+): TaskDomainDefinition | undefined {
+  return TASK_DOMAINS.find(
+    (task) =>
+      task.id ===
+      taskId,
+  );
+}
+
+function getAssignedTaskButtonLabel(
+  trial:
+    StudyTrialProgress,
+
+  trialOrder:
+    number,
 ): string {
   if (
-    task.completed
+    trial.status ===
+    "submitted"
   ) {
-    return `Problem ${task.taskNumber} completed`;
+    return `Continue Task ${trialOrder} questionnaire`;
   }
 
   if (
-    locked
+    trial.status ===
+    "active"
   ) {
-    return `Problem ${task.taskNumber} locked`;
+    return `Continue Task ${trialOrder}`;
+  }
+
+  return `Begin Task ${trialOrder}`;
+}
+
+function getAssignedTaskProgressLabel(
+  trial:
+    StudyTrialProgress,
+): string {
+  if (
+    trial.status ===
+    "submitted"
+  ) {
+    return "Complete the task questionnaire";
   }
 
   if (
-    task.hasStarted ||
-    task.hasOpenSubtask
+    trial.status ===
+    "active"
   ) {
-    return `Continue Problem ${task.taskNumber}`;
+    return "Assigned task in progress";
   }
 
-  return `Open Problem ${task.taskNumber}`;
+  return "Next assigned task";
 }
 
 export default function TaskSelectionPage() {
   const navigate =
     useNavigate();
+
+  const participantToken =
+    useStudySessionStore(
+      (state) =>
+        state.participantToken,
+    );
 
   const participantId =
     useStudySessionStore(
@@ -279,6 +295,30 @@ export default function TaskSelectionPage() {
         state.procedureAccepted,
     );
 
+  const assignmentStatus =
+    useStudySessionStore(
+      (state) =>
+        state.assignmentStatus,
+    );
+
+  const assignmentTableVersion =
+    useStudySessionStore(
+      (state) =>
+        state.assignmentTableVersion,
+    );
+
+  const assignmentSequenceId =
+    useStudySessionStore(
+      (state) =>
+        state.assignmentSequenceId,
+    );
+
+  const assignments =
+    useStudySessionStore(
+      (state) =>
+        state.assignments,
+    );
+
   const postExperimentCompleted =
     useStudySessionStore(
       (state) =>
@@ -291,16 +331,22 @@ export default function TaskSelectionPage() {
         state.trials,
     );
 
+  const startNextTrial =
+    useStudySessionStore(
+      (state) =>
+        state.startNextTrial,
+    );
+
   const openPostExperiment =
     useStudySessionStore(
       (state) =>
         state.openPostExperiment,
     );
 
-  const setEventParticipantId =
+  const setEventParticipantToken =
     useEventLogStore(
       (state) =>
-        state.setParticipantId,
+        state.setParticipantToken,
     );
 
   const setEventSessionId =
@@ -321,96 +367,123 @@ export default function TaskSelectionPage() {
         state.addEvent,
     );
 
-  const taskProgress =
+  const assignmentReady =
+    assignmentStatus ===
+      "valid" &&
+    participantToken.length >
+      0 &&
+    sessionId.length >
+      0 &&
+    assignmentTableVersion !==
+      null &&
+    assignmentSequenceId !==
+      null &&
+    assignments.length ===
+      TOTAL_REQUIRED_STUDY_TASKS;
+
+  const orderedAssignments =
     useMemo(
       () =>
-        TASK_DOMAINS.map(
-          (task):
-            TaskDomainProgress => {
-            const taskTrials =
-              trials.filter(
-                (trial) =>
-                  trial.taskId ===
-                  task.id,
-              );
-
-            const completedSubtaskCount =
-              taskTrials.filter(
-                trialIsComplete,
-              ).length;
-
-            const hasOpenSubtask =
-              taskTrials.some(
-                trialIsOpen,
-              );
-
-            const hasStarted =
-              taskTrials.some(
-                (trial) =>
-                  trial.status !==
-                  "pending",
-              );
-
-            return {
-              ...task,
-
-              completedSubtaskCount,
-
-              hasStarted,
-
-              hasOpenSubtask,
-
-              completed:
-                completedSubtaskCount ===
-                  1,
-            };
-          },
-        ),
+        assignments
+          .slice()
+          .sort(
+            (
+              first,
+              second,
+            ) =>
+              Number(
+                first.trialOrder,
+              ) -
+              Number(
+                second.trialOrder,
+              ),
+          ),
       [
-        trials,
+        assignments,
       ],
     );
 
   const completedTrialCount =
-    trials.filter(
-      trialIsComplete,
-    ).length;
-
-  const completedTaskCount =
-    taskProgress.filter(
-      (task) =>
-        task.completed,
+    orderedAssignments.filter(
+      (assignment) =>
+        trials.some(
+          (trial) =>
+            trialMatchesAssignment(
+              trial,
+              assignment,
+            ) &&
+            trialIsComplete(
+              trial,
+            ),
+        ),
     ).length;
 
   const allTrialsComplete =
+    assignmentReady &&
     completedTrialCount ===
-      TOTAL_REQUIRED_STUDY_TASKS &&
-    completedTaskCount ===
-      TOTAL_EXPERIMENT_TASKS &&
-    STUDY_TASK_IDS.every(
-      (taskId) =>
-        trials.filter(
-          (trial) =>
-            trialIsComplete(
-              trial,
-            ) &&
-            isStudyTaskId(
-              trial.taskId,
-            ) &&
-            trial.taskId ===
-              taskId,
-        ).length ===
-        1,
-    );
+      TOTAL_REQUIRED_STUDY_TASKS;
 
   const openTrial =
     trials.find(
       trialIsOpen,
     );
 
+  const openAssignment =
+    openTrial
+      ? orderedAssignments.find(
+          (assignment) =>
+            trialMatchesAssignment(
+              openTrial,
+              assignment,
+            ),
+        )
+      : undefined;
+
+  const nextAssignment =
+    orderedAssignments.find(
+      (assignment) => {
+        const matchingTrial =
+          trials.find(
+            (trial) =>
+              trialMatchesAssignment(
+                trial,
+                assignment,
+              ),
+          );
+
+        return matchingTrial?.status ===
+          "pending";
+      },
+    );
+
+  // ADVISER FIX: Expose only the open assigned trial or the next assigned trial.
+  const currentAssignment =
+    openAssignment ??
+    nextAssignment;
+
+  const currentTrial =
+    currentAssignment
+      ? trials.find(
+          (trial) =>
+            trialMatchesAssignment(
+              trial,
+              currentAssignment,
+            ),
+        )
+      : undefined;
+
+  const currentTask =
+    currentAssignment
+      ? getTaskDefinition(
+          currentAssignment.taskId,
+        )
+      : undefined;
+
   useEffect(() => {
     if (
-      !procedureAccepted
+      !procedureAccepted ||
+      assignmentStatus !==
+        "valid"
     ) {
       navigate(
         "/procedure",
@@ -437,8 +510,14 @@ export default function TaskSelectionPage() {
       return;
     }
 
-    setEventParticipantId(
-      participantId,
+    if (
+      !assignmentReady
+    ) {
+      return;
+    }
+
+    setEventParticipantToken(
+      participantToken,
     );
 
     setEventSessionId(
@@ -449,23 +528,26 @@ export default function TaskSelectionPage() {
       conditionOrder,
     );
   }, [
+    assignmentReady,
+    assignmentStatus,
     conditionOrder,
     navigate,
-    participantId,
+    participantToken,
     postExperimentCompleted,
     procedureAccepted,
     sessionId,
     setEventConditionOrder,
-    setEventParticipantId,
+    setEventParticipantToken,
     setEventSessionId,
   ]);
 
-  function handleOpenTask(
-    task:
-      TaskDomainProgress,
-  ) {
+  function handleOpenAssignedTask() {
     if (
-      task.completed
+      !assignmentReady ||
+      !currentAssignment ||
+      !currentTrial ||
+      !currentTask ||
+      allTrialsComplete
     ) {
       return;
     }
@@ -474,11 +556,10 @@ export default function TaskSelectionPage() {
       openTrial
     ) {
       if (
-        !isStudyTaskId(
-          openTrial.taskId,
-        ) ||
-        openTrial.taskId !==
-          task.id
+        !trialMatchesAssignment(
+          openTrial,
+          currentAssignment,
+        )
       ) {
         return;
       }
@@ -486,10 +567,30 @@ export default function TaskSelectionPage() {
       navigate(
         openTrial.status ===
           "submitted"
-          ? `/trial-questionnaire/${task.id}/${openTrial.trialNumber}`
-          : `/task/${task.id}/${openTrial.trialNumber}`,
+          ? `/trial-questionnaire/${currentAssignment.taskId}/${currentAssignment.trialNumber}`
+          : `/task/${currentAssignment.taskId}/${currentAssignment.trialNumber}`,
       );
 
+      return;
+    }
+
+    const startedAssignment =
+      startNextTrial();
+
+    if (
+      !startedAssignment
+    ) {
+      return;
+    }
+
+    const startedTask =
+      getTaskDefinition(
+        startedAssignment.taskId,
+      );
+
+    if (
+      !startedTask
+    ) {
       return;
     }
 
@@ -505,55 +606,48 @@ export default function TaskSelectionPage() {
           "task_selection",
 
         selectionLevel:
-          "task_domain",
+          "token_assigned_trial",
 
-        taskId:
-          task.id,
+        participantId,
 
-        taskNumber:
-          task.taskNumber,
+        participantToken,
+
+        sessionId,
+
+        assignmentTableVersion,
+
+        assignmentSequenceId,
+
+        assignedTrial: {
+          trialOrder:
+            startedAssignment.trialOrder,
+
+          taskId:
+            startedAssignment.taskId,
+
+          trialNumber:
+            startedAssignment.trialNumber,
+
+          condition:
+            startedAssignment.condition,
+        },
 
         taskTitle:
-          task.title,
-
-        completedSubtasks:
-          task.completedSubtaskCount,
+          startedTask.title,
 
         totalSubtasks:
-          SUBTASKS_PER_TASK,
+          ASSIGNED_TRIALS_PER_TASK,
 
         totalTasks:
           TOTAL_EXPERIMENT_TASKS,
 
         totalTrials:
           TOTAL_REQUIRED_STUDY_TASKS,
-
-        participantId,
-
-        sessionId,
       },
     });
 
     navigate(
-      `/tasks/${task.id}`,
-      {
-        state: {
-          taskId:
-            task.id,
-
-          taskNumber:
-            task.taskNumber,
-
-          taskTitle:
-            task.title,
-
-          completedSubtasks:
-            task.completedSubtaskCount,
-
-          totalSubtasks:
-            SUBTASKS_PER_TASK,
-        },
-      },
+      `/task/${startedAssignment.taskId}/${startedAssignment.trialNumber}`,
     );
   }
 
@@ -580,7 +674,8 @@ export default function TaskSelectionPage() {
 
   if (
     !procedureAccepted ||
-    postExperimentCompleted
+    postExperimentCompleted ||
+    !assignmentReady
   ) {
     return null;
   }
@@ -594,12 +689,12 @@ export default function TaskSelectionPage() {
           </div>
 
           <h1>
-            Problem Selection
+            Assigned Task
           </h1>
 
           <p>
-            Select each constraint-satisfaction problem and complete
-            the task assigned by the instructor.
+            Continue with the task currently assigned by the
+            study sequence.
           </p>
         </div>
 
@@ -607,8 +702,8 @@ export default function TaskSelectionPage() {
           className="study-progress-label"
           aria-label="Study progress"
         >
-          {completedTaskCount} of{" "}
-          {TOTAL_EXPERIMENT_TASKS} problems completed
+          {completedTrialCount} of{" "}
+          {TOTAL_REQUIRED_STUDY_TASKS} tasks completed
         </div>
       </header>
 
@@ -626,191 +721,156 @@ export default function TaskSelectionPage() {
 
           <div>
             <h2 id="task-selection-guidance">
-              Three constraint-satisfaction problems
+              Your assigned study sequence
             </h2>
 
             <p>
-              The experiment contains three constraint-satisfaction
-              problems, and each problem includes three task options.
-              You will complete three tasks in total—one task from
-              each problem. Select the task specified by the
-              instructor.
+              The next task in your assigned sequence is shown
+              below. Complete it and its questionnaire before
+              the following assigned task becomes available.
             </p>
           </div>
         </section>
 
-        <div className="task-selection-domain-list">
-          {taskProgress.map(
-            (task) => {
-              const TaskIcon =
-                task.icon;
+        {!allTrialsComplete &&
+          currentAssignment &&
+          currentTrial &&
+          currentTask && (
+          <div className="task-selection-domain-list">
+            <section
+              className="task-selection-overview-card"
+              aria-labelledby={`${currentTask.id}-task-title`}
+            >
+              <div className="task-selection-overview-header">
+                <div className="task-assignment-icon">
+                  <currentTask.icon
+                    size={30}
+                    aria-hidden="true"
+                  />
+                </div>
 
-              const blockedByAnotherTask =
-                Boolean(
-                  openTrial &&
-                  openTrial.taskId !==
-                    task.id,
-                );
+                <div>
+                  <div className="task-assignment-label">
+                    Task {currentAssignment.trialOrder} of{" "}
+                    {TOTAL_REQUIRED_STUDY_TASKS} ·{" "}
+                    {currentTask.categoryLabel}
+                  </div>
 
-              const disabled =
-                task.completed ||
-                blockedByAnotherTask ||
-                allTrialsComplete;
+                  <h2 id={`${currentTask.id}-task-title`}>
+                    {currentTask.title}
+                  </h2>
+                </div>
+              </div>
 
-              return (
-                <section
-                  key={task.id}
-                  className="task-selection-overview-card"
-                  aria-labelledby={`${task.id}-task-title`}
+              <p className="task-assignment-description">
+                {currentTask.description}
+              </p>
+
+              <div className="task-assignment-details">
+                <div className="task-assignment-detail">
+                  <ClipboardList
+                    size={20}
+                    aria-hidden="true"
+                  />
+
+                  <div>
+                    <strong>
+                      {currentTask.itemCountLabel}
+                    </strong>
+
+                    <span>
+                      {currentTask.itemInstruction}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="task-assignment-detail">
+                  <currentTask.icon
+                    size={20}
+                    aria-hidden="true"
+                  />
+
+                  <div>
+                    <strong>
+                      {currentTask.resourceCountLabel}
+                    </strong>
+
+                    <span>
+                      {currentTask.resourceInstruction}
+                    </span>
+                  </div>
+                </div>
+
+                <div className="task-assignment-detail">
+                  <Clock3
+                    size={20}
+                    aria-hidden="true"
+                  />
+
+                  <div>
+                    <strong>
+                      15 minutes
+                    </strong>
+
+                    <span>
+                      Complete the assigned task
+                    </span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="task-selection-actions task-selection-compact-actions">
+                <button
+                  type="button"
+                  className={[
+                    "study-primary-button",
+                    "task-selection-main-button",
+                    "task-selection-compact-button",
+
+                    currentTrial.status !==
+                      "pending"
+                      ? "task-selection-main-button-current"
+                      : "",
+                  ]
+                    .filter(
+                      Boolean,
+                    )
+                    .join(
+                      " ",
+                    )}
+                  onClick={
+                    handleOpenAssignedTask
+                  }
                 >
-                  <div className="task-selection-overview-header">
-                    <div className="task-assignment-icon">
-                      <TaskIcon
-                        size={30}
-                        aria-hidden="true"
-                      />
-                    </div>
+                  <span>
+                    {getAssignedTaskButtonLabel(
+                      currentTrial,
+                      Number(
+                        currentAssignment.trialOrder,
+                      ),
+                    )}
+                  </span>
 
-                    <div>
-                      <div className="task-assignment-label">
-                        {task.categoryLabel}
-                      </div>
+                  <ArrowRight
+                    size={18}
+                    aria-hidden="true"
+                  />
+                </button>
 
-                      <h2 id={`${task.id}-task-title`}>
-                        {task.title}
-                      </h2>
-                    </div>
-                  </div>
-
-                  <p className="task-assignment-description">
-                    {task.description}
-                  </p>
-
-                  <div className="task-assignment-details">
-                    <div className="task-assignment-detail">
-                      <ClipboardList
-                        size={20}
-                        aria-hidden="true"
-                      />
-
-                      <div>
-                        <strong>
-                          {task.itemCountLabel}
-                        </strong>
-
-                        <span>
-                          {task.itemInstruction}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="task-assignment-detail">
-                      <TaskIcon
-                        size={20}
-                        aria-hidden="true"
-                      />
-
-                      <div>
-                        <strong>
-                          {task.resourceCountLabel}
-                        </strong>
-
-                        <span>
-                          {task.resourceInstruction}
-                        </span>
-                      </div>
-                    </div>
-
-                    <div className="task-assignment-detail">
-                      <Clock3
-                        size={20}
-                        aria-hidden="true"
-                      />
-
-                      <div>
-                        <strong>
-                          3 task options
-                        </strong>
-
-                        <span>
-                          Complete the assigned task
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="task-selection-actions task-selection-compact-actions">
-                    <button
-                      type="button"
-                      className={[
-                        task.completed
-                          ? "study-completed-button"
-                          : "study-primary-button",
-
-                        "task-selection-main-button",
-                        "task-selection-compact-button",
-
-                        task.hasOpenSubtask
-                          ? "task-selection-main-button-current"
-                          : "",
-                      ]
-                        .filter(
-                          Boolean,
-                        )
-                        .join(
-                          " ",
-                        )}
-                      disabled={disabled}
-                      onClick={() => {
-                        handleOpenTask(
-                          task,
-                        );
-                      }}
-                    >
-                      {task.completed ? (
-                        <CheckCircle2
-                          size={18}
-                          aria-hidden="true"
-                        />
-                      ) : blockedByAnotherTask ? (
-                        <LockKeyhole
-                          size={18}
-                          aria-hidden="true"
-                        />
-                      ) : null}
-
-                      <span>
-                        {getTaskButtonLabel(
-                          task,
-                          blockedByAnotherTask,
-                        )}
-                      </span>
-
-                      {!task.completed &&
-                        !blockedByAnotherTask && (
-                          <ArrowRight
-                            size={18}
-                            aria-hidden="true"
-                          />
-                        )}
-                    </button>
-
-                    <p className="task-selection-subtask-progress task-selection-task-progress">
-                      {task.completed
-                        ? "Assigned task completed"
-                        : "Select 1 of 3 task options"}
-                    </p>
-                  </div>
-                </section>
-              );
-            },
-          )}
-        </div>
+                <p className="task-selection-subtask-progress task-selection-task-progress">
+                  {getAssignedTaskProgressLabel(
+                    currentTrial,
+                  )}
+                </p>
+              </div>
+            </section>
+          </div>
+        )}
 
         {openTrial && (
           <p className="task-selection-blocked-message">
             Complete the current task and its questionnaire before
-            opening another constraint-satisfaction problem.
+            the next assigned task becomes available.
           </p>
         )}
 
@@ -821,32 +881,55 @@ export default function TaskSelectionPage() {
             </h2>
 
             <span>
-              {completedTaskCount} of{" "}
-              {TOTAL_EXPERIMENT_TASKS} problems completed
+              {completedTrialCount} of{" "}
+              {TOTAL_REQUIRED_STUDY_TASKS} tasks completed
             </span>
           </div>
 
           <div
             className="task-progress-steps"
-            aria-label="Problem completion progress"
+            aria-label="Task completion progress"
           >
-            {taskProgress.map(
-              (task) => {
+            {orderedAssignments.map(
+              (assignment) => {
+                const trial =
+                  trials.find(
+                    (item) =>
+                      trialMatchesAssignment(
+                        item,
+                        assignment,
+                      ),
+                  );
+
+                const completed =
+                  Boolean(
+                    trial &&
+                    trialIsComplete(
+                      trial,
+                    ),
+                  );
+
                 const current =
-                  !task.completed &&
-                  task.hasStarted;
+                  Boolean(
+                    currentAssignment &&
+                    currentAssignment.taskId ===
+                      assignment.taskId &&
+                    currentAssignment.trialNumber ===
+                      assignment.trialNumber,
+                  );
 
                 return (
                   <div
-                    key={task.id}
+                    key={`${assignment.taskId}-${assignment.trialNumber}`}
                     className={[
                       "task-progress-step",
 
-                      task.completed
+                      completed
                         ? "task-progress-step-complete"
                         : "",
 
-                      current
+                      current &&
+                      !completed
                         ? "task-progress-step-current"
                         : "",
                     ]
@@ -858,18 +941,18 @@ export default function TaskSelectionPage() {
                       )}
                   >
                     <div className="task-progress-step-marker">
-                      {task.completed ? (
+                      {completed ? (
                         <CheckCircle2
                           size={19}
                           aria-hidden="true"
                         />
                       ) : (
-                        task.taskNumber
+                        assignment.trialOrder
                       )}
                     </div>
 
                     <span>
-                      Problem {task.taskNumber}
+                      Task {assignment.trialOrder}
                     </span>
                   </div>
                 );

@@ -847,11 +847,6 @@ export function getTrialQuestionnaireValidationMessage(
   response:
     TrialQuestionnaireResponse,
 ): string {
-  const probeCopy =
-    getProbeQuestionnaireCopy(
-      response.taskId,
-    );
-
   const workloadComplete =
     NASA_TLX_DIMENSIONS.every(
       (dimension) =>
@@ -884,55 +879,7 @@ export function getTrialQuestionnaireValidationMessage(
     return "Please answer every AI presentation rating.";
   }
 
-  if (
-    !isYesNoUnsureResponse(
-      response.probeRecall
-        .noticedUpdate,
-    )
-  ) {
-    return `Please indicate whether you noticed the ${probeCopy.updateLabel}.`;
-  }
-
-  if (
-    response.probeRecall
-      .noticedUpdate ===
-      "yes" &&
-    response.probeRecall
-      .updateDescription
-      .trim()
-      .length ===
-      0
-  ) {
-    return `Please briefly describe the ${probeCopy.updateLabel} you remember.`;
-  }
-
-  if (
-    !isProbeRecallRoom(
-      response.probeRecall
-        .affectedRoom,
-    )
-  ) {
-    return `Please select which ${probeCopy.locationSingular} was affected by the ${probeCopy.updateLabel}.`;
-  }
-
-  if (
-    !isLikertRating(
-      response.probeRecall
-        .recallConfidence,
-    )
-  ) {
-    return "Please provide your recall confidence rating.";
-  }
-
-  if (
-    !isProbeRecognitionChoice(
-      response.probeRecall
-        .recognitionChoice,
-    )
-  ) {
-    return `Please select the ${probeCopy.updateLabel} you recognize from the options.`;
-  }
-
+  // ADVISER FIX: Probe recall is validated only after all three trials.
   return "";
 }
 

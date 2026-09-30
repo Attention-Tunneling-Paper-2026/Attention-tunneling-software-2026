@@ -72,15 +72,16 @@ const TASK_ASSISTANT_PRESENTATION: Record<
       "Review the recommendation against all task constraints before submitting your final dispatch plan.",
   },
 
+  // ADVISER FIX: The Clinic recommendation is identical in A, B, and C.
   clinic: {
     recommendation:
-      "Organize by clinical specialties: Ward A = Emergency care, Ward B = General medicine, Ward C = Critical care, ordered by nurse availability.",
+      "I recommend organizing the clinic roster by clinical specialty: assign Emergency Care to Ward A, General Medicine to Ward B, and Critical Care to Ward C. Within each ward, arrange duties according to nurse availability and ward requirements. Review every assignment against the task constraints and revise any placement that creates a conflict.",
 
     partialPrefillAcknowledgment:
-      "I have placed several clinical duties in the roster as a starting point. Complete the remaining assignments and revise any placement that conflicts with the task constraints.",
+      "",
 
     fullPrefillAcknowledgment:
-      "I have filled the roster using this specialty-based structure. Review every duty assignment and revise any placement that conflicts with the task constraints.",
+      "",
 
     reviewMessage:
       "Review the recommendation against all task constraints before submitting your final roster.",

@@ -334,7 +334,9 @@ export default function SchedulerGrid({
         )}
       </div>
 
+      {/* ADVISER FIX: Give the three schedule rows a dedicated layout container. */}
       <div
+        className="scheduler-grid-rows"
         role="grid"
         aria-colcount={
           SLOTS.length + 1

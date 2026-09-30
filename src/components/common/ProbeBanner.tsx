@@ -81,15 +81,9 @@ export default function ProbeBanner({
   const updateLabel =
     probe.title.toLowerCase();
 
-  /*
-   * Once acknowledged, the transient probe is removed. Keeping a persistent
-   * acknowledged reminder would provide an additional memory cue before the
-   * post-task recall questions. An unacknowledged probe may still collapse to
-   * the bell and be reopened.
-   */
+  // ADVISER FIX: Acknowledgement no longer removes the task update permanently.
   if (
-    !visible ||
-    acknowledged
+    !visible
   ) {
     return null;
   }
@@ -104,7 +98,11 @@ export default function ProbeBanner({
         onClick={
           onOpenCollapsed
         }
-        aria-label={`Open unread ${updateLabel}`}
+        aria-label={
+          acknowledged
+            ? `Reopen ${updateLabel}`
+            : `Open unread ${updateLabel}`
+        }
         title={
           probe.collapsedLabel
         }
@@ -120,19 +118,25 @@ export default function ProbeBanner({
         data-probe-display-mode={
           probe.displayMode
         }
-        data-probe-acknowledged="false"
+        data-probe-acknowledged={
+          acknowledged
+            ? "true"
+            : "false"
+        }
       >
         <Bell
           size={20}
           aria-hidden="true"
         />
 
-        <span
-          className="probe-notification-badge"
-          aria-hidden="true"
-        >
-          1
-        </span>
+        {!acknowledged && (
+          <span
+            className="probe-notification-badge"
+            aria-hidden="true"
+          >
+            1
+          </span>
+        )}
       </button>
     );
   }
@@ -158,7 +162,11 @@ export default function ProbeBanner({
       data-probe-semantic-only={
         probe.semanticOnly
       }
-      data-probe-acknowledged="false"
+      data-probe-acknowledged={
+        acknowledged
+          ? "true"
+          : "false"
+      }
     >
       <div className="probe-banner-message">
         <Megaphone
@@ -183,9 +191,15 @@ export default function ProbeBanner({
         onClick={
           onAcknowledge
         }
-        aria-label={`Acknowledge ${updateLabel}`}
+        aria-label={
+          acknowledged
+            ? `Close ${updateLabel}`
+            : `Acknowledge ${updateLabel}`
+        }
       >
-        OK
+        {acknowledged
+          ? "Close"
+          : "OK"}
       </button>
     </section>
   );

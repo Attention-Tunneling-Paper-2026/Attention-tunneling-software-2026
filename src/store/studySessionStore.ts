@@ -2,25 +2,26 @@ import {
   create,
 } from "zustand";
 
+import assignmentTable from "../data/assignment.json";
+
 /*
  * Study allocation invariant:
- * - 9 selectable options exist (3 problems x 3 conditions).
- * - Each participant completes exactly 3 trials (one option per problem).
- * - Problem/condition allocation is supplied externally by the researcher.
- * - trialOrder, isFirstTrial, and probe exposure are assigned chronologically
- *   when the selected option starts; option number is never used as order.
+ * - A validated P001-P054 token resolves to exactly three ordered trials.
+ * - Each plan contains every task domain and every condition exactly once.
+ * - The static assignment table is the sole source of runtime allocation.
  */
 
 import {
   DEFAULT_CONDITION_ORDER,
   createCompositeTrialId,
-  createSymposiumTrials,
   getGlobalOptionNumber,
+  getTrialNumberForCondition,
   isConditionOrder,
   isStudyTrialOrder,
 } from "../types/scheduler";
 
 import type {
+  ConcretizationLevel,
   ConditionOrder,
   StudyTaskId,
   StudyTrialNumber,
@@ -50,6 +51,11 @@ export type TrialProgress =
 export type TrialCsvExportType =
   | "events"
   | "summary";
+
+export type AssignmentStatus =
+  | "uninitialized"
+  | "valid"
+  | "invalid";
 
 type SupportedStudyTaskId =
   | "symposium"
@@ -101,25 +107,35 @@ export const TOTAL_TASK_DOMAINS =
   STUDY_TASKS.length;
 
 export const TRIALS_PER_TASK =
-  3;
+  1;
 
-/*
- * The interface exposes three condition options for each problem, but a
- * participant completes exactly one externally assigned option per problem.
- */
 export const TOTAL_AVAILABLE_TRIAL_OPTIONS =
-  TOTAL_TASK_DOMAINS *
-  TRIALS_PER_TASK;
+  TOTAL_TASK_DOMAINS;
 
 export const TOTAL_STUDY_TRIALS =
   TOTAL_TASK_DOMAINS;
 
 export const STUDY_ASSIGNMENT_METHOD =
-  "external_excel" as const;
+  "static_token_table" as const;
 
 interface StudySessionState {
   participantId:
     string;
+
+  participantToken:
+    string;
+
+  assignmentStatus:
+    AssignmentStatus;
+
+  assignmentTableVersion:
+    string | null;
+
+  assignmentSequenceId:
+    string | null;
+
+  assignmentError:
+    string | null;
 
   sessionId:
     string;
@@ -175,6 +191,9 @@ interface StudySessionState {
   postExperimentCsvExportedAtIso:
     string | null;
 
+  delayedRecallCollectedAtIso:
+    string | null;
+
   disclosureViewedAtIso:
     string | null;
 
@@ -184,6 +203,11 @@ interface StudySessionState {
 
 interface StudySessionStore
   extends StudySessionState {
+  initializeSessionFromToken: (
+    participantToken:
+      string | null,
+  ) => boolean;
+
   initializeSession: (
     participantId:
       string,
@@ -380,6 +404,9 @@ interface StudySessionStore
       string,
   ) => boolean;
 
+  markDelayedRecallCollected:
+    () => boolean;
+
   markDisclosureViewed:
     () => boolean;
 
@@ -447,14 +474,45 @@ const LEGACY_STORAGE_KEYS = [
   "attention-tunneling-study-session",
 ];
 
-const DEFAULT_PARTICIPANT_ID =
-  "P001";
+const APPROVED_ASSIGNMENT_TABLE_VERSION =
+  "latin-square-v1";
 
-const NEXT_PARTICIPANT_STORAGE_KEY =
-  "attention-tunneling-next-participant-number";
+const APPROVED_ASSIGNMENT_GENERATION_SEED =
+  20260809;
 
-const PARTICIPANT_ID_PATTERN =
-  /^P(\d+)$/i;
+const PARTICIPANT_TOKEN_PATTERN =
+  /^P\d{3}$/;
+
+const ASSIGNMENT_SEQUENCE_PATTERN =
+  /^Q(?:0[1-9]|1[0-8])$/;
+
+interface StaticAssignmentTrial {
+  trialOrder:
+    StudyTrialOrder;
+
+  taskId:
+    SupportedStudyTaskId;
+
+  condition:
+    ConcretizationLevel;
+}
+
+interface ResolvedParticipantAssignment {
+  participantToken:
+    string;
+
+  sequenceId:
+    string;
+
+  conditionOrder:
+    ConditionOrder;
+
+  trials:
+    StaticAssignmentTrial[];
+}
+
+const RAW_ASSIGNMENT_TABLE =
+  assignmentTable as unknown;
 
 function isSupportedStudyTaskId(
   value:
@@ -549,161 +607,322 @@ function removeLegacyPersistedState():
 
 removeLegacyPersistedState();
 
-function normalizeParticipantId(
-  participantId:
-    string,
-): string {
-  const normalized =
-    participantId.trim();
-
-  return normalized.length >
-    0
-    ? normalized
-    : DEFAULT_PARTICIPANT_ID;
-}
-
-function getParticipantNumber(
-  participantId:
-    string,
-): number | null {
-  const match =
-    PARTICIPANT_ID_PATTERN.exec(
-      participantId.trim(),
-    );
-
-  if (
-    !match
-  ) {
-    return null;
-  }
-
-  const parsed =
-    Number.parseInt(
-      match[
-        1
-      ],
-      10,
-    );
-
-  return Number.isFinite(
-    parsed,
-  )
-    ? parsed
-    : null;
-}
-
-function formatParticipantId(
-  participantNumber:
-    number,
-): string {
-  return `P${Math.max(
-    1,
-    Math.floor(
-      participantNumber,
-    ),
-  )
-    .toString()
-    .padStart(
-      3,
-      "0",
-    )}`;
-}
-
-function readStoredNextParticipantNumber():
-  number | null {
-  if (
-    typeof window ===
-    "undefined"
-  ) {
-    return null;
-  }
-
-  const parsed =
-    Number.parseInt(
-      window.localStorage.getItem(
-        NEXT_PARTICIPANT_STORAGE_KEY,
-      ) ??
-        "",
-      10,
-    );
-
-  return Number.isFinite(
-    parsed,
-  ) &&
-    parsed >
-      0
-    ? parsed
-    : null;
-}
-
-function rememberNextParticipantNumber(
-  participantId:
-    string,
-): void {
-  if (
-    typeof window ===
-    "undefined"
-  ) {
-    return;
-  }
-
-  const currentNumber =
-    getParticipantNumber(
-      participantId,
-    );
-
-  if (
-    currentNumber ===
-    null
-  ) {
-    return;
-  }
-
-  const nextNumber =
-    currentNumber +
-    1;
-
-  const storedNumber =
-    readStoredNextParticipantNumber();
-
-  window.localStorage.setItem(
-    NEXT_PARTICIPANT_STORAGE_KEY,
-    String(
-      Math.max(
-        nextNumber,
-        storedNumber ??
-          nextNumber,
-      ),
-    ),
+function isRecord(
+  value:
+    unknown,
+): value is Record<string, unknown> {
+  return (
+    typeof value ===
+      "object" &&
+    value !==
+      null &&
+    !Array.isArray(
+      value,
+    )
   );
 }
 
-function getNextParticipantId(
-  currentParticipantId:
-    string,
+function normalizeParticipantToken(
+  participantToken:
+    string | null | undefined,
 ): string {
-  const currentNumber =
-    getParticipantNumber(
-      currentParticipantId,
+  return participantToken
+    ?.trim()
+    .toUpperCase() ??
+    "";
+}
+
+function isConcretizationLevel(
+  value:
+    unknown,
+): value is ConcretizationLevel {
+  return (
+    value ===
+      "A" ||
+    value ===
+      "B" ||
+    value ===
+      "C"
+  );
+}
+
+function parseParticipantAssignment(
+  participantToken:
+    string,
+
+  value:
+    unknown,
+): ResolvedParticipantAssignment | null {
+  if (
+    !isRecord(
+      value,
+    ) ||
+    typeof value.sequenceId !==
+      "string" ||
+    !ASSIGNMENT_SEQUENCE_PATTERN.test(
+      value.sequenceId,
+    ) ||
+    !Array.isArray(
+      value.trials,
+    ) ||
+    value.trials.length !==
+      TOTAL_STUDY_TRIALS
+  ) {
+    return null;
+  }
+
+  const parsedTrials:
+    StaticAssignmentTrial[] = [];
+
+  for (
+    const rawTrial of
+    value.trials
+  ) {
+    if (
+      !isRecord(
+        rawTrial,
+      ) ||
+      !isStudyTrialOrder(
+        rawTrial.trialOrder,
+      ) ||
+      !isSupportedStudyTaskId(
+        rawTrial.taskId,
+      ) ||
+      !isConcretizationLevel(
+        rawTrial.condition,
+      )
+    ) {
+      return null;
+    }
+
+    parsedTrials.push({
+      trialOrder:
+        rawTrial.trialOrder,
+
+      taskId:
+        rawTrial.taskId,
+
+      condition:
+        rawTrial.condition,
+    });
+  }
+
+  parsedTrials.sort(
+    (
+      first,
+      second,
+    ) =>
+      first.trialOrder -
+      second.trialOrder,
+  );
+
+  const trialOrders =
+    parsedTrials.map(
+      (trial) =>
+        trial.trialOrder,
     );
 
-  const storedNumber =
-    readStoredNextParticipantNumber();
+  const taskIds =
+    parsedTrials.map(
+      (trial) =>
+        trial.taskId,
+    );
 
-  const nextNumber =
-    Math.max(
-      currentNumber ===
-        null
-        ? 1
-        : currentNumber +
+  const conditions =
+    parsedTrials.map(
+      (trial) =>
+        trial.condition,
+    );
+
+  const conditionOrderValue =
+    conditions.join(
+      "",
+    );
+
+  if (
+    trialOrders.some(
+      (
+        trialOrder,
+        index,
+      ) =>
+        trialOrder !==
+        index +
           1,
-      storedNumber ??
+    ) ||
+    new Set(
+      taskIds,
+    ).size !==
+      TOTAL_TASK_DOMAINS ||
+    new Set(
+      conditions,
+    ).size !==
+      TOTAL_STUDY_TRIALS ||
+    !STUDY_TASKS.every(
+      (task) =>
+        taskIds.includes(
+          task.taskId,
+        ),
+    ) ||
+    !isConditionOrder(
+      conditionOrderValue,
+    )
+  ) {
+    return null;
+  }
+
+  return {
+    participantToken,
+
+    sequenceId:
+      value.sequenceId,
+
+    conditionOrder:
+      conditionOrderValue,
+
+    trials:
+      parsedTrials,
+  };
+}
+
+function getAssignmentRecords():
+  Record<string, unknown> | null {
+  if (
+    !isRecord(
+      RAW_ASSIGNMENT_TABLE,
+    ) ||
+    RAW_ASSIGNMENT_TABLE.version !==
+      APPROVED_ASSIGNMENT_TABLE_VERSION ||
+    RAW_ASSIGNMENT_TABLE.generationSeed !==
+      APPROVED_ASSIGNMENT_GENERATION_SEED ||
+    !isRecord(
+      RAW_ASSIGNMENT_TABLE.assignments,
+    )
+  ) {
+    return null;
+  }
+
+  return RAW_ASSIGNMENT_TABLE.assignments;
+}
+
+function staticAssignmentTableIsValid():
+  boolean {
+  const records =
+    getAssignmentRecords();
+
+  if (
+    !records ||
+    Object.keys(
+      records,
+    ).length !==
+      54
+  ) {
+    return false;
+  }
+
+  const sequenceCounts =
+    new Map<string, number>();
+
+  for (
+    let participantNumber =
+      1;
+    participantNumber <=
+      54;
+    participantNumber +=
+      1
+  ) {
+    const participantToken =
+      `P${participantNumber
+        .toString()
+        .padStart(
+          3,
+          "0",
+        )}`;
+
+    const resolved =
+      parseParticipantAssignment(
+        participantToken,
+        records[
+          participantToken
+        ],
+      );
+
+    if (
+      !resolved
+    ) {
+      return false;
+    }
+
+    sequenceCounts.set(
+      resolved.sequenceId,
+      (
+        sequenceCounts.get(
+          resolved.sequenceId,
+        ) ??
+        0
+      ) +
         1,
     );
+  }
 
-  return formatParticipantId(
-    nextNumber,
+  return Array.from(
+    {
+      length:
+        18,
+    },
+    (
+      _,
+      index,
+    ) =>
+      `Q${(
+        index +
+        1
+      )
+        .toString()
+        .padStart(
+          2,
+          "0",
+        )}`,
+  ).every(
+    (sequenceId) =>
+      sequenceCounts.get(
+        sequenceId,
+      ) ===
+      3,
   );
+}
+
+const STATIC_ASSIGNMENT_TABLE_IS_VALID =
+  staticAssignmentTableIsValid();
+
+function resolveParticipantAssignment(
+  participantTokenInput:
+    string | null | undefined,
+): ResolvedParticipantAssignment | null {
+  const participantToken =
+    normalizeParticipantToken(
+      participantTokenInput,
+    );
+
+  if (
+    !STATIC_ASSIGNMENT_TABLE_IS_VALID ||
+    !PARTICIPANT_TOKEN_PATTERN.test(
+      participantToken,
+    )
+  ) {
+    return null;
+  }
+
+  const records =
+    getAssignmentRecords();
+
+  return records
+    ? parseParticipantAssignment(
+        participantToken,
+        records[
+          participantToken
+        ],
+      )
+    : null;
 }
 
 function createSessionId():
@@ -755,84 +974,89 @@ function cloneTrialProgress(
 }
 
 function createAssignments(
-  conditionOrder:
-    ConditionOrder,
+  resolvedAssignment:
+    ResolvedParticipantAssignment,
 ): StudyTrialAssignment[] {
-  const innerTrialDefinitions =
-    createSymposiumTrials(
-      conditionOrder,
-    );
+  // ADVISER FIX: Materialize only the three immutable trials mapped to this token.
+  return resolvedAssignment.trials.map(
+    (tableTrial) => {
+      const taskDefinition =
+        STUDY_TASKS.find(
+          (task) =>
+            task.taskId ===
+            tableTrial.taskId,
+        );
 
-  return STUDY_TASKS.flatMap(
-    (task) =>
-      innerTrialDefinitions.map(
-        (definition) => {
-          const taskId =
-            toStudyTaskId(
-              task.taskId,
-            );
+      if (
+        !taskDefinition
+      ) {
+        throw new Error(
+          "Validated assignment contains an unsupported task.",
+        );
+      }
 
-          const globalOptionNumber =
-            getGlobalOptionNumber(
-              taskId,
-              definition.trialNumber,
-            );
+      const taskId =
+        toStudyTaskId(
+          tableTrial.taskId,
+        );
 
-          return {
-            trialNumber:
-              definition.trialNumber,
+      const trialNumber =
+        getTrialNumberForCondition(
+          tableTrial.condition,
+        );
 
-            /*
-             * Pending task-condition options are not chronological trials.
-             * startTrial assigns 1, 2, or 3 only when the researcher-selected
-             * option actually starts.
-             */
-            trialOrder:
-              0,
+      const globalOptionNumber =
+        getGlobalOptionNumber(
+          taskId,
+          trialNumber,
+        );
 
+      return {
+        trialNumber,
+
+        trialOrder:
+          tableTrial.trialOrder,
+
+        taskId,
+
+        condition:
+          tableTrial.condition,
+
+        conditionOrder:
+          resolvedAssignment.conditionOrder,
+
+        participantLabel:
+          `Task ${tableTrial.trialOrder}`,
+
+        isFirstTrial:
+          tableTrial.trialOrder ===
+          1,
+
+        probeExposureNumber:
+          tableTrial.trialOrder,
+
+        probeNaive:
+          tableTrial.trialOrder ===
+          1,
+
+        trialId:
+          createCompositeTrialId(
             taskId,
+            trialNumber,
+          ),
 
-            condition:
-              definition.condition,
+        outerTaskNumber:
+          taskDefinition.outerTaskNumber,
 
-            conditionOrder:
-              definition.conditionOrder,
+        innerTaskNumber:
+          trialNumber,
 
-            participantLabel:
-              `Task ${task.outerTaskNumber}`,
+        globalOptionNumber,
 
-            isFirstTrial:
-              false,
-
-            probeExposureNumber:
-              0,
-
-            probeNaive:
-              false,
-
-            trialId:
-              createCompositeTrialId(
-                taskId,
-                definition.trialNumber,
-              ),
-
-            outerTaskNumber:
-              task.outerTaskNumber,
-
-            innerTaskNumber:
-              definition.trialNumber,
-
-            globalOptionNumber,
-
-            /*
-             * Compatibility name retained for existing exports.
-             * This is a stable 1–9 option identifier, not trial chronology.
-             */
-            globalTrialNumber:
-              globalOptionNumber,
-          } satisfies StudyTrialAssignment;
-        },
-      ),
+        globalTrialNumber:
+          globalOptionNumber,
+      } satisfies StudyTrialAssignment;
+    },
   );
 }
 
@@ -907,13 +1131,9 @@ function createTrialProgress(
   };
 }
 
-function createStateForParticipant(
-  participantId:
-    string,
-
-  conditionOrder:
-    ConditionOrder =
-      DEFAULT_CONDITION_ORDER,
+function createStateForResolvedAssignment(
+  resolvedAssignment:
+    ResolvedParticipantAssignment,
 ): StudySessionState {
   const createdAtIso =
     new Date()
@@ -921,19 +1141,33 @@ function createStateForParticipant(
 
   const assignments =
     createAssignments(
-      conditionOrder,
+      resolvedAssignment,
     );
 
   return {
     participantId:
-      normalizeParticipantId(
-        participantId,
-      ),
+      resolvedAssignment.participantToken,
+
+    participantToken:
+      resolvedAssignment.participantToken,
+
+    assignmentStatus:
+      "valid",
+
+    assignmentTableVersion:
+      APPROVED_ASSIGNMENT_TABLE_VERSION,
+
+    assignmentSequenceId:
+      resolvedAssignment.sequenceId,
+
+    assignmentError:
+      null,
 
     sessionId:
       createSessionId(),
 
-    conditionOrder,
+    conditionOrder:
+      resolvedAssignment.conditionOrder,
 
     assignments,
 
@@ -984,6 +1218,101 @@ function createStateForParticipant(
     postExperimentCsvExportedAtIso:
       null,
 
+    delayedRecallCollectedAtIso:
+      null,
+
+    disclosureViewedAtIso:
+      null,
+
+    studyCompletedAtIso:
+      null,
+  };
+}
+
+function createInactiveState(
+  assignmentStatus:
+    Exclude<
+      AssignmentStatus,
+      "valid"
+    >,
+
+  assignmentError:
+    string | null,
+): StudySessionState {
+  return {
+    participantId:
+      "",
+
+    participantToken:
+      "",
+
+    assignmentStatus,
+
+    assignmentTableVersion:
+      null,
+
+    assignmentSequenceId:
+      null,
+
+    assignmentError,
+
+    sessionId:
+      "",
+
+    conditionOrder:
+      DEFAULT_CONDITION_ORDER,
+
+    assignments:
+      [],
+
+    trials:
+      [],
+
+    stage:
+      "procedure",
+
+    procedureAccepted:
+      false,
+
+    currentTaskId:
+      null,
+
+    currentTrialNumber:
+      null,
+
+    postExperimentCompleted:
+      false,
+
+    disclosureViewed:
+      false,
+
+    studyCompleted:
+      false,
+
+    sessionCreatedAtIso:
+      null,
+
+    sessionStartedAtIso:
+      null,
+
+    procedureAcceptedAtIso:
+      null,
+
+    postExperimentStartedAtIso:
+      null,
+
+    postExperimentCompletedAtIso:
+      null,
+
+    postExperimentCsvExportStatus:
+      "not_ready",
+
+    postExperimentCsvExportedAtIso:
+      null,
+
+    delayedRecallCollectedAtIso:
+      null,
+
     disclosureViewedAtIso:
       null,
 
@@ -1030,17 +1359,10 @@ function getCompletedTrialCountFromTrials(
   trials:
     StudyTrialProgress[],
 ): number {
-  return STUDY_TASKS.filter(
-    (task) =>
-      trials.some(
-        (trial) =>
-          getTaskIdFromAssignment(
-            trial,
-          ) ===
-            task.taskId &&
-          trial.status ===
-            "questionnaire_complete",
-      ),
+  return trials.filter(
+    (trial) =>
+      trial.status ===
+      "questionnaire_complete",
   ).length;
 }
 
@@ -1081,17 +1403,14 @@ function areAllTrialsCompleteFromTrials(
   trials:
     StudyTrialProgress[],
 ): boolean {
-  return STUDY_TASKS.every(
-    (task) =>
-      trials.some(
-        (trial) =>
-          getTaskIdFromAssignment(
-            trial,
-          ) ===
-            task.taskId &&
-          trial.status ===
-            "questionnaire_complete",
-      ),
+  return (
+    trials.length ===
+      TOTAL_STUDY_TRIALS &&
+    trials.every(
+      (trial) =>
+        trial.status ===
+        "questionnaire_complete",
+    )
   );
 }
 
@@ -1141,35 +1460,31 @@ function sessionConfigurationIsValid(
   trials:
     StudyTrialProgress[],
 
-  conditionOrder:
-    ConditionOrder,
+  expectedAssignments:
+    StudyTrialAssignment[],
 ): boolean {
   if (
     assignments.length !==
-      TOTAL_AVAILABLE_TRIAL_OPTIONS ||
+      TOTAL_STUDY_TRIALS ||
     trials.length !==
-      TOTAL_AVAILABLE_TRIAL_OPTIONS
+      TOTAL_STUDY_TRIALS ||
+    expectedAssignments.length !==
+      TOTAL_STUDY_TRIALS
   ) {
     return false;
   }
 
-  const definitions =
-    createAssignments(
-      conditionOrder,
-    );
-
-  const definitionsArePresent =
-    definitions.every(
-      (definition) => {
+  return expectedAssignments.every(
+      (expectedAssignment) => {
         const identity:
           TrialIdentity = {
             taskId:
               getTaskIdFromAssignment(
-                definition,
+                expectedAssignment,
               ),
 
             trialNumber:
-              definition.trialNumber,
+              expectedAssignment.trialNumber,
           };
 
         const assignment =
@@ -1192,78 +1507,26 @@ function sessionConfigurationIsValid(
 
         return (
           assignment?.condition ===
-            definition.condition &&
+            expectedAssignment.condition &&
           assignment?.conditionOrder ===
-            definition.conditionOrder &&
+            expectedAssignment.conditionOrder &&
+          assignment?.trialOrder ===
+            expectedAssignment.trialOrder &&
           trial?.condition ===
-            definition.condition &&
+            expectedAssignment.condition &&
           trial?.conditionOrder ===
-            definition.conditionOrder
+            expectedAssignment.conditionOrder &&
+          trial?.trialOrder ===
+            expectedAssignment.trialOrder
         );
       },
     );
-
-  if (
-    !definitionsArePresent
-  ) {
-    return false;
-  }
-
-  const selectedTrials =
-    getSelectedTrials(
-      trials,
-    );
-
-  const selectedTaskIds =
-    selectedTrials.map(
-      getTaskIdFromAssignment,
-    );
-
-  if (
-    new Set(
-      selectedTaskIds,
-    ).size !==
-    selectedTaskIds.length
-  ) {
-    return false;
-  }
-
-  const chronologicalOrders =
-    selectedTrials.map(
-      (trial) =>
-        Number(
-          trial.trialOrder,
-        ),
-    );
-
-  return chronologicalOrders.every(
-    (
-      order,
-      index,
-    ) =>
-      order ===
-        index +
-          1 &&
-      selectedTrials[
-        index
-      ].probeExposureNumber ===
-        order &&
-      selectedTrials[
-        index
-      ].isFirstTrial ===
-        (order ===
-          1) &&
-      selectedTrials[
-        index
-      ].probeNaive ===
-        (order ===
-          1),
-  );
 }
 
 const initialState =
-  createStateForParticipant(
-    DEFAULT_PARTICIPANT_ID,
+  createInactiveState(
+    "uninitialized",
+    null,
   );
 
 export const useStudySessionStore =
@@ -1426,105 +1689,133 @@ export const useStudySessionStore =
         return true;
       }
 
+      function initializeFromTokenInput(
+        participantTokenInput:
+          string | null | undefined,
+
+        forceNewSession =
+          false,
+      ): boolean {
+        removeLegacyPersistedState();
+
+        const normalizedToken =
+          normalizeParticipantToken(
+            participantTokenInput,
+          );
+
+        const resolvedAssignment =
+          resolveParticipantAssignment(
+            normalizedToken,
+          );
+
+        if (
+          !resolvedAssignment
+        ) {
+          const assignmentError =
+            !STATIC_ASSIGNMENT_TABLE_IS_VALID
+              ? "assignment_table_invalid"
+              : normalizedToken.length ===
+                  0
+                ? "missing_token"
+                : "invalid_token";
+
+          set(
+            createInactiveState(
+              "invalid",
+              assignmentError,
+            ),
+          );
+
+          return false;
+        }
+
+        const expectedAssignments =
+          createAssignments(
+            resolvedAssignment,
+          );
+
+        const state =
+          get();
+
+        const existingSessionIsValid =
+          !forceNewSession &&
+          state.assignmentStatus ===
+            "valid" &&
+          state.participantToken ===
+            resolvedAssignment.participantToken &&
+          state.participantId ===
+            resolvedAssignment.participantToken &&
+          state.sessionId.length >
+            0 &&
+          state.assignmentTableVersion ===
+            APPROVED_ASSIGNMENT_TABLE_VERSION &&
+          state.assignmentSequenceId ===
+            resolvedAssignment.sequenceId &&
+          state.conditionOrder ===
+            resolvedAssignment.conditionOrder &&
+          sessionConfigurationIsValid(
+            state.assignments,
+            state.trials,
+            expectedAssignments,
+          );
+
+        if (
+          existingSessionIsValid
+        ) {
+          return true;
+        }
+
+        // ADVISER FIX: A validated token creates its immutable three-trial session.
+        set(
+          createStateForResolvedAssignment(
+            resolvedAssignment,
+          ),
+        );
+
+        return true;
+      }
+
       return {
         ...initialState,
 
+        initializeSessionFromToken: (
+          participantToken,
+        ) =>
+          initializeFromTokenInput(
+            participantToken,
+          ),
+
         initializeSession: (
           participantId,
-          conditionOrder =
-            DEFAULT_CONDITION_ORDER,
         ) => {
-          removeLegacyPersistedState();
-
-          set(
-            createStateForParticipant(
-              participantId,
-              conditionOrder,
-            ),
+          initializeFromTokenInput(
+            participantId,
           );
         },
 
         ensureSession: (
           participantId,
-          conditionOrder =
-            get().conditionOrder,
         ) => {
-          const normalizedParticipantId =
-            normalizeParticipantId(
-              participantId,
-            );
-
-          const state =
-            get();
-
-          const sessionIsValid =
-            state.participantId ===
-              normalizedParticipantId &&
-            state.sessionId.length >
-              0 &&
-            state.conditionOrder ===
-              conditionOrder &&
-            sessionConfigurationIsValid(
-              state.assignments,
-              state.trials,
-              conditionOrder,
-            );
-
-          if (
-            sessionIsValid
-          ) {
-            return;
-          }
-
-          set(
-            createStateForParticipant(
-              normalizedParticipantId,
-              conditionOrder,
-            ),
+          initializeFromTokenInput(
+            participantId,
           );
         },
 
         setConditionOrder: (
           conditionOrder,
         ) => {
-          if (
-            !isConditionOrder(
-              conditionOrder,
-            )
-          ) {
-            return false;
-          }
+          void conditionOrder;
 
-          const state =
-            get();
-
-          if (
-            state.procedureAccepted ||
-            state.currentTrialNumber !==
-              null
-          ) {
-            return false;
-          }
-
-          set(
-            createStateForParticipant(
-              state.participantId,
-              conditionOrder,
-            ),
-          );
-
-          return true;
+          // ADVISER FIX: Condition order is immutable and comes only from the token table.
+          return false;
         },
 
         setParticipantId: (
           participantId,
         ) => {
-          set({
-            participantId:
-              normalizeParticipantId(
-                participantId,
-              ),
-          });
+          initializeFromTokenInput(
+            participantId,
+          );
         },
 
         acceptProcedure:
@@ -1533,7 +1824,13 @@ export const useStudySessionStore =
               get();
 
             if (
-              state.studyCompleted
+              state.studyCompleted ||
+              state.assignmentStatus !==
+                "valid" ||
+              state.assignments.length !==
+                TOTAL_STUDY_TRIALS ||
+              state.sessionId.length ===
+                0
             ) {
               return;
             }
@@ -1559,13 +1856,95 @@ export const useStudySessionStore =
             });
           },
 
-        /*
-         * Deliberately disabled: task and condition allocation comes from the
-         * researcher's external Excel sheet, never from application logic.
-         */
         startNextTrial:
-          () =>
-            undefined,
+          () => {
+            const state =
+              get();
+
+            if (
+              state.assignmentStatus !==
+                "valid" ||
+              !state.procedureAccepted ||
+              state.studyCompleted ||
+              state.postExperimentCompleted
+            ) {
+              return undefined;
+            }
+
+            const openTrial =
+              state.trials.find(
+                (trial) =>
+                  trial.status ===
+                    "active" ||
+                  trial.status ===
+                    "submitted",
+              );
+
+            if (
+              openTrial
+            ) {
+              return getAssignmentForIdentity(
+                state.assignments,
+                {
+                  taskId:
+                    getTaskIdFromAssignment(
+                      openTrial,
+                    ),
+
+                  trialNumber:
+                    openTrial.trialNumber,
+                },
+              );
+            }
+
+            const nextAssignment =
+              state.assignments
+                .slice()
+                .sort(
+                  (
+                    first,
+                    second,
+                  ) =>
+                    Number(
+                      first.trialOrder,
+                    ) -
+                    Number(
+                      second.trialOrder,
+                    ),
+                )
+                .find(
+                  (assignment) => {
+                    const trial =
+                      getTrialForIdentity(
+                        state.trials,
+                        {
+                          taskId:
+                            getTaskIdFromAssignment(
+                              assignment,
+                            ),
+
+                          trialNumber:
+                            assignment.trialNumber,
+                        },
+                      );
+
+                    return trial?.status !==
+                      "questionnaire_complete";
+                  },
+                );
+
+            if (
+              !nextAssignment
+            ) {
+              return undefined;
+            }
+
+            // ADVISER FIX: Advance only to the next frozen token assignment.
+            return get().startTrial(
+              nextAssignment.trialNumber,
+              nextAssignment.taskId,
+            );
+          },
 
         startTrial: (
           trialNumber,
@@ -1575,6 +1954,8 @@ export const useStudySessionStore =
             get();
 
           if (
+            state.assignmentStatus !==
+              "valid" ||
             !state.procedureAccepted ||
             state.studyCompleted ||
             state.postExperimentCompleted
@@ -1633,97 +2014,74 @@ export const useStudySessionStore =
             return undefined;
           }
 
-          const anotherOptionForThisProblemStarted =
-            state.trials.some(
-              (trial) =>
-                !trialMatchesIdentity(
-                  trial,
-                  identity,
-                ) &&
-                getTaskIdFromAssignment(
-                  trial,
-                ) ===
-                  resolvedTaskId &&
-                trialHasStarted(
-                  trial,
-                ),
-            );
-
-          if (
-            anotherOptionForThisProblemStarted
-          ) {
-            return undefined;
-          }
-
-          const otherOpenTrial =
+          const openTrial =
             state.trials.find(
               (trial) =>
-                !trialMatchesIdentity(
-                  trial,
-                  identity,
-                ) &&
-                (
-                  trial.status ===
-                    "active" ||
-                  trial.status ===
-                    "submitted"
-                ),
+                trial.status ===
+                  "active" ||
+                trial.status ===
+                  "submitted",
             );
 
           if (
-            otherOpenTrial
-          ) {
-            return undefined;
-          }
-
-          const isNewSelection =
-            !trialHasStarted(
-              requestedTrial,
-            );
-
-          const chronologicalTrialOrderCandidate =
-            isNewSelection
-              ? getSelectedTrials(
-                  state.trials,
-                ).length +
-                1
-              : Number(
-                  requestedTrial.trialOrder,
-                );
-
-          if (
-            !isStudyTrialOrder(
-              chronologicalTrialOrderCandidate,
+            openTrial &&
+            !trialMatchesIdentity(
+              openTrial,
+              identity,
             )
           ) {
             return undefined;
           }
 
-          const chronologicalTrialOrder:
-            StudyTrialOrder =
-              chronologicalTrialOrderCandidate;
+          const nextAssignment =
+            state.assignments
+              .slice()
+              .sort(
+                (
+                  first,
+                  second,
+                ) =>
+                  Number(
+                    first.trialOrder,
+                  ) -
+                  Number(
+                    second.trialOrder,
+                  ),
+              )
+              .find(
+                (assignment) => {
+                  const trial =
+                    getTrialForIdentity(
+                      state.trials,
+                      {
+                        taskId:
+                          getTaskIdFromAssignment(
+                            assignment,
+                          ),
 
-          const runtimeAssignment:
-            StudyTrialAssignment = {
-              ...storedAssignment,
+                        trialNumber:
+                          assignment.trialNumber,
+                      },
+                    );
 
-              trialOrder:
-                chronologicalTrialOrder,
+                  return trial?.status !==
+                    "questionnaire_complete";
+                },
+              );
 
-              participantLabel:
-                `Task ${chronologicalTrialOrder}`,
+          if (
+            !nextAssignment ||
+            !trialMatchesIdentity(
+              nextAssignment,
+              identity,
+            )
+          ) {
+            return undefined;
+          }
 
-              isFirstTrial:
-                chronologicalTrialOrder ===
-                1,
-
-              probeExposureNumber:
-                chronologicalTrialOrder,
-
-              probeNaive:
-                chronologicalTrialOrder ===
-                1,
-            };
+          // ADVISER FIX: Direct URLs cannot bypass the token's frozen trial order.
+          const runtimeAssignment =
+            storedAssignment;
 
           const startedAtIso =
             requestedTrial.startedAtIso ??
@@ -1742,21 +2100,6 @@ export const useStudySessionStore =
                 "submitted"
                 ? "trial_questionnaire"
                 : "task",
-
-            assignments:
-              state.assignments.map(
-                (assignment) =>
-                  trialMatchesIdentity(
-                    assignment,
-                    identity,
-                  )
-                    ? {
-                        ...assignment,
-
-                        ...runtimeAssignment,
-                      }
-                    : assignment,
-              ),
 
             trials:
               state.trials.map(
@@ -1906,18 +2249,7 @@ export const useStudySessionStore =
             return false;
           }
 
-          /*
-           * Early submission is rejected at the session-state boundary.
-           * The caller may log submit_attempt, but no submitted state,
-           * trial end, or questionnaire navigation is created before probe.
-           */
-          if (
-            trial.probeShownAtIso ===
-            null
-          ) {
-            return false;
-          }
-
+          // ADVISER FIX: Probe acknowledgement and compliance do not gate a valid submission.
           const submittedAtIso =
             trial.submittedAtIso ??
             new Date()
@@ -2118,17 +2450,12 @@ export const useStudySessionStore =
                         questionnaireCompletedAtIso:
                           completedAtIso,
 
+                        // ADVISER FIX: Final trial files wait for delayed post-experiment recall.
                         eventsCsvExportStatus:
-                          item.eventsCsvExportStatus ===
-                          "exported"
-                            ? "exported"
-                            : "ready",
+                          "not_ready",
 
                         summaryCsvExportStatus:
-                          item.summaryCsvExportStatus ===
-                          "exported"
-                            ? "exported"
-                            : "ready",
+                          "not_ready",
 
                         exportErrorMessage:
                           undefined,
@@ -2184,8 +2511,12 @@ export const useStudySessionStore =
           if (
             status !==
               "not_ready" &&
-            trial.status !==
-              "questionnaire_complete"
+            (
+              trial.status !==
+                "questionnaire_complete" ||
+              state.delayedRecallCollectedAtIso ===
+                null
+            )
           ) {
             return false;
           }
@@ -2318,12 +2649,6 @@ export const useStudySessionStore =
                 state.postExperimentStartedAtIso ??
                 new Date()
                   .toISOString(),
-
-              postExperimentCsvExportStatus:
-                state.postExperimentCsvExportStatus ===
-                  "exported"
-                  ? "exported"
-                  : "ready",
             });
 
             return true;
@@ -2337,7 +2662,9 @@ export const useStudySessionStore =
             if (
               !areAllTrialsCompleteFromTrials(
                 state.trials,
-              )
+              ) ||
+              state.delayedRecallCollectedAtIso ===
+                null
             ) {
               return false;
             }
@@ -2397,7 +2724,11 @@ export const useStudySessionStore =
           if (
             status !==
               "not_ready" &&
-            !allTrialsComplete
+            (
+              !allTrialsComplete ||
+              state.delayedRecallCollectedAtIso ===
+                null
+            )
           ) {
             return false;
           }
@@ -2429,6 +2760,61 @@ export const useStudySessionStore =
             "exported",
             exportedAtIso,
           ),
+
+        markDelayedRecallCollected:
+          () => {
+            const state =
+              get();
+
+            if (
+              !areAllTrialsCompleteFromTrials(
+                state.trials,
+              )
+            ) {
+              return false;
+            }
+
+            const collectedAtIso =
+              state.delayedRecallCollectedAtIso ??
+              new Date()
+                .toISOString();
+
+            // ADVISER FIX: Only completed delayed recall releases final exports.
+            set({
+              delayedRecallCollectedAtIso:
+                collectedAtIso,
+
+              trials:
+                state.trials.map(
+                  (trial) => ({
+                    ...trial,
+
+                    eventsCsvExportStatus:
+                      trial.eventsCsvExportStatus ===
+                        "exported"
+                        ? "exported"
+                        : "ready",
+
+                    summaryCsvExportStatus:
+                      trial.summaryCsvExportStatus ===
+                        "exported"
+                        ? "exported"
+                        : "ready",
+
+                    exportErrorMessage:
+                      undefined,
+                  }),
+                ),
+
+              postExperimentCsvExportStatus:
+                state.postExperimentCsvExportStatus ===
+                  "exported"
+                  ? "exported"
+                  : "ready",
+            });
+
+            return true;
+          },
 
         markDisclosureViewed:
           () => {
@@ -2476,10 +2862,6 @@ export const useStudySessionStore =
               new Date()
                 .toISOString();
 
-            rememberNextParticipantNumber(
-              state.participantId,
-            );
-
             set({
               studyCompleted:
                 true,
@@ -2521,8 +2903,52 @@ export const useStudySessionStore =
           },
 
         getNextAssignment:
-          () =>
-            undefined,
+          () => {
+            const state =
+              get();
+
+            const nextAssignment =
+              state.assignments
+                .slice()
+                .sort(
+                  (
+                    first,
+                    second,
+                  ) =>
+                    Number(
+                      first.trialOrder,
+                    ) -
+                    Number(
+                      second.trialOrder,
+                    ),
+                )
+                .find(
+                  (assignment) => {
+                    const trial =
+                      getTrialForIdentity(
+                        state.trials,
+                        {
+                          taskId:
+                            getTaskIdFromAssignment(
+                              assignment,
+                            ),
+
+                          trialNumber:
+                            assignment.trialNumber,
+                        },
+                      );
+
+                    return trial?.status ===
+                      "pending";
+                  },
+                );
+
+            return nextAssignment
+              ? cloneAssignment(
+                  nextAssignment,
+                )
+              : undefined;
+          },
 
         getTrialProgress: (
           trialNumber,
@@ -2573,45 +2999,40 @@ export const useStudySessionStore =
 
         resetSession: (
           participantId,
-          conditionOrder,
         ) => {
           removeLegacyPersistedState();
 
-          const currentParticipantId =
-            get().participantId;
+          const participantToken =
+            participantId ??
+            get().participantToken;
 
-          set(
-            createStateForParticipant(
-              participantId ??
-                currentParticipantId,
-              conditionOrder ??
-                get().conditionOrder,
-            ),
+          initializeFromTokenInput(
+            participantToken,
+            true,
           );
         },
 
         resetForNewParticipant: (
           participantId,
-          conditionOrder =
-            DEFAULT_CONDITION_ORDER,
         ) => {
           removeLegacyPersistedState();
 
-          const state =
-            get();
+          if (
+            participantId
+          ) {
+            initializeFromTokenInput(
+              participantId,
+              true,
+            );
 
-          const nextParticipantId =
-            participantId ??
-            (state.studyCompleted
-              ? getNextParticipantId(
-                  state.participantId,
-                )
-              : state.participantId);
+            return;
+          }
 
+          // ADVISER FIX: A new participant must enter with an explicit valid token.
           set(
-            createStateForParticipant(
-              nextParticipantId,
-              conditionOrder,
+            createInactiveState(
+              "uninitialized",
+              null,
             ),
           );
         },

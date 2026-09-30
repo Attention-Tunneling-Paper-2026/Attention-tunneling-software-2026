@@ -100,6 +100,46 @@ const AI_ANALYSIS_DELAY_MS =
 const IDLE_THRESHOLD_MS =
   10_000;
 
+const IDLE_LOOKBACK_MS =
+  60_000;
+
+const PROBE_FLOOR_MS =
+  240_000;
+
+const PROBE_INVEST_EDIT_COUNT =
+  6;
+
+const SOLVED_GRACE_MS =
+  3_000;
+
+const PROBE_CAP_MS =
+  480_000;
+
+type ProbeTriggerReason =
+  | "invest"
+  | "solved"
+  | "cap"
+  | "floor_clamped";
+
+interface IdleInterval {
+  startedAt:
+    number;
+
+  endedAt:
+    number;
+}
+
+interface ProbeCandidate {
+  reason:
+    Exclude<
+      ProbeTriggerReason,
+      "floor_clamped"
+    >;
+
+  dueAt:
+    number;
+}
+
 const TOTAL_TASK_DOMAINS =
   STUDY_TASK_IDS.length;
 
@@ -369,6 +409,148 @@ function getEditCategory(
     : "move_between_rooms";
 }
 
+function getEarliestProbeCandidate(
+  trialStartedAt:
+    number,
+
+  investDueAt:
+    number | null,
+
+  solvedDueAt:
+    number | null,
+): ProbeCandidate {
+  const candidates:
+    ProbeCandidate[] = [
+      ...(investDueAt ===
+      null
+        ? []
+        : [
+            {
+              reason:
+                "invest" as const,
+
+              dueAt:
+                investDueAt,
+            },
+          ]),
+      ...(solvedDueAt ===
+      null
+        ? []
+        : [
+            {
+              reason:
+                "solved" as const,
+
+              dueAt:
+                solvedDueAt,
+            },
+          ]),
+      {
+        reason:
+          "cap",
+
+        dueAt:
+          trialStartedAt +
+          PROBE_CAP_MS,
+      },
+    ];
+
+  const priority:
+    Record<
+      ProbeCandidate["reason"],
+      number
+    > = {
+      invest:
+        0,
+
+      solved:
+        1,
+
+      cap:
+        2,
+    };
+
+  return candidates.sort(
+    (
+      first,
+      second,
+    ) =>
+      first.dueAt -
+        second.dueAt ||
+      priority[
+        first.reason
+      ] -
+        priority[
+          second.reason
+        ],
+  )[0];
+}
+
+function getIdleMsInPreviousWindow(
+  onsetAt:
+    number,
+
+  completedIntervals:
+    IdleInterval[],
+
+  lastActivityAt:
+    number | null,
+): number {
+  const windowStartedAt =
+    onsetAt -
+    IDLE_LOOKBACK_MS;
+
+  const intervals = [
+    ...completedIntervals,
+  ];
+
+  // ADVISER FIX: Include the no-input interval still active at probe onset,
+  // independently of the threshold used to emit ordinary idle events.
+  if (
+    lastActivityAt !==
+      null
+  ) {
+    intervals.push({
+      startedAt:
+        lastActivityAt,
+
+      endedAt:
+        onsetAt,
+    });
+  }
+
+  const overlapMs =
+    intervals.reduce(
+      (
+        total,
+        interval,
+      ) =>
+        total +
+        Math.max(
+          0,
+          Math.min(
+            onsetAt,
+            interval.endedAt,
+          ) -
+            Math.max(
+              windowStartedAt,
+              interval.startedAt,
+            ),
+        ),
+      0,
+    );
+
+  return Math.max(
+    0,
+    Math.min(
+      IDLE_LOOKBACK_MS,
+      Math.round(
+        overlapMs,
+      ),
+    ),
+  );
+}
+
 function SymposiumSchedulerTrial({
   taskId,
   taskNumber,
@@ -393,9 +575,6 @@ function SymposiumSchedulerTrial({
 
   const TRIAL_DURATION_SECONDS =
     taskDefinition.durationSeconds;
-
-  const PROBE_ONSET_SECONDS =
-    semanticProbe.shownAfterSeconds;
 
   const PROBE_COLLAPSE_SECONDS =
     semanticProbe.collapseAfterSeconds;
@@ -536,6 +715,11 @@ function SymposiumSchedulerTrial({
       false,
     );
 
+  const probeAcknowledgedLoggedRef =
+    useRef(
+      false,
+    );
+
   const probeDeadlineCheckRef =
     useRef<
       (
@@ -559,6 +743,46 @@ function SymposiumSchedulerTrial({
   const idleLastActivityAtRef =
     useRef<number | null>(
       null,
+    );
+
+  const completedIdleIntervalsRef =
+    useRef<IdleInterval[]>(
+      [],
+    );
+
+  const acceptedEditCountRef =
+    useRef(
+      0,
+    );
+
+  const boardFirstFullyAssignedAtRef =
+    useRef<number | null>(
+      null,
+    );
+
+  const postCompleteAcceptedEditCountRef =
+    useRef(
+      0,
+    );
+
+  const investTriggerDueAtRef =
+    useRef<number | null>(
+      null,
+    );
+
+  const solvedStateReachedAtRef =
+    useRef<number | null>(
+      null,
+    );
+
+  const solvedTriggerDueAtRef =
+    useRef<number | null>(
+      null,
+    );
+
+  const probeOpenedFromBellRef =
+    useRef(
+      false,
     );
 
   const recordActivityRef =
@@ -893,6 +1117,22 @@ function SymposiumSchedulerTrial({
       return;
     }
 
+    completedIdleIntervalsRef.current = [
+      ...completedIdleIntervalsRef.current.filter(
+        (interval) =>
+          interval.endedAt >=
+          now -
+            IDLE_LOOKBACK_MS,
+      ),
+      {
+        startedAt:
+          idleStartedAt,
+
+        endedAt:
+          now,
+      },
+    ];
+
     const trialStartedAt =
       trialStartedAtRef.current;
 
@@ -947,15 +1187,95 @@ function SymposiumSchedulerTrial({
       taskId,
     );
 
-  /*
-   * Manual submission requires the current arrangement to satisfy the
-   * task's three main constraints. Semantic probe compliance is measured
-   * but never gates submission.
-   */
-  const manualSubmitAllowed =
-    assistantReady &&
-    !trialSubmitted &&
-    currentSnapshot.preProbeFeasible;
+  function armSolvedTriggerCandidate(
+    snapshot:
+      ReturnType<
+        typeof createScheduleSnapshot
+      >,
+
+    reachedAt:
+      number,
+  ) {
+    if (
+      solvedTriggerDueAtRef.current !==
+        null ||
+      !snapshot.completeAssignment ||
+      snapshot.speakerConflictPairCount !==
+        0
+    ) {
+      return;
+    }
+
+    solvedStateReachedAtRef.current =
+      reachedAt;
+
+    solvedTriggerDueAtRef.current =
+      reachedAt +
+      SOLVED_GRACE_MS;
+  }
+
+  function registerAcceptedScheduleEdit(
+    previousSnapshot:
+      ReturnType<
+        typeof createScheduleSnapshot
+      >,
+
+    nextSnapshot:
+      ReturnType<
+        typeof createScheduleSnapshot
+      >,
+
+    acceptedAt:
+      number,
+  ) {
+    acceptedEditCountRef.current +=
+      1;
+
+    if (
+      boardFirstFullyAssignedAtRef.current ===
+        null &&
+      previousSnapshot.completeAssignment
+    ) {
+      boardFirstFullyAssignedAtRef.current =
+        trialStartedAtRef.current ??
+        acceptedAt;
+    }
+
+    const boardWasAlreadyFullyAssigned =
+      boardFirstFullyAssignedAtRef.current !==
+      null;
+
+    if (
+      boardWasAlreadyFullyAssigned
+    ) {
+      postCompleteAcceptedEditCountRef.current +=
+        1;
+
+      if (
+        postCompleteAcceptedEditCountRef.current ===
+          PROBE_INVEST_EDIT_COUNT &&
+        investTriggerDueAtRef.current ===
+          null
+      ) {
+        investTriggerDueAtRef.current =
+          acceptedAt;
+      }
+    } else if (
+      nextSnapshot.completeAssignment
+    ) {
+      // ADVISER FIX: The completing A/B edit establishes, but does not increment, the investment counter.
+      boardFirstFullyAssignedAtRef.current =
+        acceptedAt;
+
+      postCompleteAcceptedEditCountRef.current =
+        0;
+    }
+
+    armSolvedTriggerCandidate(
+      nextSnapshot,
+      acceptedAt,
+    );
+  }
 
   const interactionDisabled =
     !assistantReady ||
@@ -970,6 +1290,33 @@ function SymposiumSchedulerTrial({
 
     idleLastActivityAtRef.current =
       null;
+
+    completedIdleIntervalsRef.current =
+      [];
+
+    acceptedEditCountRef.current =
+      0;
+
+    boardFirstFullyAssignedAtRef.current =
+      null;
+
+    postCompleteAcceptedEditCountRef.current =
+      0;
+
+    investTriggerDueAtRef.current =
+      null;
+
+    solvedStateReachedAtRef.current =
+      null;
+
+    solvedTriggerDueAtRef.current =
+      null;
+
+    probeOpenedFromBellRef.current =
+      false;
+
+    probeAcknowledgedLoggedRef.current =
+      false;
   }, [
     taskId,
     taskNumber,
@@ -1028,18 +1375,25 @@ function SymposiumSchedulerTrial({
           ?.probeCollapsedAtIso ===
           "string";
 
+      const persistedProbeAcknowledged =
+        typeof trialProgress
+          ?.probeAcknowledgedAtIso ===
+          "string";
+
       probeCollapsedLoggedRef.current =
         persistedProbeCollapsed;
 
       setProbeCollapsed(
-        persistedProbeCollapsed,
+        persistedProbeCollapsed ||
+          persistedProbeAcknowledged,
       );
 
       setProbeAcknowledged(
-        typeof trialProgress
-          ?.probeAcknowledgedAtIso ===
-          "string",
+        persistedProbeAcknowledged,
       );
+
+      probeAcknowledgedLoggedRef.current =
+        persistedProbeAcknowledged;
     }
 
     if (
@@ -1384,6 +1738,54 @@ function SymposiumSchedulerTrial({
         expectedPlacements,
       );
 
+    const studySessionState =
+      useStudySessionStore.getState();
+
+    const resolvedOrderedPlan =
+      studySessionState.assignments
+        .slice()
+        .sort(
+          (
+            first,
+            second,
+          ) =>
+            Number(
+              first.trialOrder,
+            ) -
+            Number(
+              second.trialOrder,
+            ),
+        )
+        .map(
+          (assignment) => ({
+            trialOrder:
+              assignment.trialOrder,
+
+            taskId:
+              assignment.taskId,
+
+            condition:
+              assignment.condition,
+          }),
+        );
+
+    if (
+      initialSnapshot.completeAssignment &&
+      boardFirstFullyAssignedAtRef.current ===
+        null
+    ) {
+      // ADVISER FIX: Condition C begins counting accepted investment edits at trial start.
+      boardFirstFullyAssignedAtRef.current =
+        trialStartedAt;
+    }
+
+    armSolvedTriggerCandidate(
+      initialSnapshot,
+      trialAlreadyStarted
+        ? getCurrentTimeMs()
+        : trialStartedAt,
+    );
+
     stateHistoryRef.current = [
       initialSnapshot.stateHash,
     ];
@@ -1399,6 +1801,9 @@ function SymposiumSchedulerTrial({
     addEvent({
 
       ...eventIdentity,
+      participantToken:
+        studySessionState.participantToken,
+
         eventType:
           "trial_start",
 
@@ -1539,12 +1944,21 @@ function SymposiumSchedulerTrial({
         trialDurationSeconds:
           TRIAL_DURATION_SECONDS,
 
-        probeOnsetSeconds:
-          PROBE_ONSET_SECONDS,
+        // ADVISER FIX: Export the shared state-based policy, never the retired seven-minute onset.
+        probeTriggerPolicyVersion:
+          "state_based_v1",
 
-        configuredProbeOnsetMs:
-          PROBE_ONSET_SECONDS *
-          1000,
+        probeFloorMs:
+          PROBE_FLOOR_MS,
+
+        probeInvestAcceptedEditCount:
+          PROBE_INVEST_EDIT_COUNT,
+
+        solvedGraceMs:
+          SOLVED_GRACE_MS,
+
+        probeCapMs:
+          PROBE_CAP_MS,
 
         probeCollapseSeconds:
           PROBE_COLLAPSE_SECONDS,
@@ -1563,6 +1977,17 @@ function SymposiumSchedulerTrial({
 
         probeVersion:
           semanticProbe.version,
+
+        participantToken:
+          studySessionState.participantToken,
+
+        assignmentTableVersion:
+          studySessionState.assignmentTableVersion,
+
+        assignmentSequenceId:
+          studySessionState.assignmentSequenceId,
+
+        resolvedOrderedPlan,
 
         scoringVersion:
           taskDefinition.scoringVersion,
@@ -1639,14 +2064,148 @@ function SymposiumSchedulerTrial({
   ]);
 
   useEffect(() => {
+    const timerStartedAt =
+      trialStartedAtRef.current;
+
     if (
       !assistantReady ||
       trialSubmitted ||
-      trialStartedAtRef.current ===
+      timerStartedAt ===
         null
     ) {
       return;
     }
+
+    let probeDeadlineTimeoutId:
+      number | null =
+        null;
+
+    let collapseDeadlineTimeoutId:
+      number | null =
+        null;
+
+    const clearProbeDeadlineTimeout =
+      () => {
+        if (
+          probeDeadlineTimeoutId ===
+          null
+        ) {
+          return;
+        }
+
+        window.clearTimeout(
+          probeDeadlineTimeoutId,
+        );
+
+        probeDeadlineTimeoutId =
+          null;
+      };
+
+    const clearCollapseDeadlineTimeout =
+      () => {
+        if (
+          collapseDeadlineTimeoutId ===
+          null
+        ) {
+          return;
+        }
+
+        window.clearTimeout(
+          collapseDeadlineTimeoutId,
+        );
+
+        collapseDeadlineTimeoutId =
+          null;
+      };
+
+    const rearmDeadlineTimeouts =
+      (
+        now =
+          getCurrentTimeMs(),
+      ) => {
+        clearProbeDeadlineTimeout();
+
+        const startedAt =
+          trialStartedAtRef.current;
+
+        if (
+          startedAt !==
+            null &&
+          probeShownAtRef.current ===
+            null
+        ) {
+          const candidate =
+            getEarliestProbeCandidate(
+              startedAt,
+              investTriggerDueAtRef.current,
+              solvedTriggerDueAtRef.current,
+            );
+
+          const probeDeadlineAt =
+            Math.max(
+              startedAt +
+                PROBE_FLOOR_MS,
+              candidate.dueAt,
+            );
+
+          probeDeadlineTimeoutId =
+            window.setTimeout(
+              () => {
+                evaluateDeadlines();
+              },
+              Math.max(
+                0,
+                probeDeadlineAt -
+                  now,
+              ),
+            );
+        }
+
+        clearCollapseDeadlineTimeout();
+
+        const probeShownAt =
+          probeShownAtRef.current;
+
+        if (
+          probeShownAt !==
+            null &&
+          !probeAcknowledged &&
+          !probeCollapsed &&
+          !probeCollapsedLoggedRef.current
+        ) {
+          collapseDeadlineTimeoutId =
+            window.setTimeout(
+              () => {
+                evaluateDeadlines();
+              },
+              Math.max(
+                0,
+                probeShownAt +
+                  PROBE_COLLAPSE_SECONDS *
+                    1000 -
+                  now,
+              ),
+            );
+        }
+      };
+
+    const evaluateDeadlines =
+      (
+        now =
+          getCurrentTimeMs(),
+      ) => {
+        probeDeadlineCheckRef.current(
+          now,
+        );
+
+        collapseDeadlineCheckRef.current(
+          now,
+        );
+
+        rearmDeadlineTimeouts(
+          now,
+        );
+      };
 
     const updateRemainingTime =
       (
@@ -1680,13 +2239,14 @@ function SymposiumSchedulerTrial({
           ),
         );
 
-        probeDeadlineCheckRef.current(
+        evaluateDeadlines(
           now,
         );
+      };
 
-        collapseDeadlineCheckRef.current(
-          now,
-        );
+    const handleDeadlineEvent =
+      () => {
+        evaluateDeadlines();
       };
 
     const handleVisibilityChange =
@@ -1710,46 +2270,6 @@ function SymposiumSchedulerTrial({
 
     updateRemainingTime();
 
-    const startedAt =
-      trialStartedAtRef.current;
-
-    const probeDeadlineTimeoutId =
-      startedAt !==
-          null &&
-        probeShownAtRef.current ===
-          null
-        ? window.setTimeout(
-            updateRemainingTime,
-            Math.max(
-              0,
-              startedAt +
-                PROBE_ONSET_SECONDS *
-                  1000 -
-                getCurrentTimeMs(),
-            ),
-          )
-        : null;
-
-    const probeShownAt =
-      probeShownAtRef.current;
-
-    const collapseDeadlineTimeoutId =
-      probeShownAt !==
-          null &&
-        !probeAcknowledged &&
-        !probeCollapsed
-        ? window.setTimeout(
-            updateRemainingTime,
-            Math.max(
-              0,
-              probeShownAt +
-                PROBE_COLLAPSE_SECONDS *
-                  1000 -
-                getCurrentTimeMs(),
-            ),
-          )
-        : null;
-
     const intervalId =
       window.setInterval(
         updateRemainingTime,
@@ -1762,11 +2282,7 @@ function SymposiumSchedulerTrial({
           const now =
             getCurrentTimeMs();
 
-          probeDeadlineCheckRef.current(
-            now,
-          );
-
-          collapseDeadlineCheckRef.current(
+          evaluateDeadlines(
             now,
           );
         },
@@ -1778,6 +2294,31 @@ function SymposiumSchedulerTrial({
       handleVisibilityChange,
     );
 
+    window.addEventListener(
+      "focus",
+      handleDeadlineEvent,
+    );
+
+    window.addEventListener(
+      "blur",
+      handleDeadlineEvent,
+    );
+
+    document.addEventListener(
+      "pointermove",
+      handleDeadlineEvent,
+    );
+
+    document.addEventListener(
+      "pointerdown",
+      handleDeadlineEvent,
+    );
+
+    document.addEventListener(
+      "keydown",
+      handleDeadlineEvent,
+    );
+
     return () => {
       window.clearInterval(
         intervalId,
@@ -1787,27 +2328,38 @@ function SymposiumSchedulerTrial({
         deadlineIntervalId,
       );
 
-      if (
-        probeDeadlineTimeoutId !==
-          null
-      ) {
-        window.clearTimeout(
-          probeDeadlineTimeoutId,
-        );
-      }
+      clearProbeDeadlineTimeout();
 
-      if (
-        collapseDeadlineTimeoutId !==
-          null
-      ) {
-        window.clearTimeout(
-          collapseDeadlineTimeoutId,
-        );
-      }
+      clearCollapseDeadlineTimeout();
 
       document.removeEventListener(
         "visibilitychange",
         handleVisibilityChange,
+      );
+
+      window.removeEventListener(
+        "focus",
+        handleDeadlineEvent,
+      );
+
+      window.removeEventListener(
+        "blur",
+        handleDeadlineEvent,
+      );
+
+      document.removeEventListener(
+        "pointermove",
+        handleDeadlineEvent,
+      );
+
+      document.removeEventListener(
+        "pointerdown",
+        handleDeadlineEvent,
+      );
+
+      document.removeEventListener(
+        "keydown",
+        handleDeadlineEvent,
       );
     };
   }, [
@@ -1817,7 +2369,6 @@ function SymposiumSchedulerTrial({
     probeVisible,
     trialSubmitted,
     PROBE_COLLAPSE_SECONDS,
-    PROBE_ONSET_SECONDS,
     TRIAL_DURATION_SECONDS,
   ]);
 
@@ -2171,43 +2722,94 @@ function SymposiumSchedulerTrial({
           trialStartedAt,
       );
 
-    const configuredProbeOnsetMs =
-      PROBE_ONSET_SECONDS *
-      1000;
+    const floorAt =
+      trialStartedAt +
+      PROBE_FLOOR_MS;
+
+    const candidate =
+      getEarliestProbeCandidate(
+        trialStartedAt,
+        investTriggerDueAtRef.current,
+        solvedTriggerDueAtRef.current,
+      );
+
+    const displayAt =
+      Math.max(
+        floorAt,
+        candidate.dueAt,
+      );
 
     if (
-      elapsedMs >=
-        configuredProbeOnsetMs &&
-      probeShownAtRef.current ===
-        null &&
-      !probeAcknowledged &&
-      !trialSubmitted
+      now <
+        displayAt ||
+      probeShownAtRef.current !==
+        null ||
+      trialSubmitted
     ) {
-      const shownAt =
-        now;
+      return;
+    }
 
-      probeShownAtRef.current =
-        shownAt;
+    const triggerReason:
+      ProbeTriggerReason =
+        candidate.dueAt <
+          floorAt &&
+        candidate.reason !==
+          "cap"
+          ? "floor_clamped"
+          : candidate.reason;
 
-      markProbeShown(
-        taskNumber,
+    const shownAt =
+      now;
+
+    probeShownAtRef.current =
+      shownAt;
+
+    markProbeShown(
+      taskNumber,
+    );
+
+    setProbeVisible(
+      true,
+    );
+
+    const currentPlacements =
+      clonePlacements(
+        useSchedulerStore
+          .getState()
+          .placements,
       );
 
-      setProbeVisible(
-        true,
+    const snapshot =
+      createScheduleSnapshot(
+        currentPlacements,
+        taskId,
       );
 
-      const snapshot =
-        createScheduleSnapshot(
-          clonePlacements(
-            useSchedulerStore
-              .getState()
-              .placements,
-          ),
-                  taskId,
-        );
+    const probeOnsetMeasurements = {
+      triggerReason,
 
-      addEvent({
+      placedItemCount:
+        currentPlacements.length,
+
+      currentConflictCount:
+        snapshot.speakerConflictPairCount,
+
+      editsMadeSoFar:
+        acceptedEditCountRef.current,
+
+      hammingDistanceFromAI:
+        snapshot.hammingDistanceFromAI,
+
+      idleMsInPrevious60Seconds:
+        getIdleMsInPreviousWindow(
+          shownAt,
+          completedIdleIntervalsRef.current,
+          idleLastActivityAtRef.current,
+        ),
+    };
+
+    // ADVISER FIX: Emit one probe event with typed, snapshot-consistent onset fields.
+    addEvent({
 
         ...eventIdentity,
         eventType:
@@ -2221,6 +2823,21 @@ function SymposiumSchedulerTrial({
 
         phase:
           "post_probe",
+
+        triggerReason:
+          probeOnsetMeasurements.triggerReason,
+
+        placedItemCount:
+          probeOnsetMeasurements.placedItemCount,
+
+        currentConflictCount:
+          probeOnsetMeasurements.currentConflictCount,
+
+        editsMadeSoFar:
+          probeOnsetMeasurements.editsMadeSoFar,
+
+        idleMsInPrevious60Seconds:
+          probeOnsetMeasurements.idleMsInPrevious60Seconds,
 
         scheduleBefore:
           snapshot.canonicalSchedule,
@@ -2333,14 +2950,29 @@ function SymposiumSchedulerTrial({
             elapsedMs /
             1000,
 
-          configuredProbeOnsetMs,
-
           actualProbeOnsetMs:
             elapsedMs,
 
-          probeOnsetErrorMs:
-            elapsedMs -
-            configuredProbeOnsetMs,
+          ...probeOnsetMeasurements,
+
+          triggerCandidate:
+            candidate.reason,
+
+          triggerCandidateDueAtElapsedMs:
+            Math.max(
+              0,
+              candidate.dueAt -
+                trialStartedAt,
+            ),
+
+          probeFloorMs:
+            PROBE_FLOOR_MS,
+
+          solvedGraceMs:
+            SOLVED_GRACE_MS,
+
+          probeCapMs:
+            PROBE_CAP_MS,
 
           probeId:
             semanticProbe.id,
@@ -2396,7 +3028,6 @@ function SymposiumSchedulerTrial({
             snapshot.distanceToBestPostProbeSolution,
         },
       });
-    }
   };
 
   collapseDeadlineCheckRef.current = (
@@ -2615,6 +3246,28 @@ function SymposiumSchedulerTrial({
       return;
     }
 
+    if (
+      probeAcknowledged ||
+      probeAcknowledgedLoggedRef.current
+    ) {
+      setProbeCollapsed(
+        true,
+      );
+
+      probeOpenedFromBellRef.current =
+        false;
+
+      return;
+    }
+
+    probeAcknowledgedLoggedRef.current =
+      true;
+
+    const acknowledgementSource =
+      probeOpenedFromBellRef.current
+        ? "bell" as const
+        : "banner_ok" as const;
+
     const acknowledgedAt =
       getCurrentTimeMs();
 
@@ -2638,9 +3291,19 @@ function SymposiumSchedulerTrial({
               taskId,
       );
 
-    markProbeAcknowledged(
-      taskNumber,
-    );
+    const acknowledgementRecorded =
+      markProbeAcknowledged(
+        taskNumber,
+      );
+
+    if (
+      !acknowledgementRecorded
+    ) {
+      probeAcknowledgedLoggedRef.current =
+        false;
+
+      return;
+    }
 
     addEvent({
 
@@ -2661,7 +3324,7 @@ function SymposiumSchedulerTrial({
         latencyMs,
 
       probeAcknowledgmentSource:
-        "banner_ok",
+        acknowledgementSource,
 
       latencyFromProbeMs:
         latencyMs,
@@ -2709,6 +3372,8 @@ function SymposiumSchedulerTrial({
         acknowledgementLatencyMs:
           latencyMs,
 
+        acknowledgementSource,
+
         probeAcknowledged:
           true,
 
@@ -2735,9 +3400,16 @@ function SymposiumSchedulerTrial({
       true,
     );
 
+    // ADVISER FIX: First acknowledgement collapses to the persistent bell.
     setProbeCollapsed(
-      false,
+      true,
     );
+
+    probeCollapsedLoggedRef.current =
+      true;
+
+    probeOpenedFromBellRef.current =
+      false;
   }
 
   function handleOpenCollapsedProbe() {
@@ -2756,6 +3428,13 @@ function SymposiumSchedulerTrial({
             getCurrentTimeMs() -
               probeShownAtRef.current,
           );
+
+    if (
+      !probeAcknowledged
+    ) {
+      probeOpenedFromBellRef.current =
+        true;
+    }
 
     addEvent({
 
@@ -3314,6 +3993,21 @@ function SymposiumSchedulerTrial({
             .placements,
         );
 
+      const acceptedEditAt =
+        getCurrentTimeMs();
+
+      const nextSnapshot =
+        createScheduleSnapshot(
+          nextPlacements,
+          taskId,
+        );
+
+      registerAcceptedScheduleEdit(
+        previousSnapshot,
+        nextSnapshot,
+        acceptedEditAt,
+      );
+
       const probeActive =
         probeShownAtRef.current !==
         null;
@@ -3558,6 +4252,10 @@ function SymposiumSchedulerTrial({
               : null,
         },
       });
+
+      probeDeadlineCheckRef.current(
+        acceptedEditAt,
+      );
 
       setActiveTalkId(
         null,
@@ -3987,6 +4685,21 @@ function SymposiumSchedulerTrial({
           .getState()
           .placements,
       );
+
+    const acceptedEditAt =
+      getCurrentTimeMs();
+
+    const nextSnapshot =
+      createScheduleSnapshot(
+        nextPlacements,
+        taskId,
+      );
+
+    registerAcceptedScheduleEdit(
+      previousSnapshot,
+      nextSnapshot,
+      acceptedEditAt,
+    );
 
     const probeActive =
       probeShownAtRef.current !==
@@ -4489,6 +5202,10 @@ function SymposiumSchedulerTrial({
       },
     });
 
+    probeDeadlineCheckRef.current(
+      acceptedEditAt,
+    );
+
     setActiveTalkId(
       null,
     );
@@ -4529,142 +5246,7 @@ function SymposiumSchedulerTrial({
       typeof trialProgress?.probeShownAtIso ===
         "string";
 
-    if (
-      submissionReason ===
-        "submitted" &&
-      !probeWasShown
-    ) {
-      addEvent({
-        ...eventIdentity,
-        eventType:
-          "submit_attempt",
-        trialNumber:
-          taskNumber,
-        condition:
-          expectedCondition,
-        phase:
-          "pre_probe",
-        accepted:
-          false,
-        trialEndReason:
-          submissionReason,
-        scheduleBefore:
-          snapshot.canonicalSchedule,
-        scheduleAfter:
-          snapshot.canonicalSchedule,
-        stateHashBefore:
-          snapshot.stateHash,
-        stateHashAfter:
-          snapshot.stateHash,
-        structuralSignatureBefore:
-          snapshot.structuralSignature,
-        structuralSignatureAfter:
-          snapshot.structuralSignature,
-        scoreBefore:
-          snapshot.score.totalScore,
-        scoreAfter:
-          snapshot.score.totalScore,
-        scoreDelta:
-          0,
-        speakerConflictsBefore:
-          snapshot.speakerConflictPairCount,
-        speakerConflictsAfter:
-          snapshot.speakerConflictPairCount,
-        resultingViolations:
-          snapshot.resultingViolations,
-        violationCount:
-          snapshot.violationCount,
-        probeVisible:
-          false,
-        probeAcknowledged:
-          false,
-        metadata: {
-          ...eventIdentity,
-          taskNumber,
-          rejectionReason:
-            "probe_not_shown",
-          configuredProbeOnsetMs:
-            PROBE_ONSET_SECONDS *
-            1000,
-          boardPreserved:
-            true,
-          navigationBlocked:
-            true,
-        },
-      });
-
-      submitInProgressRef.current =
-        false;
-
-      return;
-    }
-
-    if (
-      submissionReason ===
-        "submitted" &&
-      !snapshot.preProbeFeasible
-    ) {
-      addEvent({
-        ...eventIdentity,
-        eventType:
-          "submit_attempt",
-        trialNumber:
-          taskNumber,
-        condition:
-          expectedCondition,
-        phase:
-          "post_probe",
-        accepted:
-          false,
-        trialEndReason:
-          submissionReason,
-        scheduleBefore:
-          snapshot.canonicalSchedule,
-        scheduleAfter:
-          snapshot.canonicalSchedule,
-        stateHashBefore:
-          snapshot.stateHash,
-        stateHashAfter:
-          snapshot.stateHash,
-        structuralSignatureBefore:
-          snapshot.structuralSignature,
-        structuralSignatureAfter:
-          snapshot.structuralSignature,
-        scoreBefore:
-          snapshot.score.totalScore,
-        scoreAfter:
-          snapshot.score.totalScore,
-        scoreDelta:
-          0,
-        speakerConflictsBefore:
-          snapshot.speakerConflictPairCount,
-        speakerConflictsAfter:
-          snapshot.speakerConflictPairCount,
-        resultingViolations:
-          snapshot.resultingViolations,
-        violationCount:
-          snapshot.violationCount,
-        probeVisible:
-          true,
-        probeAcknowledged,
-        metadata: {
-          ...eventIdentity,
-          taskNumber,
-          rejectionReason:
-            "task_constraints_unsatisfied",
-          boardPreserved:
-            true,
-          navigationBlocked:
-            true,
-        },
-      });
-
-      submitInProgressRef.current =
-        false;
-
-      return;
-    }
-
+    // ADVISER FIX: Submission is available for every active board state and never waits for the probe.
     setTrialLocked(
       true,
     );
@@ -4870,6 +5452,66 @@ function SymposiumSchedulerTrial({
     if (
       !submitted
     ) {
+      addEvent({
+        ...eventIdentity,
+        eventType:
+          "submit_attempt",
+        trialNumber:
+          taskNumber,
+        condition:
+          expectedCondition,
+        phase:
+          probeWasShown
+            ? "post_probe"
+            : "pre_probe",
+        accepted:
+          false,
+        trialEndReason:
+          submissionReason,
+        scheduleBefore:
+          snapshot.canonicalSchedule,
+        scheduleAfter:
+          snapshot.canonicalSchedule,
+        stateHashBefore:
+          snapshot.stateHash,
+        stateHashAfter:
+          snapshot.stateHash,
+        structuralSignatureBefore:
+          snapshot.structuralSignature,
+        structuralSignatureAfter:
+          snapshot.structuralSignature,
+        scoreBefore:
+          snapshot.score.totalScore,
+        scoreAfter:
+          snapshot.score.totalScore,
+        scoreDelta:
+          0,
+        speakerConflictsBefore:
+          snapshot.speakerConflictPairCount,
+        speakerConflictsAfter:
+          snapshot.speakerConflictPairCount,
+        resultingViolations:
+          snapshot.resultingViolations,
+        violationCount:
+          snapshot.violationCount,
+        probeVisible:
+          probeWasShown,
+        probeAcknowledged:
+          probeWasShown
+            ? probeAcknowledged
+            : false,
+        metadata: {
+          ...eventIdentity,
+          taskNumber,
+          rejectionReason:
+            "session_state_rejected",
+          boardPreserved:
+            true,
+          navigationBlocked:
+            true,
+        },
+      });
+
       submitInProgressRef.current =
         false;
 
@@ -4893,7 +5535,9 @@ function SymposiumSchedulerTrial({
         expectedCondition,
 
       phase:
-        "post_probe",
+        probeWasShown
+          ? "post_probe"
+          : "pre_probe",
 
       accepted:
         true,
@@ -5242,6 +5886,9 @@ function SymposiumSchedulerTrial({
         onPointerDownCapture={() => {
           recordActivityRef.current();
         }}
+        onPointerMoveCapture={() => {
+          recordActivityRef.current();
+        }}
         onKeyDownCapture={() => {
           recordActivityRef.current();
         }}
@@ -5293,13 +5940,11 @@ function SymposiumSchedulerTrial({
                 );
               }}
               disabled={
-                !manualSubmitAllowed ||
                 timerExpired
               }
             >
-              {timerExpired
-                ? "Submitting..."
-                : taskPresentation.submitLabel}
+              {/* ADVISER FIX: Keep the submit label stable without previewing the probe. */}
+              {taskPresentation.submitLabel}
             </button>
           </div>
         </header>
@@ -5324,6 +5969,8 @@ function SymposiumSchedulerTrial({
             handleOpenCollapsedProbe
           }
         />
+
+        {/* ADVISER FIX: Only the real mid-task probe renders in the reserved banner slot. */}
 
         {timerExpired && (
           <div className="trial-timeout-message">

@@ -2,6 +2,7 @@ import {
   Navigate,
   Route,
   Routes,
+  useLocation,
 } from "react-router";
 
 import ProtectedStudyRoute from "./components/navigation/ProtectedStudyRoute.tsx";
@@ -9,7 +10,6 @@ import ProtectedStudyRoute from "./components/navigation/ProtectedStudyRoute.tsx
 import DisclosurePage from "./pages/DisclosurePage.tsx";
 import PostExperimentPage from "./pages/PostExperimentPage.tsx";
 import ProcedurePage from "./pages/ProcedurePage.tsx";
-import TaskConditionSelectionPage from "./pages/TaskConditionSelectionPage.tsx";
 import TaskPage from "./pages/TaskPage.tsx";
 import TaskSelectionPage from "./pages/TaskSelectionPage.tsx";
 import TrialQuestionnairePage from "./pages/TrialQuestionnairePage.tsx";
@@ -17,17 +17,27 @@ import TrialQuestionnairePage from "./pages/TrialQuestionnairePage.tsx";
 import "./styles/studyPages.css";
 import "./styles/forms.css";
 
+
+function ProcedureRedirect() {
+  const { search } = useLocation();
+
+  return (
+    <Navigate
+      to={{
+        pathname: "/procedure",
+        search,
+      }}
+      replace
+    />
+  );
+}
+
 function App() {
   return (
     <Routes>
       <Route
         path="/"
-        element={
-          <Navigate
-            to="/procedure"
-            replace
-          />
-        }
+        element={<ProcedureRedirect />}
       />
 
       <Route
@@ -44,15 +54,7 @@ function App() {
         }
       />
 
-      <Route
-        path="/tasks/:taskId"
-        element={
-          <ProtectedStudyRoute stage="tasks">
-            <TaskConditionSelectionPage />
-          </ProtectedStudyRoute>
-        }
-      />
-
+      {/* ADVISER FIX: The manual task/condition-selection route is retired. */}
       <Route
         path="/task/:taskId/:trialNumber"
         element={

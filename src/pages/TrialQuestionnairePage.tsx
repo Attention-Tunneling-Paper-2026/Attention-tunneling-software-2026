@@ -1,6 +1,5 @@
 import {
   ArrowRight,
-  Bell,
   Brain,
   CheckCircle2,
   ClipboardCheck,
@@ -14,7 +13,6 @@ import {
 } from "react";
 
 import type {
-  ChangeEvent,
   FormEvent,
   ReactNode,
 } from "react";
@@ -26,15 +24,6 @@ import {
 
 import LikertScale from "../components/forms/LikertScale";
 import NasaTlxForm from "../components/forms/NasaTlxForm";
-
-import {
-  getSemanticProbe,
-} from "../data/symposium";
-
-import {
-  buildTrialEventRows,
-  buildTrialSummaryRows,
-} from "../metrics/trialMetrics";
 
 import {
   useEventLogStore,
@@ -61,8 +50,6 @@ import {
 import type {
   LikertRating,
   ManipulationCheckDimension,
-  ProbeRecallRoom,
-  ProbeRecognitionChoice,
   TrialExperienceDimension,
   TrialExperienceRatings,
 } from "../types/questionnaire";
@@ -82,12 +69,6 @@ import type {
   StudyTrialNumber,
   StudyTrialOrder,
 } from "../types/scheduler";
-
-import {
-  downloadCsv,
-  getTrialEventsCsvFileName,
-  getTrialSummaryCsvFileName,
-} from "../utils/csvExport";
 
 type ExperienceDimension =
   TrialExperienceDimension;
@@ -118,77 +99,6 @@ interface TaskQuestionnaireCopy {
 
   solutionNoun:
     string;
-
-  updateLabel:
-    string;
-
-  affectedLocationTitle:
-    string;
-
-  affectedLocationQuestion:
-    string;
-
-  recallConfidenceDescription:
-    string;
-
-  locationLabels:
-    readonly [
-      string,
-      string,
-      string
-    ];
-
-  noLocationAffectedLabel:
-    string;
-
-  recognitionLabels: {
-    correct:
-      string;
-
-    alternativeA:
-      string;
-
-    alternativeB:
-      string;
-
-    timeChanged:
-      string;
-
-    noUpdate:
-      string;
-  };
-
-  recognitionValues: {
-    correct:
-      Exclude<
-        ProbeRecognitionChoice,
-        ""
-      >;
-
-    alternativeA:
-      Exclude<
-        ProbeRecognitionChoice,
-        ""
-      >;
-
-    alternativeB:
-      Exclude<
-        ProbeRecognitionChoice,
-        ""
-      >;
-
-    timeChanged:
-      Exclude<
-        ProbeRecognitionChoice,
-        ""
-      >;
-
-    noUpdate:
-      Exclude<
-        ProbeRecognitionChoice,
-        ""
-      >;
-  };
 }
 
 const TASK_QUESTIONNAIRE_COPY: Record<
@@ -201,63 +111,6 @@ const TASK_QUESTIONNAIRE_COPY: Record<
 
     solutionNoun:
       "schedule",
-
-    updateLabel:
-      "facilities update",
-
-    affectedLocationTitle:
-      "Affected room",
-
-    affectedLocationQuestion:
-      "Which room was affected by the facilities update?",
-
-    recallConfidenceDescription:
-      "How confident are you that your answer about the affected room is correct?",
-
-    locationLabels: [
-      "Room A",
-      "Room B",
-      "Room C",
-    ],
-
-    noLocationAffectedLabel:
-      "No room was affected",
-
-    recognitionLabels: {
-      correct:
-        getSemanticProbe(
-          "symposium",
-        ).message,
-
-      alternativeA:
-        "The projector in Room A broke for the rest of the day",
-
-      alternativeB:
-        "Room B became unavailable for the rest of the day",
-
-      timeChanged:
-        "The time of one session changed",
-
-      noUpdate:
-        "No facilities update was shown",
-    },
-
-    recognitionValues: {
-      correct:
-        "room_c_projector_failure",
-
-      alternativeA:
-        "room_a_projector_failure",
-
-      alternativeB:
-        "room_b_unavailable",
-
-      timeChanged:
-        "session_time_changed",
-
-      noUpdate:
-        "no_update",
-    },
   },
 
   delivery: {
@@ -266,63 +119,6 @@ const TASK_QUESTIONNAIRE_COPY: Record<
 
     solutionNoun:
       "dispatch plan",
-
-    updateLabel:
-      "vehicle update",
-
-    affectedLocationTitle:
-      "Affected van",
-
-    affectedLocationQuestion:
-      "Which van was affected by the vehicle update?",
-
-    recallConfidenceDescription:
-      "How confident are you that your answer about the affected van is correct?",
-
-    locationLabels: [
-      "Van A",
-      "Van B",
-      "Van C",
-    ],
-
-    noLocationAffectedLabel:
-      "No van was affected",
-
-    recognitionLabels: {
-      correct:
-        getSemanticProbe(
-          "delivery",
-        ).message,
-
-      alternativeA:
-        "The refrigeration unit in Van A failed for the rest of the day",
-
-      alternativeB:
-        "Van B became unavailable for the rest of the day",
-
-      timeChanged:
-        "The route window of one shipment changed",
-
-      noUpdate:
-        "No vehicle update was shown",
-    },
-
-    recognitionValues: {
-      correct:
-        "van_c_refrigeration_failure",
-
-      alternativeA:
-        "van_a_refrigeration_failure",
-
-      alternativeB:
-        "van_b_unavailable",
-
-      timeChanged:
-        "shipment_route_window_changed",
-
-      noUpdate:
-        "no_update",
-    },
   },
 
   clinic: {
@@ -331,63 +127,6 @@ const TASK_QUESTIONNAIRE_COPY: Record<
 
     solutionNoun:
       "roster",
-
-    updateLabel:
-      "ward update",
-
-    affectedLocationTitle:
-      "Affected ward",
-
-    affectedLocationQuestion:
-      "Which ward was affected by the ward update?",
-
-    recallConfidenceDescription:
-      "How confident are you that your answer about the affected ward is correct?",
-
-    locationLabels: [
-      "Ward A",
-      "Ward B",
-      "Ward C",
-    ],
-
-    noLocationAffectedLabel:
-      "No ward was affected",
-
-    recognitionLabels: {
-      correct:
-        getSemanticProbe(
-          "clinic",
-        ).message,
-
-      alternativeA:
-        "Ward A lost ICU certification for the rest of the day",
-
-      alternativeB:
-        "Ward B became unavailable for the rest of the day",
-
-      timeChanged:
-        "The shift time of one duty changed",
-
-      noUpdate:
-        "No ward update was shown",
-    },
-
-    recognitionValues: {
-      correct:
-        "ward_c_icu_certification_loss",
-
-      alternativeA:
-        "ward_a_icu_certification_loss",
-
-      alternativeB:
-        "ward_b_unavailable",
-
-      timeChanged:
-        "duty_shift_changed",
-
-      noUpdate:
-        "no_update",
-    },
   },
 };
 
@@ -399,24 +138,6 @@ function getTaskQuestionnaireCopy(
     ...TASK_QUESTIONNAIRE_COPY[
       taskId
     ],
-
-    locationLabels: [
-      ...TASK_QUESTIONNAIRE_COPY[
-        taskId
-      ].locationLabels,
-    ],
-
-    recognitionLabels: {
-      ...TASK_QUESTIONNAIRE_COPY[
-        taskId
-      ].recognitionLabels,
-    },
-
-    recognitionValues: {
-      ...TASK_QUESTIONNAIRE_COPY[
-        taskId
-      ].recognitionValues,
-    },
   };
 }
 
@@ -485,152 +206,6 @@ function getExperienceQuestions(
 
       highLabel:
         "Strongly agree",
-    },
-  ];
-}
-
-function getProbeLocationOptions(
-  taskCopy:
-    TaskQuestionnaireCopy,
-): Array<{
-  value:
-    Exclude<
-      ProbeRecallRoom,
-      ""
-    >;
-
-  label:
-    string;
-}> {
-  return [
-    {
-      value:
-        "A",
-
-      label:
-        taskCopy.locationLabels[
-          0
-        ],
-    },
-
-    {
-      value:
-        "B",
-
-      label:
-        taskCopy.locationLabels[
-          1
-        ],
-    },
-
-    {
-      value:
-        "C",
-
-      label:
-        taskCopy.locationLabels[
-          2
-        ],
-    },
-
-    {
-      value:
-        "none",
-
-      label:
-        taskCopy.noLocationAffectedLabel,
-    },
-
-    {
-      value:
-        "unsure",
-
-      label:
-        "Unsure",
-    },
-  ];
-}
-
-function getProbeRecognitionOptions(
-  taskCopy:
-    TaskQuestionnaireCopy,
-): Array<{
-  value:
-    Exclude<
-      ProbeRecognitionChoice,
-      ""
-    >;
-
-  label:
-    string;
-}> {
-  return [
-    {
-      value:
-        taskCopy
-          .recognitionValues
-          .correct,
-
-      label:
-        taskCopy
-          .recognitionLabels
-          .correct,
-    },
-
-    {
-      value:
-        taskCopy
-          .recognitionValues
-          .alternativeA,
-
-      label:
-        taskCopy
-          .recognitionLabels
-          .alternativeA,
-    },
-
-    {
-      value:
-        taskCopy
-          .recognitionValues
-          .alternativeB,
-
-      label:
-        taskCopy
-          .recognitionLabels
-          .alternativeB,
-    },
-
-    {
-      value:
-        taskCopy
-          .recognitionValues
-          .timeChanged,
-
-      label:
-        taskCopy
-          .recognitionLabels
-          .timeChanged,
-    },
-
-    {
-      value:
-        taskCopy
-          .recognitionValues
-          .noUpdate,
-
-      label:
-        taskCopy
-          .recognitionLabels
-          .noUpdate,
-    },
-
-    {
-      value:
-        "unsure",
-
-      label:
-        "Unsure",
     },
   ];
 }
@@ -838,24 +413,6 @@ function getExperienceValue(
   ];
 }
 
-function getErrorMessage(
-  error:
-    unknown,
-): string {
-  if (
-    error instanceof
-      Error &&
-    error.message
-      .trim()
-      .length >
-      0
-  ) {
-    return error.message;
-  }
-
-  return "Unknown CSV export error.";
-}
-
 export default function TrialQuestionnairePage() {
   const navigate =
     useNavigate();
@@ -922,18 +479,6 @@ export default function TrialQuestionnairePage() {
           trialNumber,
         );
 
-  const participantId =
-    useStudySessionStore(
-      (state) =>
-        state.participantId,
-    );
-
-  const sessionId =
-    useStudySessionStore(
-      (state) =>
-        state.sessionId,
-    );
-
   const procedureAccepted =
     useStudySessionStore(
       (state) =>
@@ -956,24 +501,6 @@ export default function TrialQuestionnairePage() {
     useStudySessionStore(
       (state) =>
         state.completeTrialQuestionnaire,
-    );
-
-  const setTrialCsvExportStatus =
-    useStudySessionStore(
-      (state) =>
-        state.setTrialCsvExportStatus,
-    );
-
-  const markTrialEventsCsvExported =
-    useStudySessionStore(
-      (state) =>
-        state.markTrialEventsCsvExported,
-    );
-
-  const markTrialSummaryCsvExported =
-    useStudySessionStore(
-      (state) =>
-        state.markTrialSummaryCsvExported,
     );
 
   const trialResponses =
@@ -1006,34 +533,16 @@ export default function TrialQuestionnairePage() {
         state.setManipulationCheckValue,
     );
 
-  const setProbeRecallValue =
-    useQuestionnaireStore(
-      (state) =>
-        state.setProbeRecallValue,
-    );
-
   const submitTrialQuestionnaire =
     useQuestionnaireStore(
       (state) =>
         state.submitTrialQuestionnaire,
     );
 
-  const markTrialQuestionnaireExported =
-    useQuestionnaireStore(
-      (state) =>
-        state.markTrialQuestionnaireExported,
-    );
-
   const addEvent =
     useEventLogStore(
       (state) =>
         state.addEvent,
-    );
-
-  const getEventsForTrial =
-    useEventLogStore(
-      (state) =>
-        state.getEventsForTrial,
     );
 
   const [
@@ -1122,12 +631,6 @@ export default function TrialQuestionnairePage() {
         )
       : null;
 
-  const trialExportsComplete =
-    trial?.eventsCsvExportStatus ===
-      "exported" &&
-    trial.summaryCsvExportStatus ===
-      "exported";
-
   useEffect(() => {
     if (
       !procedureAccepted
@@ -1171,24 +674,21 @@ export default function TrialQuestionnairePage() {
       trialStatus ===
       "questionnaire_complete"
     ) {
-      if (
-        trialExportsComplete
-      ) {
-        const allTrialsComplete =
-          useStudySessionStore
-            .getState()
-            .areAllTrialsComplete();
+      // ADVISER FIX: Per-trial files remain pending until delayed recall is collected.
+      const allTrialsComplete =
+        useStudySessionStore
+          .getState()
+          .areAllTrialsComplete();
 
-        navigate(
-          allTrialsComplete
-            ? "/post-experiment"
-            : "/tasks",
-          {
-            replace:
-              true,
-          },
-        );
-      }
+      navigate(
+        allTrialsComplete
+          ? "/post-experiment"
+          : "/tasks",
+        {
+          replace:
+            true,
+        },
+      );
 
       return;
     }
@@ -1238,7 +738,6 @@ export default function TrialQuestionnairePage() {
     taskId,
     taskKey,
     trialCondition,
-    trialExportsComplete,
     trialNumber,
     trialStatus,
   ]);
@@ -1605,11 +1104,6 @@ export default function TrialQuestionnairePage() {
               .manipulationCheck,
           },
 
-          probeRecall: {
-            ...submittedResponse
-              .probeRecall,
-          },
-
           questionnaireStartedAtIso:
             submittedResponse
               .startedAtIso,
@@ -1649,319 +1143,7 @@ export default function TrialQuestionnairePage() {
       }
     }
 
-    const completedTrial =
-      useStudySessionStore
-        .getState()
-        .getTrialProgress(
-          trialNumber,
-          taskId,
-        ) ??
-      trial;
-
-    const eventsFileName =
-      getTrialEventsCsvFileName(
-        participantId,
-        trialNumber,
-        trial.condition,
-        taskId,
-      );
-
-    const summaryFileName =
-      getTrialSummaryCsvFileName(
-        participantId,
-        trialNumber,
-        trial.condition,
-        taskId,
-      );
-
-    const exportErrors:
-      string[] = [];
-
-    let eventsExported =
-      completedTrial
-        .eventsCsvExportStatus ===
-      "exported";
-
-    let summaryExported =
-      completedTrial
-        .summaryCsvExportStatus ===
-      "exported";
-
-    const exportAttemptAtIso =
-      new Date()
-        .toISOString();
-
-    const trialEvents =
-      getEventsForTrial(
-        trialNumber,
-        taskId,
-      );
-
-    if (
-      !eventsExported
-    ) {
-      setTrialCsvExportStatus(
-        trialNumber,
-        "events",
-        "exporting",
-        undefined,
-        taskId,
-      );
-
-      try {
-        const eventRows =
-          buildTrialEventRows(
-            trialEvents,
-          );
-
-        downloadCsv(
-          eventsFileName,
-          eventRows,
-        );
-
-        const statusMarked =
-          markTrialEventsCsvExported(
-            trialNumber,
-            taskId,
-            exportAttemptAtIso,
-          );
-
-        if (
-          !statusMarked
-        ) {
-          throw new Error(
-            "The event CSV download started, but its export status could not be recorded.",
-          );
-        }
-
-        eventsExported =
-          true;
-      } catch (
-        error
-      ) {
-        const errorMessage =
-          getErrorMessage(
-            error,
-          );
-
-        exportErrors.push(
-          `Events CSV: ${errorMessage}`,
-        );
-
-        setTrialCsvExportStatus(
-          trialNumber,
-          "events",
-          "failed",
-          errorMessage,
-          taskId,
-        );
-      }
-    }
-
-    if (
-      !summaryExported
-    ) {
-      setTrialCsvExportStatus(
-        trialNumber,
-        "summary",
-        "exporting",
-        undefined,
-        taskId,
-      );
-
-      try {
-        const summaryRows =
-          buildTrialSummaryRows({
-            participantId,
-
-            sessionId,
-
-            trial:
-              completedTrial,
-
-            questionnaireResponse:
-              submittedResponse,
-
-            events:
-              trialEvents,
-          });
-
-        downloadCsv(
-          summaryFileName,
-          summaryRows,
-        );
-
-        const statusMarked =
-          markTrialSummaryCsvExported(
-            trialNumber,
-            taskId,
-            exportAttemptAtIso,
-          );
-
-        if (
-          !statusMarked
-        ) {
-          throw new Error(
-            "The summary CSV download started, but its export status could not be recorded.",
-          );
-        }
-
-        summaryExported =
-          true;
-      } catch (
-        error
-      ) {
-        const errorMessage =
-          getErrorMessage(
-            error,
-          );
-
-        exportErrors.push(
-          `Summary CSV: ${errorMessage}`,
-        );
-
-        setTrialCsvExportStatus(
-          trialNumber,
-          "summary",
-          "failed",
-          errorMessage,
-          taskId,
-        );
-      }
-    }
-
-    if (
-      eventsExported &&
-      summaryExported
-    ) {
-      markTrialQuestionnaireExported(
-        trialNumber,
-        taskId,
-      );
-    }
-
-    addEvent({
-      eventType:
-        "trial_csv_exported",
-
-      taskId,
-
-      trialId,
-
-      trialNumber,
-
-      trialOrder:
-        participantTaskNumber,
-
-      globalOptionNumber,
-
-      globalTrialNumber:
-        globalOptionNumber,
-
-      outerTaskNumber:
-        trial.outerTaskNumber,
-
-      innerTaskNumber:
-        trialNumber,
-
-      condition:
-        trial.condition,
-
-      conditionOrder:
-        trial.conditionOrder,
-
-      isFirstTrial:
-        trial.isFirstTrial,
-
-      probeExposureNumber:
-        trial.probeExposureNumber,
-
-      probeNaive:
-        trial.probeNaive,
-
-      phase:
-        "questionnaire",
-
-      accepted:
-        eventsExported &&
-        summaryExported,
-
-      metadata: {
-        taskId,
-
-        taskTitle:
-          taskCopy.taskTitle,
-
-        taskNumber:
-          participantTaskNumber,
-
-        conditionOptionNumber:
-          trialNumber,
-
-        innerTaskNumber:
-          trialNumber,
-
-        globalOptionNumber,
-
-        globalTrialNumber:
-          globalOptionNumber,
-
-        participantTaskNumber,
-
-        totalTrials:
-          TOTAL_STUDY_TRIALS,
-
-        totalStudyTrials:
-          TOTAL_STUDY_TRIALS,
-
-        totalSelectableTaskConditionOptions:
-          TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
-
-        eventsFileName,
-
-        summaryFileName,
-
-        eventsExported,
-
-        summaryExported,
-
-        exportErrors,
-
-        exportedAtIso:
-          exportAttemptAtIso,
-      },
-    });
-
-    if (
-      exportErrors.length >
-      0
-    ) {
-      submissionStartedRef.current =
-        false;
-
-      setSubmitting(
-        false,
-      );
-
-      setValidationMessage(
-        "The questionnaire was saved, but one or more study files could not be downloaded. Select the button again to retry only the missing file download.",
-      );
-
-      window.alert(
-        [
-          "The questionnaire was saved, but one or more CSV files could not be downloaded.",
-          "",
-          ...exportErrors,
-          "",
-          "Check whether your browser is blocking automatic downloads, then select the button again to retry.",
-        ].join(
-          "\n",
-        ),
-      );
-
-      return;
-    }
-
+    // ADVISER FIX: Final trial CSVs are generated only after delayed recall.
     const allTrialsComplete =
       useStudySessionStore
         .getState()
@@ -2001,18 +1183,9 @@ export default function TrialQuestionnairePage() {
     return null;
   }
 
+  // ADVISER FIX: Probe recall is deferred to the post-experiment page.
   const experienceQuestions =
     getExperienceQuestions(
-      taskCopy,
-    );
-
-  const probeLocationOptions =
-    getProbeLocationOptions(
-      taskCopy,
-    );
-
-  const probeRecognitionOptions =
-    getProbeRecognitionOptions(
       taskCopy,
     );
 
@@ -2282,335 +1455,6 @@ export default function TrialQuestionnairePage() {
           </QuestionnaireSection>
         )}
 
-        <QuestionnaireSection
-          icon={
-            <Bell
-              size={22}
-              aria-hidden="true"
-            />
-          }
-          title="Task update recall"
-          description="Please answer these questions from memory without returning to the task."
-        >
-          <div className="likert-list">
-            <fieldset className="radio-question-card">
-              <legend>
-                <strong>
-                  Update detection
-                </strong>
-
-                <span>
-                  Did you notice a new {taskCopy.updateLabel} while
-                  completing the task?
-                </span>
-              </legend>
-
-              <div className="radio-question-options">
-                {[
-                  {
-                    value:
-                      "yes" as const,
-
-                    label:
-                      "Yes",
-                  },
-
-                  {
-                    value:
-                      "no" as const,
-
-                    label:
-                      "No",
-                  },
-
-                  {
-                    value:
-                      "unsure" as const,
-
-                    label:
-                      "Unsure",
-                  },
-                ].map(
-                  (option) => (
-                    <label
-                      key={
-                        option.value
-                      }
-                      className={[
-                        "radio-question-option",
-
-                        response
-                          .probeRecall
-                          .noticedUpdate ===
-                        option.value
-                          ? "radio-question-option-selected"
-                          : "",
-                      ]
-                        .filter(
-                          Boolean,
-                        )
-                        .join(
-                          " ",
-                        )}
-                    >
-                      <input
-                        type="radio"
-                        name={`noticed_update_${formScope}`}
-                        required
-                        value={
-                          option.value
-                        }
-                        checked={
-                          response
-                            .probeRecall
-                            .noticedUpdate ===
-                          option.value
-                        }
-                        disabled={
-                          questionnaireSubmitted
-                        }
-                        onChange={() => {
-                          setProbeRecallValue(
-                            trialNumber,
-                            "noticedUpdate",
-                            option.value,
-                            taskId,
-                          );
-                        }}
-                      />
-
-                      <span>
-                        {option.label}
-                      </span>
-                    </label>
-                  ),
-                )}
-              </div>
-            </fieldset>
-
-            {response
-              .probeRecall
-              .noticedUpdate ===
-              "yes" && (
-              <div className="open-response-card">
-                <label
-                  htmlFor={`update-description-${formScope}`}
-                >
-                  <strong>
-                    Update recall
-                  </strong>
-
-                  <span>
-                    Briefly describe the update you remember.
-                  </span>
-                </label>
-
-                <textarea
-                  id={`update-description-${formScope}`}
-                  value={
-                    response
-                      .probeRecall
-                      .updateDescription
-                  }
-                  disabled={
-                    questionnaireSubmitted
-                  }
-                  onChange={(
-                    event:
-                      ChangeEvent<HTMLTextAreaElement>,
-                  ) => {
-                    setProbeRecallValue(
-                      trialNumber,
-                      "updateDescription",
-                      event.target.value,
-                      taskId,
-                    );
-                  }}
-                  rows={4}
-                  required
-                />
-              </div>
-            )}
-
-            <fieldset className="radio-question-card">
-              <legend>
-                <strong>
-                  {taskCopy.affectedLocationTitle}
-                </strong>
-
-                <span>
-                  {taskCopy.affectedLocationQuestion}
-                </span>
-              </legend>
-
-              <div className="radio-question-options">
-                {probeLocationOptions.map(
-                  (option) => (
-                    <label
-                      key={
-                        option.value
-                      }
-                      className={[
-                        "radio-question-option",
-
-                        response
-                          .probeRecall
-                          .affectedRoom ===
-                        option.value
-                          ? "radio-question-option-selected"
-                          : "",
-                      ]
-                        .filter(
-                          Boolean,
-                        )
-                        .join(
-                          " ",
-                        )}
-                    >
-                      <input
-                        type="radio"
-                        name={`affected_location_${formScope}`}
-                        required
-                        value={
-                          option.value
-                        }
-                        checked={
-                          response
-                            .probeRecall
-                            .affectedRoom ===
-                          option.value
-                        }
-                        disabled={
-                          questionnaireSubmitted
-                        }
-                        onChange={() => {
-                          setProbeRecallValue(
-                            trialNumber,
-                            "affectedRoom",
-                            option.value,
-                            taskId,
-                          );
-                        }}
-                      />
-
-                      <span>
-                        {option.label}
-                      </span>
-                    </label>
-                  ),
-                )}
-              </div>
-            </fieldset>
-
-            <LikertScale
-              name={`recall_confidence_${formScope}`}
-              title="Recall confidence"
-              description={
-                taskCopy.recallConfidenceDescription
-              }
-              lowLabel="Not at all confident"
-              highLabel="Extremely confident"
-              value={
-                response
-                  .probeRecall
-                  .recallConfidence
-              }
-              min={1}
-              max={5}
-              required
-              disabled={
-                questionnaireSubmitted
-              }
-              onChange={(value) => {
-                if (
-                  !isLikertRating(
-                    value,
-                  )
-                ) {
-                  return;
-                }
-
-                setProbeRecallValue(
-                  trialNumber,
-                  "recallConfidence",
-                  value,
-                  taskId,
-                );
-              }}
-            />
-
-            <fieldset className="radio-question-card">
-              <legend>
-                <strong>
-                  Update recognition
-                </strong>
-
-                <span>
-                  Which {taskCopy.updateLabel} was shown during the task?
-                </span>
-              </legend>
-
-              <div className="radio-question-options">
-                {probeRecognitionOptions.map(
-                  (option) => (
-                    <label
-                      key={
-                        option.value
-                      }
-                      className={[
-                        "radio-question-option",
-
-                        response
-                          .probeRecall
-                          .recognitionChoice ===
-                        option.value
-                          ? "radio-question-option-selected"
-                          : "",
-                      ]
-                        .filter(
-                          Boolean,
-                        )
-                        .join(
-                          " ",
-                        )}
-                    >
-                      <input
-                        type="radio"
-                        name={`probe_recognition_${formScope}`}
-                        required
-                        value={
-                          option.value
-                        }
-                        checked={
-                          response
-                            .probeRecall
-                            .recognitionChoice ===
-                          option.value
-                        }
-                        disabled={
-                          questionnaireSubmitted
-                        }
-                        onChange={() => {
-                          setProbeRecallValue(
-                            trialNumber,
-                            "recognitionChoice",
-                            option.value,
-                            taskId,
-                          );
-                        }}
-                      />
-
-                      <span>
-                        {option.label}
-                      </span>
-                    </label>
-                  ),
-                )}
-              </div>
-            </fieldset>
-          </div>
-        </QuestionnaireSection>
-
         {validationMessage && (
           <div
             className="questionnaire-validation-message"
@@ -2628,8 +1472,8 @@ export default function TrialQuestionnairePage() {
 
           <p>
             {questionnaireSubmitted
-              ? "Your questionnaire responses are saved. Select the button below to retry any study file that has not yet been downloaded."
-              : "Your responses will be saved after you select the button below. One event CSV and one summary CSV will then be downloaded for this task."}
+              ? "Your questionnaire responses are saved."
+              : "Your responses will be saved after you select the button below."}
           </p>
         </section>
 
@@ -2642,9 +1486,9 @@ export default function TrialQuestionnairePage() {
             }
           >
             {submitting
-              ? "Preparing study files"
+              ? "Saving responses"
               : questionnaireSubmitted
-                ? "Retry missing study file downloads"
+                ? "Continue"
                 : "Submit and continue"}
 
             {!submitting && (

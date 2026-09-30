@@ -1,5 +1,6 @@
 import {
   ArrowRight,
+  Bell,
   CheckCircle2,
 } from "lucide-react";
 
@@ -11,7 +12,9 @@ import {
 } from "react";
 
 import type {
+  ChangeEvent,
   FormEvent,
+  ReactNode,
 } from "react";
 
 import {
@@ -19,10 +22,20 @@ import {
 } from "react-router";
 
 import DebriefForm from "../components/forms/DebriefForm";
+import LikertScale from "../components/forms/LikertScale";
 
 import type {
   DebriefFormValues,
 } from "../components/forms/DebriefForm";
+
+import {
+  getSemanticProbe,
+} from "../data/symposium";
+
+import {
+  buildTrialEventRows,
+  buildTrialSummaryRows,
+} from "../metrics/trialMetrics";
 
 import {
   useEventLogStore,
@@ -37,9 +50,22 @@ import {
 } from "../store/studySessionStore";
 
 import type {
+  StudyEvent,
+} from "../types/events";
+
+import type {
   LikertRating,
   PrimaryInfluence,
+  ProbeRecallResponses,
+  ProbeRecallRoom,
+  ProbeRecognitionChoice,
+  TrialQuestionnaireResponse,
   YesNoUnsure,
+} from "../types/questionnaire";
+
+import {
+  isLikertRating,
+  isProbeRecallComplete,
 } from "../types/questionnaire";
 
 import type {
@@ -48,6 +74,8 @@ import type {
 
 import {
   downloadCsv,
+  getTrialEventsCsvFileName,
+  getTrialSummaryCsvFileName,
 } from "../utils/csvExport";
 
 const TOTAL_TASKS =
@@ -92,6 +120,876 @@ type StudyTrialWithIdentity =
     trialId?:
       string;
   };
+
+interface TaskRecallCopy {
+  taskTitle:
+    string;
+
+  updateLabel:
+    string;
+
+  affectedLocationTitle:
+    string;
+
+  affectedLocationQuestion:
+    string;
+
+  recallConfidenceDescription:
+    string;
+
+  locationLabels:
+    readonly [
+      string,
+      string,
+      string
+    ];
+
+  noLocationAffectedLabel:
+    string;
+
+  recognitionLabels: {
+    correct:
+      string;
+
+    alternativeA:
+      string;
+
+    alternativeB:
+      string;
+
+    timeChanged:
+      string;
+
+    noUpdate:
+      string;
+  };
+
+  recognitionValues: {
+    correct:
+      Exclude<
+        ProbeRecognitionChoice,
+        ""
+      >;
+
+    alternativeA:
+      Exclude<
+        ProbeRecognitionChoice,
+        ""
+      >;
+
+    alternativeB:
+      Exclude<
+        ProbeRecognitionChoice,
+        ""
+      >;
+
+    timeChanged:
+      Exclude<
+        ProbeRecognitionChoice,
+        ""
+      >;
+
+    noUpdate:
+      Exclude<
+        ProbeRecognitionChoice,
+        ""
+      >;
+  };
+}
+
+// ADVISER FIX: The existing task-specific recall questions now appear only here.
+const TASK_RECALL_COPY: Record<
+  SupportedStudyTaskId,
+  TaskRecallCopy
+> = {
+  symposium: {
+    taskTitle:
+      "Symposium Scheduler",
+
+    updateLabel:
+      "facilities update",
+
+    affectedLocationTitle:
+      "Affected room",
+
+    affectedLocationQuestion:
+      "Which room was affected by the facilities update?",
+
+    recallConfidenceDescription:
+      "How confident are you that your answer about the affected room is correct?",
+
+    locationLabels: [
+      "Room A",
+      "Room B",
+      "Room C",
+    ],
+
+    noLocationAffectedLabel:
+      "No room was affected",
+
+    recognitionLabels: {
+      correct:
+        getSemanticProbe(
+          "symposium",
+        ).message,
+
+      alternativeA:
+        "The projector in Room A broke for the rest of the day",
+
+      alternativeB:
+        "Room B became unavailable for the rest of the day",
+
+      timeChanged:
+        "The time of one session changed",
+
+      noUpdate:
+        "No facilities update was shown",
+    },
+
+    recognitionValues: {
+      correct:
+        "room_c_projector_failure",
+
+      alternativeA:
+        "room_a_projector_failure",
+
+      alternativeB:
+        "room_b_unavailable",
+
+      timeChanged:
+        "session_time_changed",
+
+      noUpdate:
+        "no_update",
+    },
+  },
+
+  delivery: {
+    taskTitle:
+      "Delivery Dispatch",
+
+    updateLabel:
+      "vehicle update",
+
+    affectedLocationTitle:
+      "Affected van",
+
+    affectedLocationQuestion:
+      "Which van was affected by the vehicle update?",
+
+    recallConfidenceDescription:
+      "How confident are you that your answer about the affected van is correct?",
+
+    locationLabels: [
+      "Van A",
+      "Van B",
+      "Van C",
+    ],
+
+    noLocationAffectedLabel:
+      "No van was affected",
+
+    recognitionLabels: {
+      correct:
+        getSemanticProbe(
+          "delivery",
+        ).message,
+
+      alternativeA:
+        "The refrigeration unit in Van A failed for the rest of the day",
+
+      alternativeB:
+        "Van B became unavailable for the rest of the day",
+
+      timeChanged:
+        "The route window of one shipment changed",
+
+      noUpdate:
+        "No vehicle update was shown",
+    },
+
+    recognitionValues: {
+      correct:
+        "van_c_refrigeration_failure",
+
+      alternativeA:
+        "van_a_refrigeration_failure",
+
+      alternativeB:
+        "van_b_unavailable",
+
+      timeChanged:
+        "shipment_route_window_changed",
+
+      noUpdate:
+        "no_update",
+    },
+  },
+
+  clinic: {
+    taskTitle:
+      "Clinic Roster",
+
+    updateLabel:
+      "ward update",
+
+    affectedLocationTitle:
+      "Affected ward",
+
+    affectedLocationQuestion:
+      "Which ward was affected by the ward update?",
+
+    recallConfidenceDescription:
+      "How confident are you that your answer about the affected ward is correct?",
+
+    locationLabels: [
+      "Ward A",
+      "Ward B",
+      "Ward C",
+    ],
+
+    noLocationAffectedLabel:
+      "No ward was affected",
+
+    recognitionLabels: {
+      correct:
+        getSemanticProbe(
+          "clinic",
+        ).message,
+
+      alternativeA:
+        "Ward A lost ICU certification for the rest of the day",
+
+      alternativeB:
+        "Ward B became unavailable for the rest of the day",
+
+      timeChanged:
+        "The shift time of one duty changed",
+
+      noUpdate:
+        "No ward update was shown",
+    },
+
+    recognitionValues: {
+      correct:
+        "ward_c_icu_certification_loss",
+
+      alternativeA:
+        "ward_a_icu_certification_loss",
+
+      alternativeB:
+        "ward_b_unavailable",
+
+      timeChanged:
+        "duty_shift_changed",
+
+      noUpdate:
+        "no_update",
+    },
+  },
+};
+
+function getTaskRecallCopy(
+  taskId:
+    SupportedStudyTaskId,
+): TaskRecallCopy {
+  const copy =
+    TASK_RECALL_COPY[
+      taskId
+    ];
+
+  return {
+    ...copy,
+
+    locationLabels: [
+      ...copy.locationLabels,
+    ],
+
+    recognitionLabels: {
+      ...copy.recognitionLabels,
+    },
+
+    recognitionValues: {
+      ...copy.recognitionValues,
+    },
+  };
+}
+
+function getProbeLocationOptions(
+  taskCopy:
+    TaskRecallCopy,
+): Array<{
+  value:
+    Exclude<
+      ProbeRecallRoom,
+      ""
+    >;
+
+  label:
+    string;
+}> {
+  return [
+    {
+      value:
+        "A",
+
+      label:
+        taskCopy.locationLabels[
+          0
+        ],
+    },
+
+    {
+      value:
+        "B",
+
+      label:
+        taskCopy.locationLabels[
+          1
+        ],
+    },
+
+    {
+      value:
+        "C",
+
+      label:
+        taskCopy.locationLabels[
+          2
+        ],
+    },
+
+    {
+      value:
+        "none",
+
+      label:
+        taskCopy.noLocationAffectedLabel,
+    },
+
+    {
+      value:
+        "unsure",
+
+      label:
+        "Unsure",
+    },
+  ];
+}
+
+function getProbeRecognitionOptions(
+  taskCopy:
+    TaskRecallCopy,
+): Array<{
+  value:
+    Exclude<
+      ProbeRecognitionChoice,
+      ""
+    >;
+
+  label:
+    string;
+}> {
+  return [
+    {
+      value:
+        taskCopy
+          .recognitionValues
+          .correct,
+
+      label:
+        taskCopy
+          .recognitionLabels
+          .correct,
+    },
+
+    {
+      value:
+        taskCopy
+          .recognitionValues
+          .alternativeA,
+
+      label:
+        taskCopy
+          .recognitionLabels
+          .alternativeA,
+    },
+
+    {
+      value:
+        taskCopy
+          .recognitionValues
+          .alternativeB,
+
+      label:
+        taskCopy
+          .recognitionLabels
+          .alternativeB,
+    },
+
+    {
+      value:
+        taskCopy
+          .recognitionValues
+          .timeChanged,
+
+      label:
+        taskCopy
+          .recognitionLabels
+          .timeChanged,
+    },
+
+    {
+      value:
+        taskCopy
+          .recognitionValues
+          .noUpdate,
+
+      label:
+        taskCopy
+          .recognitionLabels
+          .noUpdate,
+    },
+
+    {
+      value:
+        "unsure",
+
+      label:
+        "Unsure",
+    },
+  ];
+}
+
+function QuestionnaireSection({
+  icon,
+  title,
+  description,
+  children,
+}: {
+  icon:
+    ReactNode;
+
+  title:
+    string;
+
+  description:
+    string;
+
+  children:
+    ReactNode;
+}) {
+  return (
+    <section className="questionnaire-section">
+      <div className="study-section-heading">
+        <div className="questionnaire-section-icon">
+          {icon}
+        </div>
+
+        <div>
+          <h2>
+            {title}
+          </h2>
+
+          <p>
+            {description}
+          </p>
+        </div>
+      </div>
+
+      {children}
+    </section>
+  );
+}
+
+interface DelayedRecallSectionProps {
+  taskId:
+    SupportedStudyTaskId;
+
+  trialNumber:
+    StudyTrialProgress["trialNumber"];
+
+  trialOrder:
+    number;
+
+  condition:
+    StudyTrialProgress["condition"];
+
+  probeVersion:
+    string;
+
+  response:
+    TrialQuestionnaireResponse;
+
+  disabled:
+    boolean;
+
+  onChange:
+    <Key extends keyof ProbeRecallResponses>(
+      dimension:
+        Key,
+
+      value:
+        ProbeRecallResponses[Key],
+    ) => void;
+}
+
+function DelayedRecallSection({
+  taskId,
+  trialNumber,
+  trialOrder,
+  condition,
+  probeVersion,
+  response,
+  disabled,
+  onChange,
+}: DelayedRecallSectionProps) {
+  const taskCopy =
+    getTaskRecallCopy(
+      taskId,
+    );
+
+  const locationOptions =
+    getProbeLocationOptions(
+      taskCopy,
+    );
+
+  const recognitionOptions =
+    getProbeRecognitionOptions(
+      taskCopy,
+    );
+
+  const formScope =
+    `delayed_recall_${taskId}_${trialNumber}`;
+
+  return (
+    <QuestionnaireSection
+      icon={
+        <Bell
+          size={22}
+          aria-hidden="true"
+        />
+      }
+      title={`Task update recall — Task ${trialOrder}: ${taskCopy.taskTitle}`}
+      description="Please answer these questions from memory without returning to the task."
+    >
+      <div
+        className="likert-list"
+        data-task-id={taskId}
+        data-trial-number={trialNumber}
+        data-trial-order={trialOrder}
+        data-condition={condition}
+        data-probe-version={probeVersion}
+      >
+        <fieldset className="radio-question-card">
+          <legend>
+            <strong>
+              Update detection
+            </strong>
+
+            <span>
+              Did you notice a new {taskCopy.updateLabel} while
+              completing this task?
+            </span>
+          </legend>
+
+          <div className="radio-question-options">
+            {[
+              {
+                value:
+                  "yes" as const,
+
+                label:
+                  "Yes",
+              },
+
+              {
+                value:
+                  "no" as const,
+
+                label:
+                  "No",
+              },
+
+              {
+                value:
+                  "unsure" as const,
+
+                label:
+                  "Unsure",
+              },
+            ].map(
+              (option) => (
+                <label
+                  key={
+                    option.value
+                  }
+                  className={[
+                    "radio-question-option",
+
+                    response
+                      .probeRecall
+                      .noticedUpdate ===
+                    option.value
+                      ? "radio-question-option-selected"
+                      : "",
+                  ]
+                    .filter(
+                      Boolean,
+                    )
+                    .join(
+                      " ",
+                    )}
+                >
+                  <input
+                    type="radio"
+                    name={`noticed_update_${formScope}`}
+                    required
+                    value={
+                      option.value
+                    }
+                    checked={
+                      response
+                        .probeRecall
+                        .noticedUpdate ===
+                      option.value
+                    }
+                    disabled={
+                      disabled
+                    }
+                    onChange={() => {
+                      onChange(
+                        "noticedUpdate",
+                        option.value,
+                      );
+                    }}
+                  />
+
+                  <span>
+                    {option.label}
+                  </span>
+                </label>
+              ),
+            )}
+          </div>
+        </fieldset>
+
+        {response
+          .probeRecall
+          .noticedUpdate ===
+          "yes" && (
+          <div className="open-response-card">
+            <label
+              htmlFor={`update-description-${formScope}`}
+            >
+              <strong>
+                Update recall
+              </strong>
+
+              <span>
+                Briefly describe the update you remember.
+              </span>
+            </label>
+
+            <textarea
+              id={`update-description-${formScope}`}
+              value={
+                response
+                  .probeRecall
+                  .updateDescription
+              }
+              disabled={
+                disabled
+              }
+              onChange={(
+                event:
+                  ChangeEvent<HTMLTextAreaElement>,
+              ) => {
+                onChange(
+                  "updateDescription",
+                  event.target.value,
+                );
+              }}
+              rows={4}
+              required
+            />
+          </div>
+        )}
+
+        <fieldset className="radio-question-card">
+          <legend>
+            <strong>
+              {taskCopy.affectedLocationTitle}
+            </strong>
+
+            <span>
+              {taskCopy.affectedLocationQuestion}
+            </span>
+          </legend>
+
+          <div className="radio-question-options">
+            {locationOptions.map(
+              (option) => (
+                <label
+                  key={
+                    option.value
+                  }
+                  className={[
+                    "radio-question-option",
+
+                    response
+                      .probeRecall
+                      .affectedRoom ===
+                    option.value
+                      ? "radio-question-option-selected"
+                      : "",
+                  ]
+                    .filter(
+                      Boolean,
+                    )
+                    .join(
+                      " ",
+                    )}
+                >
+                  <input
+                    type="radio"
+                    name={`affected_location_${formScope}`}
+                    required
+                    value={
+                      option.value
+                    }
+                    checked={
+                      response
+                        .probeRecall
+                        .affectedRoom ===
+                      option.value
+                    }
+                    disabled={
+                      disabled
+                    }
+                    onChange={() => {
+                      onChange(
+                        "affectedRoom",
+                        option.value,
+                      );
+                    }}
+                  />
+
+                  <span>
+                    {option.label}
+                  </span>
+                </label>
+              ),
+            )}
+          </div>
+        </fieldset>
+
+        <LikertScale
+          name={`recall_confidence_${formScope}`}
+          title="Recall confidence"
+          description={
+            taskCopy.recallConfidenceDescription
+          }
+          lowLabel="Not at all confident"
+          highLabel="Extremely confident"
+          value={
+            response
+              .probeRecall
+              .recallConfidence
+          }
+          min={1}
+          max={5}
+          required
+          disabled={
+            disabled
+          }
+          onChange={(value) => {
+            if (
+              !isLikertRating(
+                value,
+              )
+            ) {
+              return;
+            }
+
+            onChange(
+              "recallConfidence",
+              value,
+            );
+          }}
+        />
+
+        <fieldset className="radio-question-card">
+          <legend>
+            <strong>
+              Update recognition
+            </strong>
+
+            <span>
+              Which {taskCopy.updateLabel} was shown during this task?
+            </span>
+          </legend>
+
+          <div className="radio-question-options">
+            {recognitionOptions.map(
+              (option) => (
+                <label
+                  key={
+                    option.value
+                  }
+                  className={[
+                    "radio-question-option",
+
+                    response
+                      .probeRecall
+                      .recognitionChoice ===
+                    option.value
+                      ? "radio-question-option-selected"
+                      : "",
+                  ]
+                    .filter(
+                      Boolean,
+                    )
+                    .join(
+                      " ",
+                    )}
+                >
+                  <input
+                    type="radio"
+                    name={`probe_recognition_${formScope}`}
+                    required
+                    value={
+                      option.value
+                    }
+                    checked={
+                      response
+                        .probeRecall
+                        .recognitionChoice ===
+                      option.value
+                    }
+                    disabled={
+                      disabled
+                    }
+                    onChange={() => {
+                      onChange(
+                        "recognitionChoice",
+                        option.value,
+                      );
+                    }}
+                  />
+
+                  <span>
+                    {option.label}
+                  </span>
+                </label>
+              ),
+            )}
+          </div>
+        </fieldset>
+      </div>
+    </QuestionnaireSection>
+  );
+}
 
 function sanitizeFilePart(
   value:
@@ -434,6 +1332,218 @@ function getCompositeTrialId(
   )}-${trial.condition}`;
 }
 
+function getChronologicalTrialOrder(
+  trial:
+    StudyTrialProgress,
+): number {
+  return trial.trialOrder ===
+      1 ||
+    trial.trialOrder ===
+      2 ||
+    trial.trialOrder ===
+      3
+    ? trial.trialOrder
+    : TOTAL_STUDY_TRIALS +
+        getGlobalTrialNumber(
+          trial,
+        );
+}
+
+function isPlainRecord(
+  value:
+    unknown,
+): value is Record<string, unknown> {
+  return (
+    typeof value ===
+      "object" &&
+    value !==
+      null &&
+    !Array.isArray(
+      value,
+    )
+  );
+}
+
+function getLoggedProbeVersion(
+  trial:
+    StudyTrialProgress,
+
+  events:
+    StudyEvent[],
+): string {
+  const taskId =
+    getTrialTaskId(
+      trial,
+    );
+
+  const probeShownEvent =
+    events.find(
+      (event) =>
+        event.taskId ===
+          taskId &&
+        event.trialNumber ===
+          trial.trialNumber &&
+        event.eventType ===
+          "probe_shown",
+    );
+
+  const metadata =
+    isPlainRecord(
+      probeShownEvent?.metadata,
+    )
+      ? probeShownEvent.metadata
+      : {};
+
+  const metadataVersion =
+    metadata.probeVersion;
+
+  if (
+    typeof probeShownEvent?.contentVersion ===
+      "string" &&
+    probeShownEvent.contentVersion
+      .trim()
+      .length >
+      0
+  ) {
+    return probeShownEvent.contentVersion;
+  }
+
+  if (
+    typeof metadataVersion ===
+      "string" &&
+    metadataVersion
+      .trim()
+      .length >
+      0
+  ) {
+    return metadataVersion;
+  }
+
+  return getSemanticProbe(
+    taskId,
+  ).version ??
+    "";
+}
+
+interface DelayedRecallRecord {
+  trial:
+    StudyTrialProgress;
+
+  taskId:
+    SupportedStudyTaskId;
+
+  trialOrder:
+    number;
+
+  probeVersion:
+    string;
+
+  response:
+    TrialQuestionnaireResponse;
+}
+
+function getDelayedRecallValidationMessage(
+  records:
+    DelayedRecallRecord[],
+): string {
+  if (
+    records.length !==
+    TOTAL_STUDY_TRIALS
+  ) {
+    return "The delayed recall responses for all three tasks could not be loaded.";
+  }
+
+  const incompleteRecord =
+    records.find(
+      (record) =>
+        !isProbeRecallComplete(
+          record.response
+            .probeRecall,
+        ),
+    );
+
+  if (
+    !incompleteRecord
+  ) {
+    return "";
+  }
+
+  return `Please complete every task-update recall item for Task ${incompleteRecord.trialOrder}: ${TASK_RECALL_COPY[incompleteRecord.taskId].taskTitle}.`;
+}
+
+function getPostExperimentRecallColumns(
+  records:
+    DelayedRecallRecord[],
+
+  collectedAtIso:
+    string,
+): Record<string, string | number | null> {
+  const columns:
+    Record<string, string | number | null> = {};
+
+  for (
+    const record of
+      records
+  ) {
+    const prefix =
+      `trial_${record.trialOrder}`;
+
+    const recall =
+      record.response
+        .probeRecall;
+
+    columns[
+      `${prefix}_task_id`
+    ] = record.taskId;
+
+    columns[
+      `${prefix}_trial_number`
+    ] = record.trial.trialNumber;
+
+    columns[
+      `${prefix}_trial_order`
+    ] = record.trialOrder;
+
+    columns[
+      `${prefix}_condition`
+    ] = record.trial.condition;
+
+    columns[
+      `${prefix}_probe_version`
+    ] = record.probeVersion;
+
+    columns[
+      `${prefix}_probe_recall_noticed_update`
+    ] = recall.noticedUpdate;
+
+    columns[
+      `${prefix}_probe_recall_description`
+    ] = recall.updateDescription;
+
+    columns[
+      `${prefix}_probe_recall_affected_resource`
+    ] = recall.affectedRoom;
+
+    columns[
+      `${prefix}_probe_recall_affected_room`
+    ] = recall.affectedRoom;
+
+    columns[
+      `${prefix}_probe_recall_confidence`
+    ] = recall.recallConfidence;
+
+    columns[
+      `${prefix}_probe_recognition_choice`
+    ] = recall.recognitionChoice;
+
+    columns[
+      `${prefix}_probe_recall_collected_at_iso`
+    ] = collectedAtIso;
+  }
+
+  return columns;
+}
+
 export default function PostExperimentPage() {
   const navigate =
     useNavigate();
@@ -442,6 +1552,12 @@ export default function PostExperimentPage() {
     useStudySessionStore(
       (state) =>
         state.participantId,
+    );
+
+  const participantToken =
+    useStudySessionStore(
+      (state) =>
+        state.participantToken,
     );
 
   const sessionId =
@@ -486,16 +1602,58 @@ export default function PostExperimentPage() {
         state.setPostExperimentCsvExportStatus,
     );
 
+  const postExperimentCsvExportStatus =
+    useStudySessionStore(
+      (state) =>
+        state.postExperimentCsvExportStatus,
+    );
+
   const markPostExperimentCsvExported =
     useStudySessionStore(
       (state) =>
         state.markPostExperimentCsvExported,
     );
 
+  const setTrialCsvExportStatus =
+    useStudySessionStore(
+      (state) =>
+        state.setTrialCsvExportStatus,
+    );
+
+  const markTrialEventsCsvExported =
+    useStudySessionStore(
+      (state) =>
+        state.markTrialEventsCsvExported,
+    );
+
+  const markTrialSummaryCsvExported =
+    useStudySessionStore(
+      (state) =>
+        state.markTrialSummaryCsvExported,
+    );
+
+  const markDelayedRecallCollected =
+    useStudySessionStore(
+      (state) =>
+        state.markDelayedRecallCollected,
+    );
+
   const finalQuestionnaire =
     useQuestionnaireStore(
       (state) =>
         state.finalQuestionnaire,
+    );
+
+  const trialResponses =
+    useQuestionnaireStore(
+      (state) =>
+        state.trialResponses,
+    );
+
+  const setProbeRecallValue =
+    useQuestionnaireStore(
+      (state) =>
+        state.setProbeRecallValue,
     );
 
   const initializeFinalQuestionnaire =
@@ -534,10 +1692,22 @@ export default function PostExperimentPage() {
         state.markFinalQuestionnaireExported,
     );
 
+  const markTrialQuestionnaireExported =
+    useQuestionnaireStore(
+      (state) =>
+        state.markTrialQuestionnaireExported,
+    );
+
   const setEventParticipantId =
     useEventLogStore(
       (state) =>
         state.setParticipantId,
+    );
+
+  const setEventParticipantToken =
+    useEventLogStore(
+      (state) =>
+        state.setParticipantToken,
     );
 
   const setEventSessionId =
@@ -610,6 +1780,7 @@ export default function PostExperimentPage() {
     completedTaskCount ===
       TOTAL_TASKS;
 
+  // ADVISER FIX: Delayed recall follows the participant's actual trial order.
   const orderedTrials =
     useMemo(
       () =>
@@ -624,14 +1795,64 @@ export default function PostExperimentPage() {
               first,
               second,
             ) =>
-              getGlobalTrialNumber(
+              getChronologicalTrialOrder(
                 first,
               ) -
-              getGlobalTrialNumber(
+              getChronologicalTrialOrder(
                 second,
               ),
           ),
       [trials],
+    );
+
+  const delayedRecallRecords =
+    useMemo(
+      () =>
+        orderedTrials.flatMap(
+          (trial) => {
+            const taskId =
+              getTrialTaskId(
+                trial,
+              );
+
+            const response =
+              trialResponses.find(
+                (item) =>
+                  item.taskId ===
+                    taskId &&
+                  item.trialNumber ===
+                    trial.trialNumber,
+              );
+
+            return response
+              ? [
+                  {
+                    trial,
+
+                    taskId,
+
+                    trialOrder:
+                      getChronologicalTrialOrder(
+                        trial,
+                      ),
+
+                    probeVersion:
+                      getLoggedProbeVersion(
+                        trial,
+                        events,
+                      ),
+
+                    response,
+                  },
+                ]
+              : [];
+          },
+        ),
+      [
+        events,
+        orderedTrials,
+        trialResponses,
+      ],
     );
 
   const finalTrial =
@@ -948,6 +2169,10 @@ export default function PostExperimentPage() {
       participantId,
     );
 
+    setEventParticipantToken(
+      participantToken,
+    );
+
     setEventSessionId(
       sessionId,
     );
@@ -976,10 +2201,12 @@ export default function PostExperimentPage() {
     navigate,
     openPostExperiment,
     participantId,
+    participantToken,
     postExperimentCompleted,
     procedureAccepted,
     sessionId,
     setEventParticipantId,
+    setEventParticipantToken,
     setEventSessionId,
   ]);
 
@@ -1042,6 +2269,8 @@ export default function PostExperimentPage() {
       metadata: {
         page:
           "post_experiment",
+
+        participantToken,
 
         completedTaskCount,
 
@@ -1111,6 +2340,22 @@ export default function PostExperimentPage() {
       return;
     }
 
+    const delayedRecallValidationResult =
+      getDelayedRecallValidationMessage(
+        delayedRecallRecords,
+      );
+
+    if (
+      delayedRecallValidationResult.length >
+      0
+    ) {
+      setValidationMessage(
+        delayedRecallValidationResult,
+      );
+
+      return;
+    }
+
     const validationResult =
       getFinalQuestionnaireValidationMessage();
 
@@ -1150,9 +2395,200 @@ export default function PostExperimentPage() {
       return;
     }
 
-    addEvent({
-      eventType:
-        "post_experiment_submitted",
+    const recallCollectedAtIso =
+      new Date()
+        .toISOString();
+
+    // ADVISER FIX: Log one delayed-recall event against each exact trial identity.
+    for (
+      const record of
+        delayedRecallRecords
+    ) {
+      const probe =
+        getSemanticProbe(
+          record.taskId,
+        );
+
+      const alreadyLogged =
+        useEventLogStore
+          .getState()
+          .getEventsForTrial(
+            record.trial
+              .trialNumber,
+            record.taskId,
+          )
+          .some(
+            (loggedEvent) =>
+              loggedEvent.eventType ===
+                "form_submitted" &&
+              isPlainRecord(
+                loggedEvent.metadata,
+              ) &&
+              loggedEvent.metadata.formId ===
+                "delayed_probe_recall",
+          );
+
+      if (
+        alreadyLogged
+      ) {
+        continue;
+      }
+
+      const recall = {
+        ...record.response
+          .probeRecall,
+      };
+
+      addEvent({
+        eventType:
+          "form_submitted",
+
+        participantToken,
+
+        taskId:
+          record.taskId,
+
+        skin:
+          record.taskId,
+
+        trialId:
+          getCompositeTrialId(
+            record.trial,
+          ),
+
+        compositeTrialId:
+          getCompositeTrialId(
+            record.trial,
+          ),
+
+        trialNumber:
+          record.trial
+            .trialNumber,
+
+        trialOrder:
+          record.trial
+            .trialOrder,
+
+        globalOptionNumber:
+          getGlobalTrialNumber(
+            record.trial,
+          ),
+
+        globalTrialNumber:
+          getGlobalTrialNumber(
+            record.trial,
+          ),
+
+        outerTaskNumber:
+          getOuterTaskNumber(
+            record.trial,
+          ),
+
+        innerTaskNumber:
+          getInnerTaskNumber(
+            record.trial,
+          ) as StudyTrialProgress["trialNumber"],
+
+        condition:
+          record.trial
+            .condition,
+
+        conditionOrder:
+          record.trial
+            .conditionOrder,
+
+        isFirstTrial:
+          record.trial
+            .isFirstTrial,
+
+        probeExposureNumber:
+          record.trial
+            .probeExposureNumber,
+
+        probeNaive:
+          record.trial
+            .probeNaive,
+
+        phase:
+          "post_experiment",
+
+        messageId:
+          probe.id,
+
+        contentVersion:
+          record.probeVersion,
+
+        metadata: {
+          formId:
+            "delayed_probe_recall",
+
+          participantToken,
+
+          taskId:
+            record.taskId,
+
+          trialNumber:
+            record.trial
+              .trialNumber,
+
+          trialOrder:
+            record.trialOrder,
+
+          condition:
+            record.trial
+              .condition,
+
+          probeId:
+            probe.id,
+
+          probeVersion:
+            record.probeVersion,
+
+          recallCollectedAtIso,
+
+          probeRecall:
+            recall,
+        },
+
+        payload: {
+          probeRecall:
+            recall,
+        },
+      });
+    }
+
+    if (
+      !markDelayedRecallCollected()
+    ) {
+      setSubmitting(
+        false,
+      );
+
+      setValidationMessage(
+        "The delayed task-update recall responses could not be finalized.",
+      );
+
+      return;
+    }
+
+    const postExperimentSubmissionAlreadyLogged =
+      useEventLogStore
+        .getState()
+        .events
+        .some(
+          (loggedEvent) =>
+            loggedEvent.sessionId ===
+              sessionId &&
+            loggedEvent.eventType ===
+              "post_experiment_submitted",
+        );
+
+    if (
+      !postExperimentSubmissionAlreadyLogged
+    ) {
+      addEvent({
+        eventType:
+          "post_experiment_submitted",
 
       trialNumber:
         finalTrial.trialNumber,
@@ -1232,6 +2668,37 @@ export default function PostExperimentPage() {
             .funneledDebrief,
         },
 
+        delayedProbeRecall:
+          delayedRecallRecords.map(
+            (record) => ({
+              participantToken,
+
+              taskId:
+                record.taskId,
+
+              trialNumber:
+                record.trial
+                  .trialNumber,
+
+              trialOrder:
+                record.trialOrder,
+
+              condition:
+                record.trial
+                  .condition,
+
+              probeVersion:
+                record.probeVersion,
+
+              recallCollectedAtIso,
+
+              probeRecall: {
+                ...record.response
+                  .probeRecall,
+              },
+            }),
+          ),
+
         questionnaireStartedAtIso:
           submittedResponse
             .startedAtIso,
@@ -1239,26 +2706,316 @@ export default function PostExperimentPage() {
         questionnaireSubmittedAtIso:
           submittedResponse
             .submittedAtIso,
-      },
-    });
+        },
+      });
+    }
+
+    // ADVISER FIX: Export each finalized trial only after its delayed recall event exists.
+    const trialExportErrors:
+      string[] = [];
+
+    for (
+      const record of
+        delayedRecallRecords
+    ) {
+      const exportAttemptAtIso =
+        new Date()
+          .toISOString();
+
+      const currentTrial =
+        useStudySessionStore
+          .getState()
+          .getTrialProgress(
+            record.trial
+              .trialNumber,
+            record.taskId,
+          ) ??
+        record.trial;
+
+      const trialEvents =
+        useEventLogStore
+          .getState()
+          .getEventsForTrial(
+            record.trial
+              .trialNumber,
+            record.taskId,
+          );
+
+      const eventsFileName =
+        getTrialEventsCsvFileName(
+          participantToken,
+          record.trial
+            .trialNumber,
+          record.trial
+            .condition,
+          record.taskId,
+        );
+
+      const summaryFileName =
+        getTrialSummaryCsvFileName(
+          participantToken,
+          record.trial
+            .trialNumber,
+          record.trial
+            .condition,
+          record.taskId,
+        );
+
+      let eventsExported =
+        currentTrial
+          .eventsCsvExportStatus ===
+        "exported";
+
+      let summaryExported =
+        currentTrial
+          .summaryCsvExportStatus ===
+        "exported";
+
+      if (
+        !eventsExported
+      ) {
+        setTrialCsvExportStatus(
+          record.trial
+            .trialNumber,
+          "events",
+          "exporting",
+          undefined,
+          record.taskId,
+          exportAttemptAtIso,
+        );
+
+        try {
+          downloadCsv(
+            eventsFileName,
+            buildTrialEventRows(
+              trialEvents,
+            ),
+          );
+
+          if (
+            !markTrialEventsCsvExported(
+              record.trial
+                .trialNumber,
+              record.taskId,
+              exportAttemptAtIso,
+            )
+          ) {
+            throw new Error(
+              "The event CSV downloaded, but its completed status could not be recorded.",
+            );
+          }
+
+          eventsExported =
+            true;
+        } catch (
+          error
+        ) {
+          const errorMessage =
+            getErrorMessage(
+              error,
+            );
+
+          trialExportErrors.push(
+            `${eventsFileName}: ${errorMessage}`,
+          );
+
+          setTrialCsvExportStatus(
+            record.trial
+              .trialNumber,
+            "events",
+            "failed",
+            errorMessage,
+            record.taskId,
+            exportAttemptAtIso,
+          );
+        }
+      }
+
+      if (
+        !summaryExported
+      ) {
+        setTrialCsvExportStatus(
+          record.trial
+            .trialNumber,
+          "summary",
+          "exporting",
+          undefined,
+          record.taskId,
+          exportAttemptAtIso,
+        );
+
+        try {
+          downloadCsv(
+            summaryFileName,
+            buildTrialSummaryRows({
+              participantId,
+
+              sessionId,
+
+              trial:
+                currentTrial,
+
+              questionnaireResponse:
+                record.response,
+
+              events:
+                trialEvents,
+            }),
+          );
+
+          if (
+            !markTrialSummaryCsvExported(
+              record.trial
+                .trialNumber,
+              record.taskId,
+              exportAttemptAtIso,
+            )
+          ) {
+            throw new Error(
+              "The summary CSV downloaded, but its completed status could not be recorded.",
+            );
+          }
+
+          summaryExported =
+            true;
+        } catch (
+          error
+        ) {
+          const errorMessage =
+            getErrorMessage(
+              error,
+            );
+
+          trialExportErrors.push(
+            `${summaryFileName}: ${errorMessage}`,
+          );
+
+          setTrialCsvExportStatus(
+            record.trial
+              .trialNumber,
+            "summary",
+            "failed",
+            errorMessage,
+            record.taskId,
+            exportAttemptAtIso,
+          );
+        }
+      }
+
+      if (
+        eventsExported &&
+        summaryExported
+      ) {
+        markTrialQuestionnaireExported(
+          record.trial
+            .trialNumber,
+          record.taskId,
+        );
+      }
+
+      addEvent({
+        eventType:
+          "trial_csv_exported",
+
+        participantToken,
+
+        taskId:
+          record.taskId,
+
+        trialId:
+          getCompositeTrialId(
+            record.trial,
+          ),
+
+        trialNumber:
+          record.trial
+            .trialNumber,
+
+        trialOrder:
+          record.trial
+            .trialOrder,
+
+        condition:
+          record.trial
+            .condition,
+
+        conditionOrder:
+          record.trial
+            .conditionOrder,
+
+        isFirstTrial:
+          record.trial
+            .isFirstTrial,
+
+        probeExposureNumber:
+          record.trial
+            .probeExposureNumber,
+
+        probeNaive:
+          record.trial
+            .probeNaive,
+
+        phase:
+          "post_experiment",
+
+        accepted:
+          eventsExported &&
+          summaryExported,
+
+        metadata: {
+          eventsFileName,
+
+          summaryFileName,
+
+          eventsExported,
+
+          summaryExported,
+
+          delayedRecallCollected:
+            true,
+
+          exportedAtIso:
+            exportAttemptAtIso,
+        },
+      });
+    }
+
+    if (
+      trialExportErrors.length >
+      0
+    ) {
+      setSubmitting(
+        false,
+      );
+
+      setValidationMessage(
+        "The delayed recall was saved, but one or more finalized trial CSV files could not be downloaded. Select Continue again to retry only missing files.",
+      );
+
+      return;
+    }
 
     const exportedAtIso =
       new Date()
         .toISOString();
 
-    const safeParticipantId =
+    const safeParticipantToken =
       sanitizeFilePart(
-        participantId,
+        participantToken,
       );
 
     const fileName =
-      `${safeParticipantId}_post_experiment_questionnaire.csv`;
+      `${safeParticipantToken}_post_experiment_questionnaire.csv`;
 
-    setPostExperimentCsvExportStatus(
-      "exporting",
-    );
+    if (
+      postExperimentCsvExportStatus !==
+      "exported"
+    ) {
+      setPostExperimentCsvExportStatus(
+        "exporting",
+      );
 
-    try {
+      try {
       const compositeTrialOrder =
         orderedTrials
           .map(
@@ -1318,6 +3075,9 @@ export default function PostExperimentPage() {
         {
           participant_id:
             participantId,
+
+          participant_token:
+            participantToken,
 
           session_id:
             sessionId,
@@ -1443,6 +3203,11 @@ export default function PostExperimentPage() {
             submittedResponse
               .funneledDebrief
               .additionalFeedback,
+
+          ...getPostExperimentRecallColumns(
+            delayedRecallRecords,
+            recallCollectedAtIso,
+          ),
         },
       ];
 
@@ -1509,27 +3274,28 @@ export default function PostExperimentPage() {
           exportedAtIso,
         },
       });
-    } catch (
-      error
-    ) {
-      const errorMessage =
-        getErrorMessage(
-          error,
+      } catch (
+        error
+      ) {
+        const errorMessage =
+          getErrorMessage(
+            error,
+          );
+
+        setPostExperimentCsvExportStatus(
+          "failed",
         );
 
-      setPostExperimentCsvExportStatus(
-        "failed",
-      );
+        setSubmitting(
+          false,
+        );
 
-      setSubmitting(
-        false,
-      );
+        setValidationMessage(
+          `The questionnaire was recorded, but the CSV file could not be downloaded. ${errorMessage}`,
+        );
 
-      setValidationMessage(
-        `The questionnaire was recorded, but the CSV file could not be downloaded. ${errorMessage}`,
-      );
-
-      return;
+        return;
+      }
     }
 
     const completed =
@@ -1606,10 +3372,53 @@ export default function PostExperimentPage() {
 
           <p>
             You have completed all three experiment tasks.
-            Please answer the following questions based on
-            your overall experience.
+            First answer the task-update questions from memory,
+            then answer the questions about your overall experience.
           </p>
         </section>
+
+        {delayedRecallRecords.map(
+          (record) => (
+            <DelayedRecallSection
+              key={`${record.taskId}:${record.trial.trialNumber}`}
+              taskId={
+                record.taskId
+              }
+              trialNumber={
+                record.trial
+                  .trialNumber
+              }
+              trialOrder={
+                record.trialOrder
+              }
+              condition={
+                record.trial
+                  .condition
+              }
+              probeVersion={
+                record.probeVersion
+              }
+              response={
+                record.response
+              }
+              disabled={
+                submitting
+              }
+              onChange={(
+                dimension,
+                value,
+              ) => {
+                setProbeRecallValue(
+                  record.trial
+                    .trialNumber,
+                  dimension,
+                  value,
+                  record.taskId,
+                );
+              }}
+            />
+          ),
+        )}
 
         <DebriefForm
           values={
@@ -1639,9 +3448,9 @@ export default function PostExperimentPage() {
           />
 
           <p>
-            Your final responses will be recorded and one
-            post-experiment questionnaire CSV file will be
-            downloaded after submission.
+            Your final responses will be recorded, then the
+            finalized trial CSV files and post-experiment CSV
+            will be downloaded after submission.
           </p>
         </section>
 
@@ -1654,7 +3463,7 @@ export default function PostExperimentPage() {
             }
           >
             {submitting
-              ? "Preparing study file"
+              ? "Preparing study files"
               : "Continue to disclosure"}
 
             {!submitting && (

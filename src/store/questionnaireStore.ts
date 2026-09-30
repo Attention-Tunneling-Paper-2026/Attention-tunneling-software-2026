@@ -1014,6 +1014,7 @@ export const useQuestionnaireStore =
         taskId =
           "symposium",
       ) => {
+        // ADVISER FIX: Delayed recall remains editable after per-trial submission until final export.
         const resolvedTaskId =
           normalizeTaskId(
             taskId,
@@ -1030,7 +1031,7 @@ export const useQuestionnaireStore =
                       trialNumber,
                       resolvedTaskId,
                     ) ||
-                    response.submittedAtIso !==
+                    response.exportedAtIso !==
                       null
                   ) {
                     return response;

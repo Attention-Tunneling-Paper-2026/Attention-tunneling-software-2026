@@ -19,6 +19,7 @@ import {
 } from "../store/studySessionStore";
 
 import {
+  TOTAL_STUDY_TRIALS,
   isStudyTaskId,
   isStudyTrialNumber,
 } from "../types/scheduler";
@@ -28,21 +29,9 @@ import type {
   StudyTrialNumber,
 } from "../types/scheduler";
 
-interface InvalidTaskPageProps {
-  taskId:
-    StudyTaskId | null;
-}
-
-function InvalidTaskPage({
-  taskId,
-}: InvalidTaskPageProps) {
+function InvalidTaskPage() {
   const navigate =
     useNavigate();
-
-  const returnPath =
-    taskId
-      ? `/tasks/${taskId}`
-      : "/tasks";
 
   return (
     <main className="study-page">
@@ -79,8 +68,8 @@ function InvalidTaskPage({
               </h2>
 
               <p>
-                Return to the task selection page and choose
-                an available task.
+                Return to the assigned-task page to continue
+                with the task in your study sequence.
               </p>
             </div>
           </div>
@@ -92,7 +81,7 @@ function InvalidTaskPage({
             className="study-primary-button"
             onClick={() =>
               navigate(
-                returnPath,
+                "/tasks",
               )
             }
           >
@@ -101,7 +90,7 @@ function InvalidTaskPage({
               aria-hidden="true"
             />
 
-            Return to task selection
+            Return to assigned task
           </button>
         </div>
       </div>
@@ -129,6 +118,18 @@ export default function TaskPage() {
         state.procedureAccepted,
     );
 
+  const assignmentStatus =
+    useStudySessionStore(
+      (state) =>
+        state.assignmentStatus,
+    );
+
+  const assignments =
+    useStudySessionStore(
+      (state) =>
+        state.assignments,
+    );
+
   const postExperimentCompleted =
     useStudySessionStore(
       (state) =>
@@ -145,6 +146,12 @@ export default function TaskPage() {
     useStudySessionStore(
       (state) =>
         state.trials,
+    );
+
+  const startNextTrial =
+    useStudySessionStore(
+      (state) =>
+        state.startNextTrial,
     );
 
   const taskId:
@@ -169,8 +176,10 @@ export default function TaskPage() {
         : null;
 
   const trial =
-    taskId === null ||
-    trialNumber === null
+    taskId ===
+        null ||
+      trialNumber ===
+        null
       ? undefined
       : trials.find(
           (item) =>
@@ -179,6 +188,30 @@ export default function TaskPage() {
             item.trialNumber ===
               trialNumber,
         );
+
+  const assignmentReady =
+    assignmentStatus ===
+      "valid" &&
+    assignments.length ===
+      TOTAL_STUDY_TRIALS &&
+    trials.length ===
+      TOTAL_STUDY_TRIALS;
+
+  const orderedAssignments =
+    assignments
+      .slice()
+      .sort(
+        (
+          first,
+          second,
+        ) =>
+          Number(
+            first.trialOrder,
+          ) -
+          Number(
+            second.trialOrder,
+          ),
+      );
 
   const openTrial =
     trials.find(
@@ -189,27 +222,97 @@ export default function TaskPage() {
           "submitted",
     );
 
-  const routeMatchesOpenTrial =
+  const openAssignment =
+    openTrial
+      ? orderedAssignments.find(
+          (assignment) =>
+            assignment.taskId ===
+              openTrial.taskId &&
+            assignment.trialNumber ===
+              openTrial.trialNumber,
+        )
+      : undefined;
+
+  const nextAssignment =
+    orderedAssignments.find(
+      (assignment) => {
+        const assignedTrial =
+          trials.find(
+            (item) =>
+              item.taskId ===
+                assignment.taskId &&
+              item.trialNumber ===
+                assignment.trialNumber,
+          );
+
+        return assignedTrial?.status ===
+          "pending";
+      },
+    );
+
+  // ADVISER FIX: Direct URLs may access only the open or next token-assigned trial.
+  const currentAssignment =
+    openAssignment ??
+    nextAssignment;
+
+  const currentTrial =
+    currentAssignment
+      ? trials.find(
+          (item) =>
+            item.taskId ===
+              currentAssignment.taskId &&
+            item.trialNumber ===
+              currentAssignment.trialNumber,
+        )
+      : undefined;
+
+  const allTrialsComplete =
+    assignmentReady &&
+    orderedAssignments.every(
+      (assignment) =>
+        trials.some(
+          (item) =>
+            item.taskId ===
+              assignment.taskId &&
+            item.trialNumber ===
+              assignment.trialNumber &&
+            item.status ===
+              "questionnaire_complete",
+        ),
+    );
+
+  const routeMatchesCurrentAssignment =
     Boolean(
-      openTrial &&
+      currentAssignment &&
       taskId !==
         null &&
       trialNumber !==
         null &&
-      openTrial.taskId ===
+      currentAssignment.taskId ===
         taskId &&
-      openTrial.trialNumber ===
+      currentAssignment.trialNumber ===
         trialNumber,
     );
 
+  const correctAssignedPath =
+    !currentAssignment ||
+    !currentTrial
+      ? "/tasks"
+      : currentTrial.status ===
+          "submitted"
+        ? `/trial-questionnaire/${currentAssignment.taskId}/${currentAssignment.trialNumber}`
+        : `/task/${currentAssignment.taskId}/${currentAssignment.trialNumber}`;
+
   useEffect(() => {
     if (
-      !procedureAccepted
+      !procedureAccepted ||
+      !assignmentReady
     ) {
       navigate(
         "/procedure",
         {
-          replace: true,
+          replace:
+            true,
         },
       );
 
@@ -223,7 +326,8 @@ export default function TaskPage() {
       navigate(
         "/disclosure",
         {
-          replace: true,
+          replace:
+            true,
         },
       );
 
@@ -231,26 +335,13 @@ export default function TaskPage() {
     }
 
     if (
-      taskId ===
-        null ||
-      trialNumber ===
-        null ||
-      !trial
-    ) {
-      return;
-    }
-
-    if (
-      openTrial &&
-      !routeMatchesOpenTrial
+      allTrialsComplete
     ) {
       navigate(
-        openTrial.status ===
-          "submitted"
-          ? `/trial-questionnaire/${openTrial.taskId}/${openTrial.trialNumber}`
-          : `/task/${openTrial.taskId}/${openTrial.trialNumber}`,
+        "/post-experiment",
         {
-          replace: true,
+          replace:
+            true,
         },
       );
 
@@ -258,27 +349,82 @@ export default function TaskPage() {
     }
 
     if (
-      trial.status ===
+      !currentAssignment ||
+      !currentTrial
+    ) {
+      navigate(
+        "/tasks",
+        {
+          replace:
+            true,
+        },
+      );
+
+      return;
+    }
+
+    if (
+      !routeMatchesCurrentAssignment
+    ) {
+      navigate(
+        correctAssignedPath,
+        {
+          replace:
+            true,
+        },
+      );
+
+      return;
+    }
+
+    if (
+      currentTrial.status ===
       "pending"
     ) {
-      navigate(
-        `/tasks/${taskId}`,
-        {
-          replace: true,
-        },
-      );
+      const startedAssignment =
+        startNextTrial();
+
+      if (
+        !startedAssignment
+      ) {
+        navigate(
+          "/tasks",
+          {
+            replace:
+              true,
+          },
+        );
+
+        return;
+      }
+
+      if (
+        startedAssignment.taskId !==
+          currentAssignment.taskId ||
+        startedAssignment.trialNumber !==
+          currentAssignment.trialNumber
+      ) {
+        navigate(
+          `/task/${startedAssignment.taskId}/${startedAssignment.trialNumber}`,
+          {
+            replace:
+              true,
+          },
+        );
+      }
 
       return;
     }
 
     if (
-      trial.status ===
+      currentTrial.status ===
       "submitted"
     ) {
       navigate(
-        `/trial-questionnaire/${taskId}/${trialNumber}`,
+        `/trial-questionnaire/${currentAssignment.taskId}/${currentAssignment.trialNumber}`,
         {
-          replace: true,
+          replace:
+            true,
         },
       );
 
@@ -286,32 +432,37 @@ export default function TaskPage() {
     }
 
     if (
-      trial.status ===
+      currentTrial.status ===
       "questionnaire_complete"
     ) {
       navigate(
-        `/tasks/${taskId}`,
+        "/tasks",
         {
-          replace: true,
+          replace:
+            true,
         },
       );
     }
   }, [
+    allTrialsComplete,
+    assignmentReady,
+    correctAssignedPath,
+    currentAssignment,
+    currentTrial,
     navigate,
-    openTrial,
     postExperimentCompleted,
     procedureAccepted,
-    routeMatchesOpenTrial,
+    routeMatchesCurrentAssignment,
+    startNextTrial,
     studyCompleted,
-    taskId,
-    trial,
-    trialNumber,
   ]);
 
   if (
     !procedureAccepted ||
+    !assignmentReady ||
     postExperimentCompleted ||
-    studyCompleted
+    studyCompleted ||
+    allTrialsComplete
   ) {
     return null;
   }
@@ -324,19 +475,14 @@ export default function TaskPage() {
     !trial
   ) {
     return (
-      <InvalidTaskPage
-        taskId={
-          taskId
-        }
-      />
+      <InvalidTaskPage />
     );
   }
 
   if (
-    (
-      openTrial &&
-      !routeMatchesOpenTrial
-    ) ||
+    !currentAssignment ||
+    !currentTrial ||
+    !routeMatchesCurrentAssignment ||
     trial.status !==
       "active"
   ) {

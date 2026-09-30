@@ -14,7 +14,6 @@ import {
 } from "../../store/studySessionStore";
 
 import {
-  STUDY_TASK_IDS,
   TOTAL_STUDY_TRIALS,
   isStudyTaskId,
   isStudyTrialNumber,
@@ -26,6 +25,7 @@ import type {
 } from "../../types/scheduler";
 
 import type {
+  StudyTrialAssignment,
   StudyTrialProgress,
 } from "../../types/study";
 
@@ -52,64 +52,49 @@ interface ProtectedStudyRouteProps {
     number;
 }
 
-function getTrialTaskId(
-  trial: unknown,
-): StudyTaskId | null {
-  if (
-    typeof trial !==
-      "object" ||
-    trial === null ||
-    !("taskId" in trial)
-  ) {
-    return null;
-  }
+function trialMatchesAssignment(
+  trial:
+    StudyTrialProgress,
 
-  const taskId =
-    (
-      trial as {
-        taskId?: unknown;
-      }
-    ).taskId;
-
-  return isStudyTaskId(
-    taskId,
-  )
-    ? taskId
-    : null;
+  assignment:
+    StudyTrialAssignment,
+): boolean {
+  return (
+    trial.taskId ===
+      assignment.taskId &&
+    trial.trialNumber ===
+      assignment.trialNumber
+  );
 }
 
-function hasExactlyOneCompletedTrialPerTask(
+function allAssignedTrialsAreComplete(
+  assignments:
+    StudyTrialAssignment[],
+
   trials:
     StudyTrialProgress[],
 ): boolean {
-  const completedTrials =
-    trials.filter(
-      (trial) =>
-        trial.status ===
-        "questionnaire_complete",
-    );
-
   if (
-    completedTrials.length !==
-    TOTAL_STUDY_TRIALS
+    assignments.length !==
+      TOTAL_STUDY_TRIALS ||
+    trials.length !==
+      TOTAL_STUDY_TRIALS
   ) {
     return false;
   }
 
-  const hasEachTaskExactlyOnce =
-    STUDY_TASK_IDS.every(
-      (taskId) =>
-        completedTrials.filter(
-          (trial) =>
-            getTrialTaskId(
-              trial,
-            ) ===
-            taskId,
-        ).length ===
-        1,
-    );
-
-  return hasEachTaskExactlyOnce;
+  return assignments.every(
+    (assignment) =>
+      trials.some(
+        (trial) =>
+          trialMatchesAssignment(
+            trial,
+            assignment,
+          ) &&
+          trial.status ===
+            "questionnaire_complete",
+      ),
+  );
 }
 
 export default function ProtectedStudyRoute({
@@ -131,6 +116,24 @@ export default function ProtectedStudyRoute({
     trialNumber?:
       string;
   }>();
+
+  const participantToken =
+    useStudySessionStore(
+      (state) =>
+        state.participantToken,
+    );
+
+  const assignmentStatus =
+    useStudySessionStore(
+      (state) =>
+        state.assignmentStatus,
+    );
+
+  const assignments =
+    useStudySessionStore(
+      (state) =>
+        state.assignments,
+    );
 
   const procedureAccepted =
     useStudySessionStore(
@@ -155,6 +158,32 @@ export default function ProtectedStudyRoute({
       (state) =>
         state.studyCompleted,
     );
+
+  const assignmentReady =
+    assignmentStatus ===
+      "valid" &&
+    participantToken.length >
+      0 &&
+    assignments.length ===
+      TOTAL_STUDY_TRIALS &&
+    trials.length ===
+      TOTAL_STUDY_TRIALS;
+
+  const orderedAssignments =
+    assignments
+      .slice()
+      .sort(
+        (
+          first,
+          second,
+        ) =>
+          Number(
+            first.trialOrder,
+          ) -
+          Number(
+            second.trialOrder,
+          ),
+      );
 
   const routeTaskId:
     StudyTaskId | null =
@@ -185,11 +214,23 @@ export default function ProtectedStudyRoute({
       ? undefined
       : trials.find(
           (trial) =>
-            getTrialTaskId(
-              trial,
-            ) ===
+            trial.taskId ===
               routeTaskId &&
             trial.trialNumber ===
+              routeTrialNumber,
+        );
+
+  const routeAssignment =
+    routeTaskId ===
+        null ||
+      routeTrialNumber ===
+        null
+      ? undefined
+      : orderedAssignments.find(
+          (assignment) =>
+            assignment.taskId ===
+              routeTaskId &&
+            assignment.trialNumber ===
               routeTrialNumber,
         );
 
@@ -202,16 +243,64 @@ export default function ProtectedStudyRoute({
           "submitted",
     );
 
-  const openTrialTaskId =
+  const openAssignment =
     openTrial
-      ? getTrialTaskId(
-          openTrial,
+      ? orderedAssignments.find(
+          (assignment) =>
+            trialMatchesAssignment(
+              openTrial,
+              assignment,
+            ),
         )
-      : null;
+      : undefined;
+
+  const nextAssignment =
+    orderedAssignments.find(
+      (assignment) => {
+        const matchingTrial =
+          trials.find(
+            (trial) =>
+              trialMatchesAssignment(
+                trial,
+                assignment,
+              ),
+          );
+
+        return matchingTrial?.status ===
+          "pending";
+      },
+    );
+
+  // ADVISER FIX: Protected routes follow only the open or next token assignment.
+  const currentAssignment =
+    openAssignment ??
+    nextAssignment;
+
+  const currentTrial =
+    currentAssignment
+      ? trials.find(
+          (trial) =>
+            trialMatchesAssignment(
+              trial,
+              currentAssignment,
+            ),
+        )
+      : undefined;
 
   const allTrialsComplete =
-    hasExactlyOneCompletedTrialPerTask(
+    allAssignedTrialsAreComplete(
+      orderedAssignments,
       trials,
+    );
+
+  const routeMatchesCurrentAssignment =
+    Boolean(
+      routeAssignment &&
+      currentAssignment &&
+      routeAssignment.taskId ===
+        currentAssignment.taskId &&
+      routeAssignment.trialNumber ===
+        currentAssignment.trialNumber,
     );
 
   function renderRoute() {
@@ -239,39 +328,62 @@ export default function ProtectedStudyRoute({
     );
   }
 
-  function getTaskSelectionPath(
-    taskId:
-      StudyTaskId | null,
-  ): string {
-    return taskId
-      ? `/tasks/${taskId}`
-      : "/tasks";
+  function getProcedurePath():
+    string {
+    const tokenFromQuery =
+      new URLSearchParams(
+        location.search,
+      )
+        .get(
+          "token",
+        )
+        ?.trim() ??
+      "";
+
+    const token =
+      participantToken.trim() ||
+      tokenFromQuery;
+
+    // ADVISER FIX: Preserve the validated token when a guard returns to procedure.
+    return token
+      ? `/procedure?token=${encodeURIComponent(
+          token,
+        )}`
+      : "/procedure";
   }
 
-  function getOpenTrialPath():
+  function getCurrentAssignedPath():
     string {
     if (
-      !openTrial ||
-      !openTrialTaskId
+      !currentAssignment ||
+      !currentTrial
     ) {
       return "/tasks";
     }
 
     if (
-      openTrial.status ===
+      currentTrial.status ===
       "submitted"
     ) {
-      return `/trial-questionnaire/${openTrialTaskId}/${openTrial.trialNumber}`;
+      return `/trial-questionnaire/${currentAssignment.taskId}/${currentAssignment.trialNumber}`;
     }
 
-    return `/task/${openTrialTaskId}/${openTrial.trialNumber}`;
+    return `/task/${currentAssignment.taskId}/${currentAssignment.trialNumber}`;
+  }
+
+  function getResumePath():
+    string {
+    return openAssignment
+      ? getCurrentAssignedPath()
+      : "/tasks";
   }
 
   if (
-    !procedureAccepted
+    !procedureAccepted ||
+    !assignmentReady
   ) {
     return redirect(
-      "/procedure",
+      getProcedurePath(),
     );
   }
 
@@ -293,7 +405,7 @@ export default function ProtectedStudyRoute({
       !allTrialsComplete
     ) {
       return redirect(
-        getOpenTrialPath(),
+        getResumePath(),
       );
     }
 
@@ -311,9 +423,7 @@ export default function ProtectedStudyRoute({
   ) {
     if (
       taskIdParam !==
-        undefined &&
-      routeTaskId ===
-        null
+      undefined
     ) {
       return redirect(
         "/tasks",
@@ -329,10 +439,10 @@ export default function ProtectedStudyRoute({
     }
 
     if (
-      openTrial
+      openAssignment
     ) {
       return redirect(
-        getOpenTrialPath(),
+        getCurrentAssignedPath(),
       );
     }
 
@@ -353,22 +463,15 @@ export default function ProtectedStudyRoute({
 
     if (
       routeTaskId ===
-        null
-    ) {
-      return redirect(
-        "/tasks",
-      );
-    }
-
-    if (
+        null ||
       routeTrialNumber ===
         null ||
-      !routeTrial
+      !routeTrial ||
+      !routeAssignment ||
+      !routeMatchesCurrentAssignment
     ) {
       return redirect(
-        getTaskSelectionPath(
-          routeTaskId,
-        ),
+        getCurrentAssignedPath(),
       );
     }
 
@@ -377,9 +480,7 @@ export default function ProtectedStudyRoute({
       "questionnaire_complete"
     ) {
       return redirect(
-        getTaskSelectionPath(
-          routeTaskId,
-        ),
+        "/tasks",
       );
     }
 
@@ -394,31 +495,12 @@ export default function ProtectedStudyRoute({
 
     if (
       routeTrial.status !==
-      "active"
+        "pending" &&
+      routeTrial.status !==
+        "active"
     ) {
       return redirect(
-        getTaskSelectionPath(
-          routeTaskId,
-        ),
-      );
-    }
-
-    const openTrialIsDifferent =
-      Boolean(
-        openTrial,
-      ) &&
-      (
-        openTrialTaskId !==
-          routeTaskId ||
-        openTrial?.trialNumber !==
-          routeTrialNumber
-      );
-
-    if (
-      openTrialIsDifferent
-    ) {
-      return redirect(
-        getOpenTrialPath(),
+        getCurrentAssignedPath(),
       );
     }
 
@@ -439,22 +521,15 @@ export default function ProtectedStudyRoute({
 
     if (
       routeTaskId ===
-        null
-    ) {
-      return redirect(
-        "/tasks",
-      );
-    }
-
-    if (
+        null ||
       routeTrialNumber ===
         null ||
-      !routeTrial
+      !routeTrial ||
+      !routeAssignment ||
+      !routeMatchesCurrentAssignment
     ) {
       return redirect(
-        getTaskSelectionPath(
-          routeTaskId,
-        ),
+        getCurrentAssignedPath(),
       );
     }
 
@@ -463,15 +538,15 @@ export default function ProtectedStudyRoute({
       "questionnaire_complete"
     ) {
       return redirect(
-        getTaskSelectionPath(
-          routeTaskId,
-        ),
+        "/tasks",
       );
     }
 
     if (
       routeTrial.status ===
-      "active"
+        "active" ||
+      routeTrial.status ===
+        "pending"
     ) {
       return redirect(
         `/task/${routeTaskId}/${routeTrialNumber}`,
@@ -483,28 +558,7 @@ export default function ProtectedStudyRoute({
       "submitted"
     ) {
       return redirect(
-        getTaskSelectionPath(
-          routeTaskId,
-        ),
-      );
-    }
-
-    const openTrialIsDifferent =
-      Boolean(
-        openTrial,
-      ) &&
-      (
-        openTrialTaskId !==
-          routeTaskId ||
-        openTrial?.trialNumber !==
-          routeTrialNumber
-      );
-
-    if (
-      openTrialIsDifferent
-    ) {
-      return redirect(
-        getOpenTrialPath(),
+        getCurrentAssignedPath(),
       );
     }
 
@@ -519,7 +573,7 @@ export default function ProtectedStudyRoute({
       !allTrialsComplete
     ) {
       return redirect(
-        getOpenTrialPath(),
+        getResumePath(),
       );
     }
 
@@ -534,7 +588,7 @@ export default function ProtectedStudyRoute({
       !allTrialsComplete
     ) {
       return redirect(
-        getOpenTrialPath(),
+        getResumePath(),
       );
     }
 

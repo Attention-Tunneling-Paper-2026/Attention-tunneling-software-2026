@@ -11,12 +11,14 @@ import {
 
 import {
   useEffect,
+  useMemo,
   useRef,
   useState,
 } from "react";
 
 import {
   useNavigate,
+  useSearchParams,
 } from "react-router";
 
 import {
@@ -30,8 +32,9 @@ import {
 const PARTICIPANT_VISIBLE_TASK_COUNT =
   3;
 
+// ADVISER FIX: Each token assigns one condition for each of the three tasks.
 const TRIALS_PER_TASK =
-  3;
+  1;
 
 const TOTAL_STUDY_TRIALS =
   PARTICIPANT_VISIBLE_TASK_COUNT *
@@ -40,6 +43,21 @@ const TOTAL_STUDY_TRIALS =
 export default function ProcedurePage() {
   const navigate =
     useNavigate();
+
+  const [
+    searchParams,
+  ] = useSearchParams();
+
+  const participantTokenFromUrl =
+    searchParams.get(
+      "token",
+    );
+
+  const participantToken =
+    useStudySessionStore(
+      (state) =>
+        state.participantToken,
+    );
 
   const participantId =
     useStudySessionStore(
@@ -53,10 +71,46 @@ export default function ProcedurePage() {
         state.sessionId,
     );
 
+  const conditionOrder =
+    useStudySessionStore(
+      (state) =>
+        state.conditionOrder,
+    );
+
   const procedureAccepted =
     useStudySessionStore(
       (state) =>
         state.procedureAccepted,
+    );
+
+  const assignmentStatus =
+    useStudySessionStore(
+      (state) =>
+        state.assignmentStatus,
+    );
+
+  const assignmentTableVersion =
+    useStudySessionStore(
+      (state) =>
+        state.assignmentTableVersion,
+    );
+
+  const assignmentSequenceId =
+    useStudySessionStore(
+      (state) =>
+        state.assignmentSequenceId,
+    );
+
+  const assignments =
+    useStudySessionStore(
+      (state) =>
+        state.assignments,
+    );
+
+  const initializeSessionFromToken =
+    useStudySessionStore(
+      (state) =>
+        state.initializeSessionFromToken,
     );
 
   const acceptProcedure =
@@ -65,10 +119,10 @@ export default function ProcedurePage() {
         state.acceptProcedure,
     );
 
-  const setEventParticipantId =
+  const setEventParticipantToken =
     useEventLogStore(
       (state) =>
-        state.setParticipantId,
+        state.setParticipantToken,
     );
 
   const setEventSessionId =
@@ -96,9 +150,9 @@ export default function ProcedurePage() {
     procedureAccepted,
   );
 
-  const procedureEventLogged =
-    useRef(
-      false,
+  const sessionEntryLoggedFor =
+    useRef<string | null>(
+      null,
     );
 
   const continueStarted =
@@ -106,18 +160,86 @@ export default function ProcedurePage() {
       false,
     );
 
+  const assignmentReady =
+    assignmentStatus ===
+      "valid" &&
+    participantToken.length >
+      0 &&
+    sessionId.length >
+      0 &&
+    assignmentTableVersion !==
+      null &&
+    assignmentSequenceId !==
+      null &&
+    assignments.length ===
+      TOTAL_STUDY_TRIALS;
+
+  const resolvedOrderedPlan =
+    useMemo(
+      () =>
+        assignments
+          .slice()
+          .sort(
+            (
+              first,
+              second,
+            ) =>
+              Number(
+                first.trialOrder,
+              ) -
+              Number(
+                second.trialOrder,
+              ),
+          )
+          .map(
+            (assignment) => ({
+              trialOrder:
+                assignment.trialOrder,
+
+              taskId:
+                assignment.taskId,
+
+              trialNumber:
+                assignment.trialNumber,
+
+              condition:
+                assignment.condition,
+            }),
+          ),
+      [
+        assignments,
+      ],
+    );
+
+  // ADVISER FIX: A valid URL token initializes the exact static three-trial plan.
   useEffect(() => {
-    setEventParticipantId(
-      participantId,
+    initializeSessionFromToken(
+      participantTokenFromUrl,
+    );
+  }, [
+    initializeSessionFromToken,
+    participantTokenFromUrl,
+  ]);
+
+  useEffect(() => {
+    if (
+      !assignmentReady
+    ) {
+      return;
+    }
+
+    setEventParticipantToken(
+      participantToken,
     );
 
     setEventSessionId(
       sessionId,
     );
   }, [
-    participantId,
+    assignmentReady,
+    participantToken,
     sessionId,
-    setEventParticipantId,
+    setEventParticipantToken,
     setEventSessionId,
   ]);
 
@@ -131,12 +253,23 @@ export default function ProcedurePage() {
 
   useEffect(() => {
     if (
-      procedureEventLogged.current
+      !assignmentReady ||
+      sessionEntryLoggedFor.current ===
+        sessionId
     ) {
       return;
     }
 
-    const alreadyLogged =
+    const sessionStartAlreadyLogged =
+      events.some(
+        (event) =>
+          event.sessionId ===
+            sessionId &&
+          event.eventType ===
+            "session_start",
+      );
+
+    const procedureAlreadyLogged =
       events.some(
         (event) =>
           event.sessionId ===
@@ -145,48 +278,79 @@ export default function ProcedurePage() {
             "procedure_viewed",
       );
 
-    procedureEventLogged.current =
-      true;
+    sessionEntryLoggedFor.current =
+      sessionId;
 
     if (
-      alreadyLogged
+      !sessionStartAlreadyLogged
     ) {
-      return;
+      // ADVISER FIX: Record the immutable token-table assignment at session start.
+      addEvent({
+        eventType:
+          "session_start",
+
+        phase:
+          "session",
+
+        // ADVISER FIX: Use the validated token plan in the fixed CSV field.
+        conditionOrder,
+
+        metadata: {
+          participantToken,
+
+          assignmentTableVersion,
+
+          assignmentSequenceId,
+
+          resolvedOrderedPlan,
+        },
+      });
     }
 
-    addEvent({
-      eventType:
-        "procedure_viewed",
+    if (
+      !procedureAlreadyLogged
+    ) {
+      addEvent({
+        eventType:
+          "procedure_viewed",
 
-      phase:
-        "pre_ai",
+        phase:
+          "pre_ai",
 
-      metadata: {
-        page:
-          "procedure",
+        metadata: {
+          page:
+            "procedure",
 
-        participantVisibleTaskCount:
-          PARTICIPANT_VISIBLE_TASK_COUNT,
+          participantVisibleTaskCount:
+            PARTICIPANT_VISIBLE_TASK_COUNT,
 
-        trialsPerTask:
-          TRIALS_PER_TASK,
+          trialsPerTask:
+            TRIALS_PER_TASK,
 
-        totalTrials:
-          TOTAL_STUDY_TRIALS,
+          totalTrials:
+            TOTAL_STUDY_TRIALS,
 
-        procedureAccepted,
-      },
-    });
+          procedureAccepted,
+        },
+      });
+    }
   }, [
     addEvent,
+    assignmentReady,
+    assignmentSequenceId,
+    assignmentTableVersion,
+    conditionOrder,
     events,
+    participantToken,
     procedureAccepted,
+    resolvedOrderedPlan,
     sessionId,
   ]);
 
   function handleContinue() {
     if (
       !instructionsAccepted ||
+      !assignmentReady ||
       continueStarted.current
     ) {
       return;
@@ -231,7 +395,15 @@ export default function ProcedurePage() {
 
           participantId,
 
+          participantToken,
+
           sessionId,
+
+          assignmentTableVersion,
+
+          assignmentSequenceId,
+
+          resolvedOrderedPlan,
         },
       });
     }
@@ -268,6 +440,25 @@ export default function ProcedurePage() {
       </header>
 
       <div className="study-page-content">
+        {assignmentStatus ===
+          "invalid" && (
+          <section
+            className="study-notice-card"
+            role="alert"
+            aria-labelledby="assignment-error-title"
+          >
+            <h2 id="assignment-error-title">
+              Participant link error
+            </h2>
+
+            <p>
+              This study link is missing a valid participant
+              token. Please ask the researcher to reopen your
+              assigned study URL.
+            </p>
+          </section>
+        )}
+
         <section
           className="study-overview-card"
           aria-labelledby="study-overview-title"
@@ -557,6 +748,9 @@ export default function ProcedurePage() {
           <label className="procedure-confirmation-label">
             <input
               type="checkbox"
+              disabled={
+                !assignmentReady
+              }
               checked={
                 instructionsAccepted
               }
@@ -579,13 +773,14 @@ export default function ProcedurePage() {
             type="button"
             className="study-primary-button"
             disabled={
-              !instructionsAccepted
+              !instructionsAccepted ||
+              !assignmentReady
             }
             onClick={
               handleContinue
             }
           >
-            Continue to task selection
+            Continue to assigned tasks
 
             <ArrowRight
               size={18}

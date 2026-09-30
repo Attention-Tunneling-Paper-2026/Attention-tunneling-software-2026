@@ -99,7 +99,7 @@ export type ScheduleAction =
   (typeof SCHEDULE_ACTIONS)[number];
 
 /*
- * All three task domains use the same 3 × 4 allocation geometry. Room and
+ * All three task domains use the same 3 Ã— 4 allocation geometry. Room and
  * Slot therefore remain the canonical stored coordinate types, while these
  * aliases provide domain-neutral terminology to new code.
  */
@@ -148,6 +148,13 @@ export type ProbeAcknowledgmentSource =
 /* Compatibility spelling used by some study files. */
 export type ProbeAcknowledgementSource =
   ProbeAcknowledgmentSource;
+
+// ADVISER FIX: Restrict probe-onset reasons to the approved state-based policy.
+export type ProbeTriggerReason =
+  | "invest"
+  | "solved"
+  | "cap"
+  | "floor_clamped";
 
 export type StudyEventMetadata =
   Record<string, unknown>;
@@ -246,6 +253,13 @@ export interface StudyEventMeasurements {
   probeDisplayMode?: ProbeDisplayMode;
   probeAcknowledgmentSource?: ProbeAcknowledgmentSource;
 
+  // ADVISER FIX: Store probe-onset measurements as typed event fields, not metadata only.
+  triggerReason?: ProbeTriggerReason;
+  placedItemCount?: number;
+  currentConflictCount?: number;
+  editsMadeSoFar?: number;
+  idleMsInPrevious60Seconds?: number;
+
   integrationConsistentEdit?: boolean;
   probeIntegrationDetected?: boolean | null;
 
@@ -313,7 +327,7 @@ export interface StudyEvent
   trialOrder: StudyTrialOrderValue;
 
   /*
-   * Stable 1–9 task-condition option identifier retained for compatibility.
+   * Stable 1â€“9 task-condition option identifier retained for compatibility.
    * This is not the participant's chronological trial order.
    */
   trialIndex?: number;
@@ -323,7 +337,7 @@ export interface StudyEvent
   innerTaskNumber?: StudyTrialNumber;
 
   /*
-   * Compatibility name for the stable 1–9 option identifier.
+   * Compatibility name for the stable 1â€“9 option identifier.
    * Prefer globalOptionNumber in new code.
    */
   globalTrialNumber?: number;
@@ -367,7 +381,7 @@ export interface CreateStudyEventInput
 
   /*
    * Stable task-condition option identifiers. They are separate from the
-   * participant's actual 1–3 chronological trial order.
+   * participant's actual 1â€“3 chronological trial order.
    */
   trialIndex?: number;
   globalOptionNumber?: number;

@@ -22,6 +22,7 @@ import {
 } from "../symposium";
 
 import type {
+  ProbeTriggerPolicyDefinition,
   SymposiumConstraintDefinition,
   SymposiumPreferenceDefinition,
 } from "../symposium";
@@ -57,7 +58,7 @@ export interface SymposiumTaskUpdate {
   affectedRoom: Room;
   requiredProjectorRoom?: Room;
   requiredTalkIds?: string[];
-  shownAfterSeconds: number;
+  triggerPolicy: ProbeTriggerPolicyDefinition;
   collapseAfterSeconds: number;
   displayMode?: ProbeDisplayMode;
   semanticOnly: boolean;
@@ -213,7 +214,7 @@ const initialPlacements: Record<
  * 1 = A, 2 = B, 3 = C.
  *
  * It is not the participant's chronological trial order. The study-session
- * store assigns chronological order only when the researcher-selected option
+ * store assigns chronological order only when the token-assigned option
  * is actually started.
  */
 const trials: SymposiumTrialContent[] = [
@@ -312,8 +313,14 @@ export const SYMPOSIUM_TASK_DATA:
       requiredTalkIds: [
         ...SEMANTIC_PROBE.requiredTalkIds,
       ],
-      shownAfterSeconds:
-        SEMANTIC_PROBE.shownAfterSeconds,
+      // ADVISER FIX: Expose the shared state-based policy instead of a fixed onset.
+      triggerPolicy: {
+        ...SEMANTIC_PROBE.triggerPolicy,
+        triggerReasons: [
+          ...SEMANTIC_PROBE
+            .triggerPolicy.triggerReasons,
+        ],
+      },
       collapseAfterSeconds:
         SEMANTIC_PROBE.collapseAfterSeconds,
       displayMode: SEMANTIC_PROBE.displayMode,

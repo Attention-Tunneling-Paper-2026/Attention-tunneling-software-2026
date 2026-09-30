@@ -415,44 +415,6 @@ function toNonNegativeNumber(
     : null;
 }
 
-function getCollectionItemCount(
-  value:
-    unknown,
-): number | null {
-  if (
-    Array.isArray(
-      value,
-    )
-  ) {
-    return value.length;
-  }
-
-  if (
-    typeof value ===
-      "string" &&
-    value.length >
-      0
-  ) {
-    try {
-      const parsed:
-        unknown =
-          JSON.parse(
-            value,
-          );
-
-      return Array.isArray(
-        parsed,
-      )
-        ? parsed.length
-        : null;
-    } catch {
-      return null;
-    }
-  }
-
-  return null;
-}
-
 function toBooleanValue(
   value:
     unknown,
@@ -754,6 +716,163 @@ function isAcceptedEdit(
   );
 }
 
+const STRATEGY_SWITCH_HAMMING_THRESHOLD =
+  6;
+
+function getHammingDistanceAfter(
+  event:
+    StudyEvent | undefined,
+): number | null {
+  return (
+    eventNumber(
+      event,
+      "hammingDistanceFromAIAfter",
+      "hammingDistanceFromAIAfter",
+    ) ??
+    eventNumber(
+      event,
+      "hammingDistanceFromAI",
+      "hammingDistanceFromAI",
+    )
+  );
+}
+
+function isInitialAssignmentComplete(
+  trialStartEvent:
+    StudyEvent | undefined,
+): boolean {
+  return (
+    eventBoolean(
+      trialStartEvent,
+      "initialCompleteAssignment",
+      "initialCompleteAssignment",
+    ) ===
+    true
+  );
+}
+
+function findFirstCompleteAssignmentEvent(
+  sortedEvents:
+    StudyEvent[],
+): StudyEvent | undefined {
+  const trialStartEvent =
+    getFirstEvent(
+      sortedEvents,
+      "trial_start",
+    );
+
+  if (
+    isInitialAssignmentComplete(
+      trialStartEvent,
+    )
+  ) {
+    return trialStartEvent;
+  }
+
+  return sortedEvents.find(
+    (event) =>
+      isAcceptedEdit(
+        event,
+      ) &&
+      eventBoolean(
+        event,
+        "completeAssignment",
+        "completeAssignment",
+      ) ===
+        true,
+  );
+}
+
+function findStrategySwitchEvent(
+  sortedEvents:
+    StudyEvent[],
+): StudyEvent | undefined {
+  const acceptedEdits =
+    sortedEvents.filter(
+      isAcceptedEdit,
+    );
+
+  const firstCompleteAssignmentEvent =
+    findFirstCompleteAssignmentEvent(
+      sortedEvents,
+    );
+
+  if (
+    !firstCompleteAssignmentEvent
+  ) {
+    return undefined;
+  }
+
+  const firstSearchEditIndex =
+    firstCompleteAssignmentEvent.eventType ===
+      "trial_start"
+      ? 0
+      : acceptedEdits.findIndex(
+          (event) =>
+            event.eventId ===
+            firstCompleteAssignmentEvent.eventId,
+        ) +
+        1;
+
+  let previousHammingDistance =
+    getHammingDistanceAfter(
+      firstCompleteAssignmentEvent,
+    );
+
+  /*
+   * FIX: Empty/partial A/B construction is not a strategy switch.
+   * The risk window starts only after the first complete assignment, and a
+   * switch requires a real crossing from d_H <= 6 to d_H > 6.
+   */
+  for (
+    let index =
+      Math.max(
+        0,
+        firstSearchEditIndex,
+      );
+    index <
+      acceptedEdits.length;
+    index +=
+      1
+  ) {
+    const event =
+      acceptedEdits[
+        index
+      ];
+
+    const hammingDistanceBefore =
+      eventNumber(
+        event,
+        "hammingDistanceFromAIBefore",
+        "hammingDistanceFromAIBefore",
+      ) ??
+      previousHammingDistance;
+
+    const hammingDistanceAfter =
+      getHammingDistanceAfter(
+        event,
+      );
+
+    if (
+      hammingDistanceBefore !==
+        null &&
+      hammingDistanceBefore <=
+        STRATEGY_SWITCH_HAMMING_THRESHOLD &&
+      hammingDistanceAfter !==
+        null &&
+      hammingDistanceAfter >
+        STRATEGY_SWITCH_HAMMING_THRESHOLD
+    ) {
+      return event;
+    }
+
+    previousHammingDistance =
+      hammingDistanceAfter;
+  }
+
+  return undefined;
+}
+
 function countTrue(
   events:
     StudyEvent[],
@@ -808,31 +927,6 @@ function getElapsedDifferenceFromReference(
       earlier,
     ),
   );
-}
-
-function getEarlierEvent(
-  first:
-    StudyEvent | undefined,
-
-  second:
-    StudyEvent | undefined,
-): StudyEvent | undefined {
-  if (
-    !first
-  ) {
-    return second;
-  }
-
-  if (
-    !second
-  ) {
-    return first;
-  }
-
-  return first.elapsedMs <=
-    second.elapsedMs
-    ? first
-    : second;
 }
 
 function calculateMean(
@@ -1759,6 +1853,14 @@ export function buildTrialEventRows(
     probeShownEvent?.timestampIso ??
     "";
 
+  // ADVISER FIX: Reopen count is derived only from matching raw bell-open events.
+  const probeReopenCount =
+    sortedEvents.filter(
+      (event) =>
+        event.eventType ===
+        "probe_notification_opened",
+    ).length;
+
   const violationFeedbackAnchor =
     getConstraintViolationFeedbackAnchor(
       sortedEvents,
@@ -1770,12 +1872,31 @@ export function buildTrialEventRows(
       violationFeedbackAnchor,
     );
 
+  /*
+   * FIX: Event CSV flags use the exact same derived switch event as the
+   * summary CSV, instead of trusting independently recorded legacy flags.
+   */
+  const strategySwitchEvent =
+    findStrategySwitchEvent(
+      sortedEvents,
+    );
+
   return sortedEvents.map(
     (event) => {
       const acceptedEditAnnotation =
         acceptedEditAnnotations.get(
           event.eventId,
         );
+
+      const acceptedEdit =
+        isAcceptedEdit(
+          event,
+        );
+
+      const isStrategySwitchEvent =
+        acceptedEdit &&
+        event.eventId ===
+          strategySwitchEvent?.eventId;
 
       const taskId = resolveTaskId(
         event.taskId,
@@ -2220,18 +2341,11 @@ export function buildTrialEventRows(
           ),
         ),
         destructive_edit:
-          isAcceptedEdit(
-            event,
-          )
-            ? (
-                event.strategySwitchTriggered ===
-                  true ||
-                event.moatCrossed ===
-                  true
-              )
+          acceptedEdit
+            ? isStrategySwitchEvent
             : null,
         destructive_edit_definition:
-          "first_moat_crossing_hamming_distance_greater_than_half",
+          "first_post_construction_crossing_from_hamming_lte_6_to_gt_6",
         structural_departure_edit:
           event.isDestructiveEdit ??
           null,
@@ -2263,30 +2377,26 @@ export function buildTrialEventRows(
         event.isOptimalDestructiveTransition ??
         null,
       moat_crossed:
-        event.moatCrossed ??
-        null,
+        acceptedEdit
+          ? isStrategySwitchEvent
+          : null,
       strategy_switch_triggered:
-        event.strategySwitchTriggered ??
-        null,
+        acceptedEdit
+          ? isStrategySwitchEvent
+          : null,
       strategy_switch_latency_from_probe_ms:
-        (
-          event.strategySwitchTriggered ===
-            true ||
-          event.moatCrossed ===
-            true
-        )
+        isStrategySwitchEvent
           ? getElapsedDifferenceFromReference(
               event,
               probeShownEvent,
             )
           : null,
       hamming_distance_at_strategy_switch:
-        toNumberValue(
-          readMetadataValue(
-            event,
-            "hammingDistanceAtStrategySwitch",
-          ),
-        ),
+        isStrategySwitchEvent
+          ? getHammingDistanceAfter(
+              event,
+            )
+          : null,
       probe_id:
         eventString(
           event,
@@ -2306,6 +2416,27 @@ export function buildTrialEventRows(
       probe_shown_elapsed_ms:
         probeShownEvent?.elapsedMs ??
         null,
+      // ADVISER FIX: Raw rows and the summary read one shared probe_shown event.
+      probe_trigger_reason:
+        probeShownEvent?.triggerReason ??
+        "",
+      probe_placed_item_count:
+        probeShownEvent?.placedItemCount ??
+        null,
+      probe_current_conflict_count:
+        probeShownEvent?.currentConflictCount ??
+        null,
+      probe_edits_made_so_far:
+        probeShownEvent?.editsMadeSoFar ??
+        null,
+      probe_hamming_distance_from_ai:
+        probeShownEvent?.hammingDistanceFromAI ??
+        null,
+      probe_idle_ms_previous_60s:
+        probeShownEvent?.idleMsInPrevious60Seconds ??
+        null,
+      probe_reopen_count:
+        probeReopenCount,
       acknowledgement_latency_ms:
         toNonNegativeNumber(
           eventNumber(
@@ -2672,6 +2803,14 @@ export function buildTrialSummaryRows({
       "probe_notification_opened",
     );
 
+  // ADVISER FIX: Count every raw bell opening, including repeated reopenings.
+  const probeReopenCount =
+    sortedEvents.filter(
+      (event) =>
+        event.eventType ===
+        "probe_notification_opened",
+    ).length;
+
   const probeAcknowledgedEvent =
     getFirstEvent(
       sortedEvents,
@@ -2683,9 +2822,9 @@ export function buildTrialSummaryRows({
     );
 
   const probeDetectionEvent =
-    getEarlierEvent(
-      probeOpenedEvent,
-      probeAcknowledgedEvent,
+    getFirstEvent(
+      sortedEvents,
+      "probe_ack",
     );
 
   const questionnaireStartedEvent =
@@ -2886,17 +3025,24 @@ export function buildTrialSummaryRows({
         Boolean,
       );
 
-  const destructiveEditEvents =
-    acceptedEdits.filter(
-      (event) =>
-        event.moatCrossed ===
-        true,
+  /*
+   * FIX: Summary metrics use the same post-construction crossing event that
+   * is exported in the raw event CSV.
+   */
+  const strategySwitchEvent =
+    findStrategySwitchEvent(
+      sortedEvents,
     );
 
+  const destructiveEditEvents =
+    strategySwitchEvent
+      ? [
+          strategySwitchEvent,
+        ]
+      : [];
+
   const firstMoatCrossingEvent =
-    destructiveEditEvents[
-      0
-    ];
+    strategySwitchEvent;
 
   const firstStructuralDepartureEvent =
     acceptedEdits.find(
@@ -2917,11 +3063,7 @@ export function buildTrialSummaryRows({
     );
 
   const firstDestructiveEditEvent =
-    acceptedEdits.find(
-      (event) =>
-        event.isDestructiveEdit ===
-        true,
-    );
+    firstMoatCrossingEvent;
 
   const firstOptimalTransitionEvent =
     acceptedEdits.find(
@@ -2966,9 +3108,6 @@ export function buildTrialSummaryRows({
     findFirstPermanentAIFamilyExit(
       acceptedEdits,
     );
-
-  const strategySwitchEvent =
-    permanentAIFamilyExit;
 
   const familyTime =
     calculateTimeInsideAIFamily(
@@ -3271,23 +3410,8 @@ export function buildTrialSummaryRows({
           )
         );
 
-  const unresolvedDemoItemCount =
-    getCollectionItemCount(
-      finalUnresolvedDemoTalkIds,
-    );
-
   const finalParetoNumeratorScore =
-    finalScore ===
-      null
-      ? null
-      : probeShown
-        ? unresolvedDemoItemCount ===
-            null
-          ? null
-          : finalScore -
-            12 *
-              unresolvedDemoItemCount
-        : finalScore;
+    finalScore;
 
   const finalParetoEfficiencyProportion =
     finalParetoNumeratorScore ===
@@ -3539,41 +3663,41 @@ export function buildTrialSummaryRows({
         probeRiskWindowMs;
 
   const initialAssignmentComplete =
-    toBooleanValue(
-      readMetadataValue(
-        trialStartEvent,
-        "initialCompleteAssignment",
-      ),
-    ) ===
-    true;
+    isInitialAssignmentComplete(
+      trialStartEvent,
+    );
 
   const firstCompleteAssignmentEvent =
-    initialAssignmentComplete
-      ? trialStartEvent
-      : acceptedEdits.find(
-          (event) =>
-            eventBoolean(
-              event,
-              "completeAssignment",
-              "completeAssignment",
-            ) ===
-            true,
-        );
+    findFirstCompleteAssignmentEvent(
+      sortedEvents,
+    );
 
+  /*
+   * FIX: This elapsed measure now uses trial_start as zero, matching the
+   * other trial-level latency measures.
+   */
   const firstCompleteAssignmentElapsedMs =
     initialAssignmentComplete
       ? 0
       : firstCompleteAssignmentEvent
-          ?.elapsedMs ??
-        null;
+          ? Math.max(
+              0,
+              firstCompleteAssignmentEvent.elapsedMs -
+                trialStartElapsedMs,
+            )
+          : null;
 
+  /*
+   * FIX: The edit that first completes the schedule is construction, so it
+   * is included here and excluded from search_edit_count.
+   */
   const constructionEditCount =
     initialAssignmentComplete
       ? 0
       : firstCompleteAssignmentEvent
           ? acceptedEdits.filter(
               (event) =>
-                event.eventIndex <
+                event.eventIndex <=
                 firstCompleteAssignmentEvent.eventIndex,
             ).length
           : acceptedEdits.length;
@@ -4083,7 +4207,7 @@ export function buildTrialSummaryRows({
               0,
         ).length,
       destructive_edit_definition:
-        "count_all_moat_crossings_with_latency_to_first_hamming_distance_greater_than_half",
+        "first_post_construction_crossing_from_hamming_lte_6_to_gt_6",
       destructive_edit_occurred:
         Boolean(
           firstMoatCrossingEvent,
@@ -4246,6 +4370,27 @@ export function buildTrialSummaryRows({
       probe_shown_timestamp_iso:
         probeShownEvent?.timestampIso ??
         "",
+      // ADVISER FIX: Summary onset fields come directly from the same probe_shown event.
+      probe_trigger_reason:
+        probeShownEvent?.triggerReason ??
+        "",
+      probe_placed_item_count:
+        probeShownEvent?.placedItemCount ??
+        null,
+      probe_current_conflict_count:
+        probeShownEvent?.currentConflictCount ??
+        null,
+      probe_edits_made_so_far:
+        probeShownEvent?.editsMadeSoFar ??
+        null,
+      probe_hamming_distance_from_ai:
+        probeShownEvent?.hammingDistanceFromAI ??
+        null,
+      probe_idle_ms_previous_60s:
+        probeShownEvent?.idleMsInPrevious60Seconds ??
+        null,
+      probe_reopen_count:
+        probeReopenCount,
       probe_opened:
         Boolean(
           probeOpenedEvent,
@@ -4461,12 +4606,15 @@ export function buildTrialSummaryRows({
           ),
         ),
       probe_onset_seconds:
-        toNumberValue(
-          readMetadataValue(
-            trialStartEvent,
-            "probeOnsetSeconds",
-          ),
-        ),
+        // ADVISER FIX: Export onset relative to trial_start, not page entry.
+        probeShownEvent &&
+        trialStartEvent
+          ? (
+              probeShownEvent.elapsedMs -
+              trialStartEvent.elapsedMs
+            ) /
+            1000
+          : null,
       probe_collapse_seconds:
         toNumberValue(
           readMetadataValue(
@@ -4662,11 +4810,8 @@ export function buildTrialSummaryRows({
         trial.exportErrorMessage ??
         "",
       probe_onset_error_ms:
-        eventNumber(
-          probeShownEvent,
-          "probeOnsetErrorMs",
-          "probeOnsetErrorMs",
-        ),
+        // ADVISER FIX: State-based onset has no fixed-clock onset error.
+        null,
       first_complete_assignment_elapsed_ms:
         firstCompleteAssignmentElapsedMs,
       construction_edit_count:

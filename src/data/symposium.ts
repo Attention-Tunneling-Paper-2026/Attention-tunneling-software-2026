@@ -954,7 +954,7 @@ export const SYMPOSIUM_ANALYSIS_BENCHMARKS = {
   bestInsideAiFamilyPostProbePercentage: 46.1,
 
   paretoEfficiencyReference:
-    "verified_global_optimum_for_active_problem_instance" as const,
+    "verified_pre_probe_global_optimum" as const,
   totalAssignments: 12,
   strategySwitchThresholdProportion: 0.5,
   strategySwitchThresholdAssignments: 6,
@@ -1005,11 +1005,12 @@ export function calculateParetoEfficiencyProportion(
     return null;
   }
 
+  void probeActive;
+
   const referenceScore =
-    getVerifiedGlobalOptimumScore(
-      probeActive,
-      taskId,
-    );
+    TASK_ANALYSIS_BENCHMARKS_BY_ID[
+      taskId
+    ].verifiedPreProbeGlobalOptimumScore;
 
   return referenceScore > 0
     ? submittedScore / referenceScore
@@ -1074,7 +1075,7 @@ const SHARED_DELIVERY_AI_RECOMMENDATION =
   "I recommend organizing the delivery plan by region: North shipments in Van A, Central shipments in Van B, and South shipments in Van C. Arrange the shipments according to driver availability and vehicle requirements.";
 
 const SHARED_CLINIC_AI_RECOMMENDATION =
-  "I recommend organizing the clinic roster by specialty: Emergency Care duties in Ward A, General Medicine duties in Ward B, and Critical Care duties in Ward C. Arrange the duties according to nurse availability and ward requirements.";
+  "I recommend organizing the clinic roster by clinical specialty: assign Emergency Care to Ward A, General Medicine to Ward B, and Critical Care to Ward C. Within each ward, arrange duties according to nurse availability and ward requirements. Review every assignment against the task constraints and revise any placement that creates a conflict.";
 
 export const AI_RECOMMENDATION_BY_LEVEL: Record<
   ConcretizationLevel,
@@ -1126,6 +1127,7 @@ export const CLINIC_AI_RECOMMENDATION_BY_LEVEL: Record<
   ConcretizationLevel,
   AssistantRecommendation
 > = {
+  // ADVISER FIX: Clinic A, B, and C use identical recommendation content.
   A: {
     heading: "Roster recommendation",
     message: SHARED_CLINIC_AI_RECOMMENDATION,
@@ -1134,14 +1136,12 @@ export const CLINIC_AI_RECOMMENDATION_BY_LEVEL: Record<
   B: {
     heading: "Roster recommendation",
     message: SHARED_CLINIC_AI_RECOMMENDATION,
-    prefillAcknowledgment:
-      "I placed four starting duties in the suggested structure.",
+    prefillAcknowledgment: null,
   },
   C: {
     heading: "Roster recommendation",
     message: SHARED_CLINIC_AI_RECOMMENDATION,
-    prefillAcknowledgment:
-      "I placed a complete proposed roster in the suggested structure.",
+    prefillAcknowledgment: null,
   },
 };
 
@@ -1154,13 +1154,42 @@ export const AI_RECOMMENDATION_BY_TASK: Record<
   clinic: CLINIC_AI_RECOMMENDATION_BY_LEVEL,
 };
 
+export const PROBE_TRIGGER_REASONS = [
+  "invest",
+  "solved",
+  "cap",
+  "floor_clamped",
+] as const;
+
+export type ProbeTriggerReason =
+  (typeof PROBE_TRIGGER_REASONS)[number];
+
+export interface ProbeTriggerPolicyDefinition {
+  version: "state_based_v1";
+  floorMs: number;
+  investAcceptedEditCount: number;
+  solvedGraceMs: number;
+  capMs: number;
+  triggerReasons: readonly ProbeTriggerReason[];
+}
+
+// ADVISER FIX: One state-based policy replaces the retired seven-minute onset for every skin.
+export const STATE_BASED_PROBE_TRIGGER_POLICY = {
+  version: "state_based_v1",
+  floorMs: 240_000,
+  investAcceptedEditCount: 6,
+  solvedGraceMs: 3_000,
+  capMs: 480_000,
+  triggerReasons: PROBE_TRIGGER_REASONS,
+} as const satisfies ProbeTriggerPolicyDefinition;
+
 export interface SemanticProbeDefinition {
   id: string;
   version: string;
   title: string;
   message: string;
   collapsedLabel: string;
-  shownAfterSeconds: number;
+  triggerPolicy: ProbeTriggerPolicyDefinition;
   collapseAfterSeconds: number;
   displayMode: "transient";
   affectedRoom: Room;
@@ -1176,7 +1205,7 @@ export const SEMANTIC_PROBE: SemanticProbeDefinition = {
   message:
     "The projector in Room C is broken for the rest of the day.",
   collapsedLabel: "Facilities update",
-  shownAfterSeconds: 7 * 60,
+  triggerPolicy: STATE_BASED_PROBE_TRIGGER_POLICY,
   collapseAfterSeconds: 10,
   displayMode: "transient",
   affectedRoom: POST_PROBE_AFFECTED_ROOM,
@@ -1195,7 +1224,7 @@ export const DELIVERY_SEMANTIC_PROBE: SemanticProbeDefinition = {
   message:
     "The refrigeration unit in Van C has failed for the rest of the dispatch period.",
   collapsedLabel: "Vehicle update",
-  shownAfterSeconds: 7 * 60,
+  triggerPolicy: STATE_BASED_PROBE_TRIGGER_POLICY,
   collapseAfterSeconds: 10,
   displayMode: "transient",
   affectedRoom: "C",
@@ -1213,7 +1242,7 @@ export const CLINIC_SEMANTIC_PROBE: SemanticProbeDefinition = {
   message:
     "Ward C has lost ICU certification for the remainder of the roster period.",
   collapsedLabel: "Ward update",
-  shownAfterSeconds: 7 * 60,
+  triggerPolicy: STATE_BASED_PROBE_TRIGGER_POLICY,
   collapseAfterSeconds: 10,
   displayMode: "transient",
   affectedRoom: "C",
@@ -1240,6 +1269,12 @@ export function getSemanticProbe(
 
   return {
     ...probe,
+    triggerPolicy: {
+      ...probe.triggerPolicy,
+      triggerReasons: [
+        ...probe.triggerPolicy.triggerReasons,
+      ],
+    },
     requiredTalkIds: [...probe.requiredTalkIds],
   };
 }

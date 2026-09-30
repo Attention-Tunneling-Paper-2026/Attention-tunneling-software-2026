@@ -779,6 +779,13 @@ const EVENT_CSV_COLUMNS = [
   "probe_acknowledged",
   "probe_display_mode",
   "probe_acknowledgment_source",
+  "probe_trigger_reason",
+  "probe_placed_item_count",
+  "probe_current_conflict_count",
+  "probe_edits_made_so_far",
+  "probe_hamming_distance_from_ai",
+  "probe_idle_ms_previous_60s",
+  "probe_reopen_count",
   "integration_consistent_edit",
   "probe_integration_detected",
   "detection_miss",
@@ -961,8 +968,63 @@ function getEventSupplementValue(
   );
 }
 
+interface ProbeCsvContext {
+  probeShownEvent?: StudyEvent;
+  probeReopenCount: number;
+}
+
+function getTrialEventKey(
+  event: StudyEvent,
+): string {
+  return [
+    event.sessionId,
+    getEventTaskId(event),
+    event.trialNumber,
+  ].join(":");
+}
+
+function buildProbeCsvContextByTrial(
+  events: StudyEvent[],
+): Map<string, ProbeCsvContext> {
+  const contexts =
+    new Map<string, ProbeCsvContext>();
+
+  for (const event of events) {
+    const trialKey =
+      getTrialEventKey(event);
+    const existing =
+      contexts.get(trialKey) ?? {
+        probeReopenCount: 0,
+      };
+
+    if (
+      event.eventType ===
+        "probe_shown" &&
+      !existing.probeShownEvent
+    ) {
+      existing.probeShownEvent =
+        event;
+    }
+
+    if (
+      event.eventType ===
+      "probe_notification_opened"
+    ) {
+      existing.probeReopenCount += 1;
+    }
+
+    contexts.set(
+      trialKey,
+      existing,
+    );
+  }
+
+  return contexts;
+}
+
 function createEventCsvRow(
   event: StudyEvent,
+  probeContext: ProbeCsvContext,
 ): Record<EventCsvColumn, unknown> {
   const metadata = isPlainRecord(
     event.metadata,
@@ -1003,6 +1065,8 @@ function createEventCsvRow(
       "sessionStartedAtIso",
       "session_started_at_iso",
     );
+  const probeShownEvent =
+    probeContext.probeShownEvent;
 
   return {
     participant_id:
@@ -1187,6 +1251,21 @@ function createEventCsvRow(
       event.probeDisplayMode,
     probe_acknowledgment_source:
       event.probeAcknowledgmentSource,
+    // ADVISER FIX: Every raw row uses the exact matching probe_shown event.
+    probe_trigger_reason:
+      probeShownEvent?.triggerReason,
+    probe_placed_item_count:
+      probeShownEvent?.placedItemCount,
+    probe_current_conflict_count:
+      probeShownEvent?.currentConflictCount,
+    probe_edits_made_so_far:
+      probeShownEvent?.editsMadeSoFar,
+    probe_hamming_distance_from_ai:
+      probeShownEvent?.hammingDistanceFromAI,
+    probe_idle_ms_previous_60s:
+      probeShownEvent?.idleMsInPrevious60Seconds,
+    probe_reopen_count:
+      probeContext.probeReopenCount,
     integration_consistent_edit:
       event.integrationConsistentEdit,
     probe_integration_detected:
@@ -1245,30 +1324,14 @@ function createEventCsvRow(
       event.contentVersion,
     probe_compliant:
       event.probeCompliant,
+    // ADVISER FIX: A state-based policy has no single configured onset or onset error.
     configured_probe_onset_ms:
-      getEventSupplementValue(
-        event,
-        "configuredProbeOnsetMs",
-        "configured_probe_onset_ms",
-        "configuredProbeDelayMs",
-        "configured_probe_delay_ms",
-      ),
+      "",
     actual_probe_onset_ms:
-      getEventSupplementValue(
-        event,
-        "actualProbeOnsetMs",
-        "actual_probe_onset_ms",
-        "probeShownElapsedMs",
-        "probe_shown_elapsed_ms",
-      ),
+      probeShownEvent?.elapsedMs ??
+      "",
     probe_onset_error_ms:
-      getEventSupplementValue(
-        event,
-        "probeOnsetErrorMs",
-        "probe_onset_error_ms",
-        "onsetErrorMs",
-        "onset_error_ms",
-      ),
+      "",
     metadata_json:
       event.metadata,
     payload_json:
@@ -1282,10 +1345,24 @@ function serializeEventsCsv(
   const header = EVENT_CSV_COLUMNS.join(
     ",",
   );
+  // ADVISER FIX: Build one auditable probe context per trial from raw events.
+  const probeContexts =
+    buildProbeCsvContextByTrial(
+      events,
+    );
   const rows = events.map(
     (event) => {
+      const probeContext =
+        probeContexts.get(
+          getTrialEventKey(event),
+        ) ?? {
+          probeReopenCount: 0,
+        };
       const row =
-        createEventCsvRow(event);
+        createEventCsvRow(
+          event,
+          probeContext,
+        );
 
       return EVENT_CSV_COLUMNS.map(
         (column) =>

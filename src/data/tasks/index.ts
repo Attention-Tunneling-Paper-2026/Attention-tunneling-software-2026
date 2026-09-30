@@ -343,8 +343,14 @@ function createTaskDefinition(
       requiredTalkIds: [
         ...probe.requiredTalkIds,
       ],
-      shownAfterSeconds:
-        probe.shownAfterSeconds,
+      // ADVISER FIX: Use the canonical state-based probe policy for every task skin.
+      triggerPolicy: {
+        ...probe.triggerPolicy,
+        triggerReasons: [
+          ...probe.triggerPolicy
+            .triggerReasons,
+        ],
+      },
       collapseAfterSeconds:
         probe.collapseAfterSeconds,
       displayMode:
