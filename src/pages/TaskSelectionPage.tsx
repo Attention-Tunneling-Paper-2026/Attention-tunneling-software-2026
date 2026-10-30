@@ -456,7 +456,7 @@ export default function TaskSelectionPage() {
       },
     );
 
-  // ADVISER FIX: Expose only the open assigned trial or the next assigned trial.
+// ADVISER FIX: Expose only the open assigned trial or the next assigned trial.
   const currentAssignment =
     openAssignment ??
     nextAssignment;
@@ -595,6 +595,41 @@ export default function TaskSelectionPage() {
     }
 
     addEvent({
+      participantToken,
+
+      taskId:
+        startedAssignment.taskId,
+      skin:
+        startedAssignment.taskId,
+      trialId:
+        startedAssignment.trialId,
+      compositeTrialId:
+        startedAssignment.trialId,
+      trialNumber:
+        startedAssignment.trialNumber,
+      trialOrder:
+        startedAssignment.trialOrder,
+      trialIndex:
+        startedAssignment.globalOptionNumber,
+      globalOptionNumber:
+        startedAssignment.globalOptionNumber,
+      outerTaskNumber:
+        startedAssignment.outerTaskNumber,
+      innerTaskNumber:
+        startedAssignment.innerTaskNumber,
+      globalTrialNumber:
+        startedAssignment.globalTrialNumber,
+      condition:
+        startedAssignment.condition,
+      conditionOrder:
+        startedAssignment.conditionOrder,
+      isFirstTrial:
+        startedAssignment.isFirstTrial,
+      probeExposureNumber:
+        startedAssignment.probeExposureNumber,
+      probeNaive:
+        startedAssignment.probeNaive,
+
       eventType:
         "task_selected",
 

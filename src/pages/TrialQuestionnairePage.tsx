@@ -43,16 +43,24 @@ import type {
 
 import {
   MANIPULATION_CHECK_DIMENSIONS,
+  NASA_TLX_DIMENSIONS,
+  TRIAL_EXPERIENCE_DIMENSIONS,
+  isSevenPointRating,
   isLikertRating,
   isTrialQuestionnaireComplete,
 } from "../types/questionnaire";
 
 import type {
-  LikertRating,
+  SevenPointRating,
   ManipulationCheckDimension,
   TrialExperienceDimension,
   TrialExperienceRatings,
+  TrialQuestionnaireResponse,
 } from "../types/questionnaire";
+
+import type {
+  QuestionnaireItemResponse,
+} from "../types/events";
 
 import {
   TOTAL_SELECTABLE_TASK_CONDITION_OPTIONS,
@@ -162,16 +170,16 @@ function getExperienceQuestions(
         "scheduleCompleteness",
 
       title:
-        "Solution completeness",
+        "Completeness of the AI's help",
 
       description:
-        `My final ${taskCopy.solutionNoun} was complete and ready to submit.`,
+        `How complete was the AI's help with your ${taskCopy.solutionNoun}?`,
 
       lowLabel:
-        "Strongly disagree",
+        "The AI gave me a general direction",
 
       highLabel:
-        "Strongly agree",
+        "The AI gave me a finished solution",
     },
 
     {
@@ -182,7 +190,7 @@ function getExperienceQuestions(
         "AI helpfulness",
 
       description:
-        "The AI assistant recommendation was helpful for completing the task.",
+        "The AI recommendation helped me complete the task.",
 
       lowLabel:
         "Strongly disagree",
@@ -199,7 +207,7 @@ function getExperienceQuestions(
         "AI competence",
 
       description:
-        "The AI assistant appeared competent at solving this task.",
+        "The AI seemed capable of solving this task well.",
 
       lowLabel:
         "Strongly disagree",
@@ -289,6 +297,9 @@ function humanizeKey(
 function getManipulationQuestion(
   dimension:
     ManipulationDimension,
+
+  taskId:
+    StudyTaskId,
 ): {
   title:
     string;
@@ -311,10 +322,14 @@ function getManipulationQuestion(
   ) {
     return {
       title:
-        "AI output concreteness",
+        "Specific assignments",
 
       description:
-        "The AI recommendation presented a concrete solution.",
+        taskId === "delivery"
+          ? "The AI recommendation showed specific assignments, such as which shipment to put in which van and route window."
+          : taskId === "clinic"
+            ? "The AI recommendation showed specific assignments, such as which duty to put in which ward and shift."
+            : "The AI recommendation showed specific assignments, such as which talk to put in which room and time slot.",
     };
   }
 
@@ -328,7 +343,7 @@ function getManipulationQuestion(
         "AI output completeness",
 
       description:
-        "The AI recommendation presented a complete solution.",
+        "The AI recommendation provided a whole solution, with no assignments left for me to fill in.",
     };
   }
 
@@ -342,7 +357,7 @@ function getManipulationQuestion(
         "AI output detail",
 
       description:
-        "The AI recommendation included detailed task information.",
+        "The AI recommendation gave detailed information about how to arrange the items.",
     };
   }
 
@@ -356,7 +371,7 @@ function getManipulationQuestion(
         "AI output specificity",
 
       description:
-        "The AI recommendation was specific about how the task should be completed.",
+        "The AI recommendation clearly specified how I should complete the task.",
     };
   }
 
@@ -367,10 +382,10 @@ function getManipulationQuestion(
   ) {
     return {
       title:
-        "AI solution actionability",
+        "Clear actions to take",
 
       description:
-        "The AI recommendation made the actions needed to use its solution clear.",
+        "The AI recommendation made it clear what actions I should take to put its solution into practice.",
     };
   }
 
@@ -381,10 +396,10 @@ function getManipulationQuestion(
   ) {
     return {
       title:
-        "AI output direct usability",
+        "Ease of using the recommendation",
 
       description:
-        "The AI recommendation could be applied directly without substantial additional interpretation.",
+        "I could use the AI recommendation directly without having to work out much more about what it meant.",
     };
   }
 
@@ -407,10 +422,76 @@ function getExperienceValue(
 
   dimension:
     ExperienceDimension,
-): LikertRating | null {
+): SevenPointRating | null {
   return values[
     dimension
   ];
+}
+
+function getRenderedQuestionnaireItems(
+  form: HTMLFormElement,
+  response: TrialQuestionnaireResponse,
+  formScope: string,
+): QuestionnaireItemResponse[] | null {
+  const inputs = Array.from(
+    form.querySelectorAll<HTMLInputElement>('input[type="radio"]'),
+  );
+
+  const expectedItems = [
+    ...NASA_TLX_DIMENSIONS.map((dimension) => ({
+      itemId: dimension,
+      answer: response.nasaTlx[dimension],
+      maximum: 7,
+      matchesName: (name: string) => name.endsWith(`-${dimension}`),
+    })),
+    ...TRIAL_EXPERIENCE_DIMENSIONS.map((dimension) => ({
+      itemId: dimension,
+      answer: response.experienceRatings[dimension],
+      maximum: 7,
+      matchesName: (name: string) => name === `${dimension}_${formScope}`,
+    })),
+    ...MANIPULATION_CHECK_DIMENSIONS.map((dimension) => ({
+      itemId: dimension,
+      answer: response.manipulationCheck[dimension],
+      maximum: 5,
+      matchesName: (name: string) => name === `${dimension}_${formScope}`,
+    })),
+  ];
+
+  const items: QuestionnaireItemResponse[] = [];
+
+  for (const expected of expectedItems) {
+    const options = inputs.filter((input) => expected.matchesName(input.name));
+    const card = options[0]?.closest("fieldset");
+    const questionText = card?.querySelector(".questionnaire-rating-question")
+      ?.textContent?.trim();
+    const labels = card?.querySelectorAll(".questionnaire-rating-labels small");
+    const scaleMinimumLabel = labels?.[0]?.textContent?.trim();
+    const scaleMaximumLabel = labels?.[1]?.textContent?.trim();
+    const ratings = options.map((input) => Number(input.value));
+    const selected = options.find((input) => input.checked);
+
+    if (
+      !questionText || !scaleMinimumLabel || !scaleMaximumLabel ||
+      ratings.length !== expected.maximum ||
+      ratings.some((rating, index) => rating !== index + 1) ||
+      !selected || Number(selected.value) !== expected.answer
+    ) {
+      return null;
+    }
+
+    items.push({
+      itemId: expected.itemId,
+      questionText,
+      scaleMinimum: 1,
+      scaleMaximum: expected.maximum,
+      scaleMinimumLabel,
+      scaleMaximumLabel,
+      answer: expected.answer,
+    });
+  }
+
+  return items;
 }
 
 export default function TrialQuestionnairePage() {
@@ -957,6 +1038,19 @@ export default function TrialQuestionnairePage() {
       return;
     }
 
+    const questionnaireItems = getRenderedQuestionnaireItems(
+      event.currentTarget,
+      currentResponse,
+      `${taskId}_${trialNumber}`,
+    );
+
+    if (!questionnaireItems) {
+      setValidationMessage(
+        "Some questionnaire details could not be saved. Please check your answers and try again.",
+      );
+      return;
+    }
+
     setValidationMessage(
       "",
     );
@@ -1043,7 +1137,11 @@ export default function TrialQuestionnairePage() {
         phase:
           "questionnaire",
 
+        questionnaireItems,
+
         metadata: {
+          questionnaireItems,
+
           taskId,
 
           taskTitle:
@@ -1291,7 +1389,7 @@ export default function TrialQuestionnairePage() {
             />
           }
           title="Task workload"
-          description="Select one rating for each NASA TLX dimension. Ratings range from 1 to 7 in whole-number steps, where 1 is low and 7 is high."
+          description="Choose a rating from 1 to 7 for each question about the effort and demands of the task. Read the labels at both ends of each scale."
         >
           <NasaTlxForm
             values={
@@ -1322,7 +1420,7 @@ export default function TrialQuestionnairePage() {
             />
           }
           title="Task and AI ratings"
-          description="Select one response on each 1 to 5 agreement scale."
+          description="Choose one rating from 1 to 7 for each question about the AI's help. Read the labels at both ends of each scale."
         >
           <div className="likert-list">
             {experienceQuestions.map(
@@ -1350,7 +1448,7 @@ export default function TrialQuestionnairePage() {
                     question.id,
                   )}
                   min={1}
-                  max={5}
+                  max={7}
                   required
                   disabled={
                     questionnaireSubmitted
@@ -1359,7 +1457,7 @@ export default function TrialQuestionnairePage() {
                     value,
                   ) => {
                     if (
-                      !isLikertRating(
+                      !isSevenPointRating(
                         value,
                       )
                     ) {
@@ -1389,7 +1487,7 @@ export default function TrialQuestionnairePage() {
               />
             }
             title="AI presentation ratings"
-            description="Rate the AI assistance on the required 1 to 5 manipulation check scales."
+            description="For each statement, choose how much you agree: 1 means strongly disagree and 5 means strongly agree."
           >
             <div className="likert-list">
               {manipulationDimensions.map(
@@ -1397,6 +1495,7 @@ export default function TrialQuestionnairePage() {
                   const question =
                     getManipulationQuestion(
                       dimension,
+                      taskId,
                     );
 
                   return (

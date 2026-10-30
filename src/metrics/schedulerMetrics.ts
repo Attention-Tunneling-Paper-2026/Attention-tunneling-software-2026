@@ -10,6 +10,7 @@ import {
   TASK_SCORING_BY_ID,
   VERIFIED_BEST_POST_PROBE_SOLUTION_BY_TASK,
   VERIFIED_PRE_PROBE_OPTIMUM_BY_TASK,
+  calculatePostProbeScore,
   getPostProbeConstraintState,
   getPostProbeIntegrationTalkIds,
   getTalkById,
@@ -82,6 +83,7 @@ export interface ScheduleSnapshot {
   violationCount: number;
   speakerConflictPairCount: number;
   score: ScheduleScore;
+  postProbeScore: number;
 }
 
 export interface SchedulerMetrics extends ScheduleSnapshot {
@@ -94,6 +96,8 @@ export interface SchedulerMetrics extends ScheduleSnapshot {
   previousDistanceToBestPostProbeSolution: number;
   previousInsideAIFamily: boolean;
   previousScore: ScheduleScore;
+  postProbeScoreBefore: number | null;
+  postProbeScoreAfter: number | null;
   scoreDelta: number;
   changedTalkIds: string[];
   transitionId: string;
@@ -1098,6 +1102,11 @@ export function createScheduleSnapshot(
     speakerConflictPairCount:
       score.violatedSpeakerPairChecks,
     score,
+    postProbeScore: calculatePostProbeScore(
+      score.totalScore,
+      placements,
+      taskId,
+    ),
   };
 }
 
@@ -1173,6 +1182,12 @@ export function calculateSchedulerMetrics(
     previousInsideAIFamily:
       previousSnapshot.insideAIFamily,
     previousScore: previousSnapshot.score,
+    postProbeScoreBefore: probeActive
+      ? previousSnapshot.postProbeScore
+      : null,
+    postProbeScoreAfter: probeActive
+      ? nextSnapshot.postProbeScore
+      : null,
     scoreDelta,
     changedTalkIds,
     transitionId: getTransitionId(

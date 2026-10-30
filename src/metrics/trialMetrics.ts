@@ -1,6 +1,12 @@
 import {
   TASK_ANALYSIS_BENCHMARKS_BY_ID,
   TASK_SCORING_BY_ID,
+  TALK_IDS,
+  calculatePostProbeScore,
+  getParetoEfficiencyReference,
+  getPostProbeIntegrationTalkIds,
+  getSemanticProbe,
+  getUnresolvedPostProbeTalkIds,
   calculateParetoEfficiencyPercentage,
   calculateParetoEfficiencyProportion,
   getVerifiedGlobalOptimumScore,
@@ -12,11 +18,16 @@ import type {
 } from "../data/symposium";
 
 import type {
+  Placement,
+  Room,
+  Slot,
+} from "../types/scheduler";
+
+import type {
   StudyEvent,
 } from "../types/events";
 
 import {
-  getProbeRecallCorrect,
   getProbeRecognitionCorrect,
   isLikertRating,
   isNasaTlxValue,
@@ -72,6 +83,12 @@ interface BuildTrialSummaryRowsInput {
 
   events:
     StudyEvent[];
+
+  exportTimestamps?: {
+    eventsCsvExportedAtIso?: string;
+    summaryCsvExportedAtIso?: string;
+    questionnaireExportedAtIso?: string;
+  };
 }
 
 interface StateObservation {
@@ -741,7 +758,7 @@ function isInitialAssignmentComplete(
   trialStartEvent:
     StudyEvent | undefined,
 ): boolean {
-  return (
+  return isCompleteEventBoard(trialStartEvent, "After") || (
     eventBoolean(
       trialStartEvent,
       "initialCompleteAssignment",
@@ -774,12 +791,7 @@ function findFirstCompleteAssignmentEvent(
       isAcceptedEdit(
         event,
       ) &&
-      eventBoolean(
-        event,
-        "completeAssignment",
-        "completeAssignment",
-      ) ===
-        true,
+      isCompleteEventBoard(event, "After"),
   );
 }
 
@@ -1773,20 +1785,218 @@ function findFirstPermanentAIFamilyExit(
   return undefined;
 }
 
+function getTimerStartedAtIso(
+  events: StudyEvent[],
+  timerStartedAtIso?: string | null,
+): string {
+  return timerStartedAtIso ||
+    eventString(
+      getFirstEvent(events, "trial_start"),
+      "timerStartedAtIso",
+      "timerStartedAtIso",
+    );
+}
+
+function normalizeElapsedTimes(
+  events: StudyEvent[],
+  timerStartedAtIso?: string | null,
+): StudyEvent[] {
+  const timerStartedAt = Date.parse(
+    getTimerStartedAtIso(events, timerStartedAtIso),
+  );
+
+  return events.map((event) => {
+    const timestamp = Date.parse(event.timestampIso);
+    return Number.isFinite(timerStartedAt) && Number.isFinite(timestamp)
+      ? { ...event, elapsedMs: timestamp - timerStartedAt }
+      : event;
+  });
+}
+
+function getSchedulePlacements(
+  schedule: string,
+): Placement[] | null {
+  if (!schedule.includes("=")) {
+    return null;
+  }
+
+  const assignments = parseCanonicalSchedule(schedule);
+  const placements: Placement[] = [];
+
+  for (const [talkId, cell] of assignments) {
+    if (!TALK_IDS.includes(talkId) || !/^[ABC][1-4]$/.test(cell)) {
+      return null;
+    }
+    placements.push({
+      talkId,
+      room: cell[0] as Room,
+      slot: Number(cell[1]) as Slot,
+    });
+  }
+
+  return placements;
+}
+
+function getEventPlacements(
+  event: StudyEvent | undefined,
+  side: "Before" | "After",
+): Placement[] | null {
+  const placements = getSchedulePlacements(
+    eventString(event, `schedule${side}`, `schedule${side}`),
+  );
+  if (placements !== null || side === "Before") {
+    return placements;
+  }
+
+  const stored = firstDefined(
+    readEventValue(event, "finalPlacements"),
+    readMetadataValue(event, "finalPlacements"),
+    readMetadataValue(event, "placements"),
+  );
+  if (!Array.isArray(stored)) {
+    return null;
+  }
+
+  const result: Placement[] = [];
+  for (const value of stored) {
+    const placement = asRecord(value);
+    if (!placement ||
+        typeof placement.talkId !== "string" ||
+        !TALK_IDS.includes(placement.talkId) ||
+        !["A", "B", "C"].includes(String(placement.room)) ||
+        ![1, 2, 3, 4].includes(Number(placement.slot))) {
+      return null;
+    }
+    result.push({
+      talkId: placement.talkId,
+      room: placement.room as Room,
+      slot: Number(placement.slot) as Slot,
+    });
+  }
+  return result;
+}
+
+function isCompleteSchedule(schedule: string): boolean {
+  const placements = getSchedulePlacements(schedule);
+  return placements !== null && TALK_IDS.every(
+    (talkId) => placements.some((placement) => placement.talkId === talkId),
+  );
+}
+
+function isCompleteEventBoard(
+  event: StudyEvent | undefined,
+  side: "Before" | "After",
+): boolean {
+  const placements = getEventPlacements(event, side);
+  if (placements !== null) {
+    return TALK_IDS.every(
+      (talkId) => placements.some((placement) => placement.talkId === talkId),
+    );
+  }
+  return eventBoolean(
+    event,
+    side === "Before" ? "completeAssignmentBefore" : "completeAssignment",
+    side === "Before" ? "completeAssignmentBefore" : "completeAssignment",
+  ) === true;
+}
+
+function findScrapEvent(events: StudyEvent[]): StudyEvent | undefined {
+  return events.find((event) =>
+    (event.eventType === "trial_start" || isAcceptedEdit(event)) &&
+    isCompleteEventBoard(event, "After") &&
+    (getHammingDistanceAfter(event) ?? -1) > STRATEGY_SWITCH_HAMMING_THRESHOLD,
+  );
+}
+
+function getPostProbeScore(
+  event: StudyEvent | undefined,
+  side: "Before" | "After",
+  taskId: SupportedStudyTaskId,
+): number | null {
+  const rawScore = eventNumber(event, `score${side}`) ??
+    (side === "After" ? eventNumber(event, "finalScore", "finalScore") : null);
+  const placements = getEventPlacements(event, side);
+  return rawScore !== null && placements !== null
+    ? calculatePostProbeScore(rawScore, placements, taskId)
+    : eventNumber(event, `postProbeScore${side}`, `postProbeScore${side}`);
+}
+
+function getProbeAnalysis(events: StudyEvent[]) {
+  const finalEvent = getFinalSubmissionEvent(events);
+  const finalIndex = finalEvent ? events.indexOf(finalEvent) : events.length;
+  const probeIndex = events.findIndex((event, index) =>
+    event.eventType === "probe_shown" && index < finalIndex,
+  );
+  const probeShownEvent = probeIndex < 0 ? undefined : events[probeIndex];
+  const taskId = resolveTaskId(probeShownEvent?.taskId, finalEvent?.taskId);
+  let onsetPlacements = getEventPlacements(probeShownEvent, "After") ??
+    getEventPlacements(probeShownEvent, "Before");
+  for (let index = probeIndex - 1; onsetPlacements === null && index >= 0; index -= 1) {
+    onsetPlacements = getEventPlacements(events[index], "After");
+  }
+  const compliantAtOnset = probeShownEvent && onsetPlacements !== null
+    ? getUnresolvedPostProbeTalkIds(onsetPlacements, taskId).length === 0
+    : null;
+  const postProbeEdits = probeShownEvent
+    ? events.slice(probeIndex + 1, finalIndex + 1).filter(isAcceptedEdit)
+    : [];
+  const integrationEdits = compliantAtOnset === true ? [] : postProbeEdits.filter((event) => {
+    const before = getEventPlacements(event, "Before");
+    const after = getEventPlacements(event, "After");
+    return before !== null && after !== null &&
+      getPostProbeIntegrationTalkIds(before, after, taskId).length > 0;
+  });
+  const firstIntegrationEvent = integrationEdits[0];
+  const acknowledgedEvent = probeShownEvent
+    ? events.slice(probeIndex + 1, finalIndex + 1).find((event) =>
+        event.eventType === "probe_ack" || event.eventType === "probe_acknowledged",
+      )
+    : undefined;
+  const activityTypes = new Set<string>([
+    "drag_start", "drop", "move", "swap", "unplace", "illegal_drop", "drag_cancel",
+    "click", "task_selected", "task_details_opened", "task_details_closed",
+    "assistant_analysis_requested", "ai_prompt_sent", "probe_notification_opened",
+    "probe_ack", "probe_acknowledged", "submit_attempt",
+  ]);
+  const lastActivity = events.slice(0, Math.max(0, probeIndex)).reverse().find((event) =>
+    activityTypes.has(event.eventType) ||
+    eventBoolean(event, "participantCaused", "participantCaused") === true,
+  );
+  const idleMs = probeShownEvent
+    ? lastActivity
+      ? Math.min(60000, Math.max(0, probeShownEvent.elapsedMs - lastActivity.elapsedMs))
+      : null
+    : null;
+
+  return {
+    probeShownEvent,
+    compliantAtOnset,
+    postProbeEdits,
+    integrationEdits,
+    firstIntegrationEvent,
+    acknowledgedEvent,
+    idleMs,
+  };
+}
+
+function toSevenPointCsvValue(value: unknown): number | null {
+  return typeof value === "number" && Number.isInteger(value) && value >= 1 && value <= 7
+    ? value
+    : null;
+}
+
 export function buildTrialEventRows(
   events:
     StudyEvent[],
+  timerStartedAtIso?: string | null,
 ): TrialMetricRow[] {
   const sortedEvents =
     sortEvents(
-      events,
+      normalizeElapsedTimes(events, timerStartedAtIso),
     );
 
-  const probeShownEvent =
-    getFirstEvent(
-      sortedEvents,
-      "probe_shown",
-    );
+  const probeAnalysis = getProbeAnalysis(sortedEvents);
+  const probeShownEvent = probeAnalysis.probeShownEvent;
 
   const probeId =
     eventString(
@@ -1881,8 +2091,28 @@ export function buildTrialEventRows(
       sortedEvents,
     );
 
+  const scrapEvent = findScrapEvent(sortedEvents);
+  const firstIntegrationIndex = probeAnalysis.firstIntegrationEvent
+    ? sortedEvents.indexOf(probeAnalysis.firstIntegrationEvent)
+    : -1;
+  const probeIndex = probeShownEvent ? sortedEvents.indexOf(probeShownEvent) : -1;
+  const acknowledgedIndex = probeAnalysis.acknowledgedEvent
+    ? sortedEvents.indexOf(probeAnalysis.acknowledgedEvent)
+    : -1;
+
   return sortedEvents.map(
-    (event) => {
+    (event, eventIndex) => {
+      const afterProbe = probeIndex >= 0 && eventIndex >= probeIndex;
+      const integrationApplicable = afterProbe && probeAnalysis.compliantAtOnset !== true;
+      const integrated = firstIntegrationIndex >= 0 && eventIndex >= firstIntegrationIndex;
+      const acknowledged = acknowledgedIndex >= 0 && eventIndex >= acknowledgedIndex;
+      const postProbeEditIndex = probeAnalysis.postProbeEdits.indexOf(event);
+      const editsBeforeIntegration = integrationApplicable
+        ? probeAnalysis.postProbeEdits.filter((edit) =>
+            sortedEvents.indexOf(edit) <= eventIndex &&
+            (firstIntegrationIndex < 0 || sortedEvents.indexOf(edit) < firstIntegrationIndex),
+          ).length
+        : null;
       const acceptedEditAnnotation =
         acceptedEditAnnotations.get(
           event.eventId,
@@ -2341,11 +2571,11 @@ export function buildTrialEventRows(
           ),
         ),
         destructive_edit:
-          acceptedEdit
-            ? isStrategySwitchEvent
+          acceptedEdit || event.eventType === "trial_start"
+            ? event === scrapEvent
             : null,
         destructive_edit_definition:
-          "first_post_construction_crossing_from_hamming_lte_6_to_gt_6",
+          "first_complete_board_with_hamming_gt_6_from_first_complete_board",
         structural_departure_edit:
           event.isDestructiveEdit ??
           null,
@@ -2433,8 +2663,7 @@ export function buildTrialEventRows(
         probeShownEvent?.hammingDistanceFromAI ??
         null,
       probe_idle_ms_previous_60s:
-        probeShownEvent?.idleMsInPrevious60Seconds ??
-        null,
+        probeAnalysis.idleMs,
       probe_reopen_count:
         probeReopenCount,
       acknowledgement_latency_ms:
@@ -2567,56 +2796,32 @@ export function buildTrialEventRows(
         event.probeAcknowledgmentSource ??
         "",
       integration_consistent_edit:
-        event.integrationConsistentEdit ??
-        null,
+        integrationApplicable && acceptedEdit
+          ? probeAnalysis.integrationEdits.includes(event)
+          : null,
       probe_integration_detected:
-        event.probeIntegrationDetected ??
-        null,
+        integrationApplicable ? integrated : null,
       detection_miss:
         event.detectionMiss ??
         null,
       integration_miss:
-        event.integrationMiss ??
-        null,
+        integrationApplicable ? !integrated : null,
       detection_without_integration:
-        event.detectionWithoutIntegration ??
-        null,
+        integrationApplicable ? acknowledged && !integrated : null,
       first_probe_integration:
-        toBooleanValue(
-          readMetadataValue(
-            event,
-            "firstProbeIntegration",
-          ),
-        ),
+        integrationApplicable && acceptedEdit
+          ? event === probeAnalysis.firstIntegrationEvent
+          : null,
       latency_from_probe_ms:
-        toNonNegativeNumber(
-          eventNumber(
-            event,
-            "latencyFromProbeMs",
-            "latencyFromProbeMs",
-          ),
-        ),
+        afterProbe
+          ? getElapsedDifferenceFromReference(event, probeShownEvent)
+          : null,
       post_probe_edit_index:
-        toNumberValue(
-          readMetadataValue(
-            event,
-            "postProbeEditIndex",
-          ),
-        ),
+        postProbeEditIndex >= 0 ? postProbeEditIndex + 1 : null,
       first_post_probe_edit:
-        toBooleanValue(
-          readMetadataValue(
-            event,
-            "isFirstPostProbeEdit",
-          ),
-        ),
+        postProbeEditIndex >= 0 ? postProbeEditIndex === 0 : null,
       post_probe_edits_before_integration:
-        toNumberValue(
-          readMetadataValue(
-            event,
-            "postProbeEditsBeforeIntegration",
-          ),
-        ),
+        editsBeforeIntegration,
       post_probe_feasible:
         event.postProbeFeasible ??
         null,
@@ -2730,6 +2935,12 @@ export function buildTrialEventRows(
           serializeValue(
             event.payload,
           ),
+        post_probe_score_before:
+          afterProbe ? getPostProbeScore(event, "Before", taskId) : null,
+        post_probe_score_after:
+          afterProbe ? getPostProbeScore(event, "After", taskId) : null,
+        probe_compliant_at_onset:
+          probeAnalysis.compliantAtOnset,
       });
     },
   );
@@ -2741,10 +2952,12 @@ export function buildTrialSummaryRows({
   trial,
   questionnaireResponse,
   events,
+  exportTimestamps,
 }: BuildTrialSummaryRowsInput): TrialMetricRow[] {
+  const timerStartedAtIso = getTimerStartedAtIso(events, trial.timerStartedAtIso);
   const sortedEvents =
     sortEvents(
-      events,
+      normalizeElapsedTimes(events, timerStartedAtIso),
     );
 
   const acceptedEdits =
@@ -2791,11 +3004,8 @@ export function buildTrialSummaryRows({
       "trial_start",
     );
 
-  const probeShownEvent =
-    getFirstEvent(
-      sortedEvents,
-      "probe_shown",
-    );
+  const probeAnalysis = getProbeAnalysis(sortedEvents);
+  const probeShownEvent = probeAnalysis.probeShownEvent;
 
   const probeOpenedEvent =
     getFirstEvent(
@@ -2811,15 +3021,7 @@ export function buildTrialSummaryRows({
         "probe_notification_opened",
     ).length;
 
-  const probeAcknowledgedEvent =
-    getFirstEvent(
-      sortedEvents,
-      "probe_ack",
-    ) ??
-    getFirstEvent(
-      sortedEvents,
-      "probe_acknowledged",
-    );
+  const probeAcknowledgedEvent = probeAnalysis.acknowledgedEvent;
 
   const probeDetectionEvent =
     getFirstEvent(
@@ -2951,9 +3153,13 @@ export function buildTrialSummaryRows({
         ),
     );
 
+  const completeStateObservations = stateObservations.filter(
+    (observation) => isCompleteSchedule(observation.schedule),
+  );
+
   const uniqueMacroStructures =
     new Set(
-      stateObservations
+      completeStateObservations
         .map(
           (observation) =>
             observation.macroStructureSignature,
@@ -2976,7 +3182,7 @@ export function buildTrialSummaryRows({
     );
 
   const hammingValues =
-    stateObservations
+    completeStateObservations
       .map(
         (observation) =>
           observation.hammingDistanceFromAI,
@@ -3013,6 +3219,9 @@ export function buildTrialSummaryRows({
 
   const theoreticalEditCategories =
     acceptedEdits
+      .filter((event) =>
+        isCompleteEventBoard(event, "Before") && isCompleteEventBoard(event, "After"),
+      )
       .map(
         (event) =>
           eventString(
@@ -3034,16 +3243,6 @@ export function buildTrialSummaryRows({
       sortedEvents,
     );
 
-  const destructiveEditEvents =
-    strategySwitchEvent
-      ? [
-          strategySwitchEvent,
-        ]
-      : [];
-
-  const firstMoatCrossingEvent =
-    strategySwitchEvent;
-
   const firstStructuralDepartureEvent =
     acceptedEdits.find(
       (event) =>
@@ -3062,8 +3261,7 @@ export function buildTrialSummaryRows({
         ),
     );
 
-  const firstDestructiveEditEvent =
-    firstMoatCrossingEvent;
+  const firstDestructiveEditEvent = findScrapEvent(sortedEvents);
 
   const firstOptimalTransitionEvent =
     acceptedEdits.find(
@@ -3072,36 +3270,13 @@ export function buildTrialSummaryRows({
         true,
     );
 
-  const firstIntegrationEvent =
-    acceptedEdits.find(
-      (event) =>
-        event.integrationConsistentEdit ===
-          true ||
-        event.probeIntegrationDetected ===
-          true,
-    );
-
-  const postProbeEdits =
-    probeShownEvent
-      ? acceptedEdits.filter(
-          (event) =>
-            event.elapsedMs >=
-            probeShownEvent.elapsedMs,
-        )
-      : [];
-
-  const firstPostProbeEdit =
-    postProbeEdits[
-      0
-    ];
-
-  const postProbeEditsBeforeIntegration =
-    firstIntegrationEvent
-      ? postProbeEdits.filter(
-          (event) =>
-            event.elapsedMs <
-            firstIntegrationEvent.elapsedMs,
-        ).length
+  const firstIntegrationEvent = probeAnalysis.firstIntegrationEvent;
+  const postProbeEdits = probeAnalysis.postProbeEdits;
+  const firstPostProbeEdit = postProbeEdits[0];
+  const postProbeEditsBeforeIntegration = !probeShownEvent || probeAnalysis.compliantAtOnset === true
+    ? null
+    : firstIntegrationEvent
+      ? postProbeEdits.indexOf(firstIntegrationEvent)
       : postProbeEdits.length;
 
   const permanentAIFamilyExit =
@@ -3128,13 +3303,7 @@ export function buildTrialSummaryRows({
     );
 
   const enteredAIFamilyElapsedMs =
-    firstEnteredAIFamilyObservation
-      ? Math.max(
-          0,
-          firstEnteredAIFamilyObservation.elapsedMs -
-            trialStartElapsedMs,
-        )
-      : null;
+    firstEnteredAIFamilyObservation?.elapsedMs ?? null;
 
   const acceptedEditsInsideFamily =
     acceptedEdits.filter(
@@ -3165,7 +3334,7 @@ export function buildTrialSummaryRows({
       "scoreAfter",
     );
 
-  const finalScore =
+  const finalRawScore =
     eventNumber(
       finalEvent,
       "scoreAfter",
@@ -3177,23 +3346,13 @@ export function buildTrialSummaryRows({
       ),
     );
 
-  const finalScorePercentageOfTheoreticalMaximum =
-    toNumberValue(
-      readMetadataValue(
-        finalEvent,
-        "finalScorePercentage",
-      ),
-    ) ??
-    (
-      finalScore !==
-      null
-        ? (
-            finalScore /
-            theoreticalMaximumScheduleScore
-          ) *
-          100
-        : null
-    );
+  const finalScore = probeShownEvent
+    ? getPostProbeScore(finalEvent, "After", taskId)
+    : finalRawScore;
+
+  const finalScorePercentageOfTheoreticalMaximum = finalScore !== null
+    ? 100 * finalScore / theoreticalMaximumScheduleScore
+    : null;
 
   const finalPostProbeFeasible =
     eventBoolean(
@@ -3358,10 +3517,7 @@ export function buildTrialSummaryRows({
       finalEvent,
       "hammingDistanceFromAI",
     ) ??
-    hammingValues[
-      hammingValues.length -
-        1
-    ] ??
+    stateObservations[stateObservations.length - 1]?.hammingDistanceFromAI ??
     null;
 
   const probeShown =
@@ -3448,67 +3604,20 @@ export function buildTrialSummaryRows({
   const probeAcknowledged =
     probeShown
       ? (
+          Boolean(probeAcknowledgedEvent) ||
           eventBoolean(
             finalEvent,
             "probeAcknowledged",
             "probeAcknowledged",
-          ) ??
-          Boolean(
-            probeAcknowledgedEvent,
-          )
+          ) === true
         )
       : null;
 
-  const probeIntegrated =
-    probeShown
-      ? (
-          eventBoolean(
-            finalEvent,
-            "probeIntegrationDetected",
-            "probeIntegrationDetected",
-          ) ??
-          Boolean(
-            firstIntegrationEvent,
-          )
-        )
-      : null;
+  const integrationApplicable = probeShown && probeAnalysis.compliantAtOnset !== true;
+  const probeIntegrated = integrationApplicable ? Boolean(firstIntegrationEvent) : null;
 
-  const detectionMiss =
-    probeShown
-      ? !Boolean(
-          probeDetectionEvent,
-        )
-      : null;
-
-  const integrationMiss =
-    probeShown
-      ? (
-          eventBoolean(
-            finalEvent,
-            "integrationMiss",
-            "integrationMiss",
-          ) ??
-          probeIntegrated ===
-            false
-        )
-      : null;
-
-  const detectionWithoutIntegration =
-    probeShown
-      ? (
-          eventBoolean(
-            finalEvent,
-            "detectionWithoutIntegration",
-            "detectionWithoutIntegration",
-          ) ??
-          (
-            probeAcknowledged ===
-              true &&
-            probeIntegrated ===
-              false
-          )
-        )
-      : null;
+  const detectionMiss = probeShown ? !Boolean(probeDetectionEvent) : null;
+  const integrationMiss = integrationApplicable ? !probeIntegrated : null;
 
   const initialVisibleViolationCount =
     getViolationCount(
@@ -3516,11 +3625,7 @@ export function buildTrialSummaryRows({
     );
 
   const probeRecallCorrect =
-    getProbeRecallCorrect(
-      questionnaireResponse
-        .probeRecall,
-      taskId,
-    );
+    questionnaireResponse.probeRecall.affectedRoom === getSemanticProbe(taskId).affectedRoom;
 
   const recognitionChoice =
     questionnaireResponse
@@ -3560,9 +3665,15 @@ export function buildTrialSummaryRows({
         )
       : null;
 
+  const detectionWithoutIntegration = integrationApplicable
+    ? detectionEvidencePresent === true && !probeIntegrated
+    : null;
+
   const probeDissociationProfile =
     !probeShown
       ? ""
+      : probeAnalysis.compliantAtOnset === true
+        ? "already_compliant"
       : probeIntegrated ===
           true
         ? "integrated"
@@ -3636,28 +3747,26 @@ export function buildTrialSummaryRows({
       : detectionLatencyMs ??
         probeRiskWindowMs;
 
-  const integrationLatencyMs =
-    getElapsedDifferenceFromReference(
-      firstIntegrationEvent,
-      probeShownEvent,
-    );
+  const integrationLatencyMs = integrationApplicable
+    ? getElapsedDifferenceFromReference(firstIntegrationEvent, probeShownEvent)
+    : null;
 
   const integrationEventObserved =
-    probeShown
+    integrationApplicable
       ? Boolean(
           firstIntegrationEvent,
         )
       : null;
 
   const integrationRightCensored =
-    probeShown
+    integrationApplicable
       ? !Boolean(
           firstIntegrationEvent,
         )
       : null;
 
   const integrationTimeOrCensorMs =
-    !probeShown
+    !integrationApplicable
       ? null
       : integrationLatencyMs ??
         probeRiskWindowMs;
@@ -3672,20 +3781,17 @@ export function buildTrialSummaryRows({
       sortedEvents,
     );
 
-  /*
-   * FIX: This elapsed measure now uses trial_start as zero, matching the
-   * other trial-level latency measures.
-   */
   const firstCompleteAssignmentElapsedMs =
-    initialAssignmentComplete
-      ? 0
-      : firstCompleteAssignmentEvent
-          ? Math.max(
-              0,
-              firstCompleteAssignmentEvent.elapsedMs -
-                trialStartElapsedMs,
-            )
-          : null;
+    firstCompleteAssignmentEvent?.elapsedMs ?? null;
+  const scrapObserved = firstCompleteAssignmentEvent
+    ? Boolean(firstDestructiveEditEvent)
+    : null;
+  const scrapLatencyMs = getElapsedDifferenceFromReference(
+    firstDestructiveEditEvent, firstCompleteAssignmentEvent,
+  );
+  const scrapTimeOrCensorMs = firstCompleteAssignmentEvent
+    ? scrapLatencyMs ?? Math.max(0, trialEndElapsedMs - firstCompleteAssignmentEvent.elapsedMs)
+    : null;
 
   /*
    * FIX: The edit that first completes the schedule is construction, so it
@@ -3825,8 +3931,7 @@ export function buildTrialSummaryRows({
         trial.assistantRecommendationShownAtIso ??
         "",
       timer_started_at_iso:
-        trial.timerStartedAtIso ??
-        "",
+        timerStartedAtIso,
       probe_shown_at_iso:
         trial.probeShownAtIso ??
         probeShownEvent?.timestampIso ??
@@ -3861,6 +3966,7 @@ export function buildTrialSummaryRows({
         questionnaireSubmittedEvent?.timestampIso ??
         "",
       questionnaire_exported_at_iso:
+        exportTimestamps?.questionnaireExportedAtIso ??
         questionnaireResponse.exportedAtIso ??
         "",
       trial_duration_ms:
@@ -3870,13 +3976,13 @@ export function buildTrialSummaryRows({
       accepted_edit_count:
         acceptedEdits.length,
       edit_sequence_entropy_bits:
-        calculateEntropy(
-          theoreticalEditCategories,
-        ),
+        theoreticalEditCategories.length > 0
+          ? calculateEntropy(theoreticalEditCategories)
+          : null,
       theoretical_edit_category_entropy_bits:
-        calculateEntropy(
-          theoreticalEditCategories,
-        ),
+        theoreticalEditCategories.length > 0
+          ? calculateEntropy(theoreticalEditCategories)
+          : null,
       transition_id_entropy_bits:
         calculateEntropy(
           transitionIds,
@@ -3981,8 +4087,7 @@ export function buildTrialSummaryRows({
       verified_global_optimum_problem_instance:
         verifiedGlobalOptimumProblemInstance,
       pareto_efficiency_reference:
-        taskBenchmarks
-          .paretoEfficiencyReference,
+        getParetoEfficiencyReference(probeShown),
       initial_score:
         firstScoreAfter,
       final_score:
@@ -4016,13 +4121,7 @@ export function buildTrialSummaryRows({
           firstStructuralDepartureEvent,
         ),
       first_structural_departure_elapsed_ms:
-        firstStructuralDepartureEvent
-          ? Math.max(
-              0,
-              firstStructuralDepartureEvent.elapsedMs -
-                trialStartElapsedMs,
-            )
-          : null,
+        firstStructuralDepartureEvent?.elapsedMs ?? null,
       ai_family_exit_count:
         acceptedEdits.filter(
           (event) =>
@@ -4114,25 +4213,9 @@ export function buildTrialSummaryRows({
           ? salvageRuns.length
           : null,
       longest_salvage_run_start_elapsed_ms:
-        longestSalvageRun
-          ? Math.max(
-              0,
-              longestSalvageRun
-                .startEvent
-                .elapsedMs -
-                trialStartElapsedMs,
-            )
-          : null,
+        longestSalvageRun?.startEvent.elapsedMs ?? null,
       longest_salvage_run_end_elapsed_ms:
-        longestSalvageRun
-          ? Math.max(
-              0,
-              longestSalvageRun
-                .endEvent
-                .elapsedMs -
-                trialStartElapsedMs,
-            )
-          : null,
+        longestSalvageRun?.endEvent.elapsedMs ?? null,
       longest_salvage_run_duration_ms:
         longestSalvageRun
           ? Math.max(
@@ -4207,37 +4290,19 @@ export function buildTrialSummaryRows({
               0,
         ).length,
       destructive_edit_definition:
-        "first_post_construction_crossing_from_hamming_lte_6_to_gt_6",
+        "first_complete_board_with_hamming_gt_6_from_first_complete_board",
       destructive_edit_occurred:
-        Boolean(
-          firstMoatCrossingEvent,
-        ),
+        scrapObserved,
       destructive_edit_count:
-        destructiveEditEvents.length,
+        scrapObserved === null ? null : Number(scrapObserved),
       destructive_edit_latency_ms:
-        firstMoatCrossingEvent
-          ? Math.max(
-              0,
-              firstMoatCrossingEvent.elapsedMs -
-                trialStartElapsedMs,
-            )
-          : null,
+        scrapLatencyMs,
       destructive_edit_event_observed:
-        Boolean(
-          firstMoatCrossingEvent,
-        ),
+        scrapObserved,
       destructive_edit_right_censored:
-        !Boolean(
-          firstMoatCrossingEvent,
-        ),
+        scrapObserved === null ? null : !scrapObserved,
       destructive_edit_time_or_censor_ms:
-        firstMoatCrossingEvent
-          ? Math.max(
-              0,
-              firstMoatCrossingEvent.elapsedMs -
-                trialStartElapsedMs,
-            )
-          : trialDurationMs,
+        scrapTimeOrCensorMs,
       structural_departure_edit_occurred:
         Boolean(
           firstStructuralDepartureEvent,
@@ -4297,7 +4362,7 @@ export function buildTrialSummaryRows({
       strategy_switch_occurred:
         strategySwitchOccurred,
       strategy_switch_elapsed_ms:
-        strategySwitchElapsedMs,
+        strategySwitchEvent?.elapsedMs ?? null,
       strategy_switch_event_observed:
         strategySwitchEventObserved,
       strategy_switch_right_censored:
@@ -4319,15 +4384,15 @@ export function buildTrialSummaryRows({
           "hammingDistanceFromAI",
         ),
       scrap_occurred:
-        strategySwitchOccurred,
+        scrapObserved,
       scrap_latency_ms:
-        strategySwitchElapsedMs,
+        scrapLatencyMs,
       scrap_event_observed:
-        strategySwitchEventObserved,
+        scrapObserved,
       scrap_right_censored:
-        strategySwitchRightCensored,
+        scrapObserved === null ? null : !scrapObserved,
       scrap_time_or_censor_ms:
-        strategySwitchTimeOrCensorMs,
+        scrapTimeOrCensorMs,
       permanent_ai_family_exit_occurred:
         Boolean(
           permanentAIFamilyExit,
@@ -4387,8 +4452,7 @@ export function buildTrialSummaryRows({
         probeShownEvent?.hammingDistanceFromAI ??
         null,
       probe_idle_ms_previous_60s:
-        probeShownEvent?.idleMsInPrevious60Seconds ??
-        null,
+        probeAnalysis.idleMs,
       probe_reopen_count:
         probeReopenCount,
       probe_opened:
@@ -4606,15 +4670,7 @@ export function buildTrialSummaryRows({
           ),
         ),
       probe_onset_seconds:
-        // ADVISER FIX: Export onset relative to trial_start, not page entry.
-        probeShownEvent &&
-        trialStartEvent
-          ? (
-              probeShownEvent.elapsedMs -
-              trialStartEvent.elapsedMs
-            ) /
-            1000
-          : null,
+        probeShownEvent ? probeShownEvent.elapsedMs / 1000 : null,
       probe_collapse_seconds:
         toNumberValue(
           readMetadataValue(
@@ -4682,15 +4738,15 @@ export function buildTrialSummaryRows({
           questionnaireResponse.nasaTlx.frustration,
         ),
       schedule_completeness_rating:
-        toLikertCsvValue(
+        toSevenPointCsvValue(
           questionnaireResponse.experienceRatings.scheduleCompleteness,
         ),
       ai_helpfulness_rating:
-        toLikertCsvValue(
+        toSevenPointCsvValue(
           questionnaireResponse.experienceRatings.aiHelpfulness,
         ),
       ai_competence_rating:
-        toLikertCsvValue(
+        toSevenPointCsvValue(
           questionnaireResponse.experienceRatings.aiCompetence,
         ),
       manipulation_recommendation_specificity:
@@ -4725,7 +4781,7 @@ export function buildTrialSummaryRows({
         questionnaireResponse.probeRecall.affectedRoom,
       probe_recall_affected_room:
         questionnaireResponse.probeRecall.affectedRoom,
-      probe_recall_correct:
+      probe_recall_room_correct:
         probeRecallCorrect,
       probe_recall_confidence:
         toLikertCsvValue(
@@ -4801,9 +4857,11 @@ export function buildTrialSummaryRows({
       summary_csv_export_status:
         trial.summaryCsvExportStatus,
       events_csv_exported_at_iso:
+        exportTimestamps?.eventsCsvExportedAtIso ??
         trial.eventsCsvExportedAtIso ??
         "",
       summary_csv_exported_at_iso:
+        exportTimestamps?.summaryCsvExportedAtIso ??
         trial.summaryCsvExportedAtIso ??
         "",
       export_error_message:
@@ -4828,6 +4886,10 @@ export function buildTrialSummaryRows({
         enteredAIFamilyOccurred,
       entered_ai_family_elapsed_ms:
         enteredAIFamilyElapsedMs,
+      final_score_rule:
+        probeShown ? "F_P" : "F",
+      probe_compliant_at_onset:
+        probeAnalysis.compliantAtOnset,
     };
 
   return [

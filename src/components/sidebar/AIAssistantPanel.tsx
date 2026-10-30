@@ -1,12 +1,15 @@
 import {
   Bot,
-  CheckCircle2,
   Sparkles,
 } from "lucide-react";
 
 import {
   useParams,
 } from "react-router";
+
+import {
+  getAssistantRecommendation,
+} from "../../data/symposium";
 
 import {
   SYMPOSIUM_TASK_DATA,
@@ -25,68 +28,6 @@ interface AIAssistantPanelProps {
   taskId?:
     TaskDomainId;
 }
-
-interface TaskAssistantPresentation {
-  recommendation:
-    string;
-
-  partialPrefillAcknowledgment:
-    string;
-
-  fullPrefillAcknowledgment:
-    string;
-
-  reviewMessage:
-    string;
-}
-
-const TASK_ASSISTANT_PRESENTATION: Record<
-  TaskDomainId,
-  TaskAssistantPresentation
-> = {
-  symposium: {
-    recommendation:
-      "Organize by topic tracks: Room A = NLP, Room B = Health, Room C = Robotics, ordered by speaker availability.",
-
-    partialPrefillAcknowledgment:
-      "I have placed several talks on the schedule as a starting point. Complete the remaining assignments and revise any placement that conflicts with the task constraints.",
-
-    fullPrefillAcknowledgment:
-      "I have filled the schedule using this topic-track structure. Review every talk placement and revise any placement that conflicts with the task constraints.",
-
-    reviewMessage:
-      "Review the recommendation against all task constraints before submitting your final schedule.",
-  },
-
-  delivery: {
-    recommendation:
-      "Organize by delivery regions: Van A = North region, Van B = Central region, Van C = South region, ordered by driver availability.",
-
-    partialPrefillAcknowledgment:
-      "I have placed several shipments in the dispatch plan as a starting point. Complete the remaining assignments and revise any placement that conflicts with the task constraints.",
-
-    fullPrefillAcknowledgment:
-      "I have filled the dispatch plan using this regional structure. Review every shipment assignment and revise any placement that conflicts with the task constraints.",
-
-    reviewMessage:
-      "Review the recommendation against all task constraints before submitting your final dispatch plan.",
-  },
-
-  // ADVISER FIX: The Clinic recommendation is identical in A, B, and C.
-  clinic: {
-    recommendation:
-      "I recommend organizing the clinic roster by clinical specialty: assign Emergency Care to Ward A, General Medicine to Ward B, and Critical Care to Ward C. Within each ward, arrange duties according to nurse availability and ward requirements. Review every assignment against the task constraints and revise any placement that creates a conflict.",
-
-    partialPrefillAcknowledgment:
-      "",
-
-    fullPrefillAcknowledgment:
-      "",
-
-    reviewMessage:
-      "Review the recommendation against all task constraints before submitting your final roster.",
-  },
-};
 
 function isTaskDomainId(
   value:
@@ -135,21 +76,17 @@ export default function AIAssistantPanel({
       ];
 
   const presentation =
-    TASK_ASSISTANT_PRESENTATION[
-      resolvedTaskId
-    ];
+    getAssistantRecommendation(
+      level,
+      resolvedTaskId,
+    );
 
   const prefillAcknowledgment =
-    level === "B"
-      ? presentation
-          .partialPrefillAcknowledgment
-      : level === "C"
-        ? presentation
-            .fullPrefillAcknowledgment
-        : null;
+    presentation
+      .prefillAcknowledgment;
 
   const contentVersion =
-    `${assistantContent.contentVersion}-${resolvedTaskId}-v1`;
+    `${assistantContent.contentVersion}-${resolvedTaskId}-v2`;
 
   return (
     <aside
@@ -204,17 +141,10 @@ export default function AIAssistantPanel({
           </div>
 
           <div className="ai-message-bubble">
-            <div className="ai-message-label">
-              {
-                assistantContent
-                  .recommendationLabel
-              }
-            </div>
-
             <p>
               {
                 presentation
-                  .recommendation
+                  .message
               }
             </p>
 
@@ -227,20 +157,6 @@ export default function AIAssistantPanel({
             ) : null}
           </div>
         </div>
-      </div>
-
-      <div className="ai-condition-note">
-        <CheckCircle2
-          size={15}
-          aria-hidden="true"
-        />
-
-        <span>
-          {
-            presentation
-              .reviewMessage
-          }
-        </span>
       </div>
     </aside>
   );

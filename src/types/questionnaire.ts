@@ -20,6 +20,22 @@ export const LIKERT_RATINGS:
     5,
   ];
 
+export type SevenPointRating =
+  | LikertRating
+  | 6
+  | 7;
+
+export const SEVEN_POINT_RATINGS:
+  readonly SevenPointRating[] = [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+  ];
+
 export type YesNoUnsure =
   | ""
   | "yes"
@@ -102,13 +118,13 @@ export const TRIAL_EXPERIENCE_DIMENSIONS:
 
 export interface TrialExperienceRatings {
   scheduleCompleteness:
-    LikertRating | null;
+    SevenPointRating | null;
 
   aiHelpfulness:
-    LikertRating | null;
+    SevenPointRating | null;
 
   aiCompetence:
-    LikertRating | null;
+    SevenPointRating | null;
 }
 
 export type ManipulationCheckDimension =
@@ -305,6 +321,9 @@ export interface ProbeRecallResponses {
 
   recognitionChoice:
     ProbeRecognitionChoice;
+
+  updateMeaning?:
+    string;
 }
 
 export interface TrialQuestionnaireResponse {
@@ -337,6 +356,12 @@ export interface TrialQuestionnaireResponse {
 
   exportedAtIso:
     string | null;
+
+  recallSubmittedAtIso?:
+    string | null;
+
+  recognitionSubmittedAtIso?:
+    string | null;
 }
 
 export type PrimaryInfluence =
@@ -363,6 +388,9 @@ export interface AttributionCheckResponses {
 
   perceivedAiCompetence:
     LikertRating | null;
+
+  aiAttributionRating?:
+    SevenPointRating | null;
 }
 
 export interface FunneledDebriefResponses {
@@ -394,6 +422,18 @@ export interface FunneledDebriefResponses {
     string;
 
   additionalFeedback:
+    string;
+
+  generalStrategy?:
+    string;
+
+  consideredOtherGrouping?:
+    YesNoUnsure;
+
+  otherGroupingDescription?:
+    string;
+
+  groupingReason?:
     string;
 }
 
@@ -499,6 +539,9 @@ export function createDefaultProbeRecallResponses():
 
     recognitionChoice:
       "",
+
+    updateMeaning:
+      "",
   };
 }
 
@@ -518,6 +561,9 @@ export function createDefaultAttributionCheckResponses():
       null,
 
     perceivedAiCompetence:
+      null,
+
+    aiAttributionRating:
       null,
   };
 }
@@ -553,6 +599,18 @@ export function createDefaultFunneledDebriefResponses():
       "",
 
     additionalFeedback:
+      "",
+
+    generalStrategy:
+      "",
+
+    consideredOtherGrouping:
+      "",
+
+    otherGroupingDescription:
+      "",
+
+    groupingReason:
       "",
   };
 }
@@ -615,6 +673,12 @@ export function createDefaultTrialQuestionnaireResponse(
 
     exportedAtIso:
       null,
+
+    recallSubmittedAtIso:
+      null,
+
+    recognitionSubmittedAtIso:
+      null,
   };
 }
 
@@ -632,6 +696,23 @@ export function isLikertRating(
       1 &&
     value <=
       5
+  );
+}
+
+export function isSevenPointRating(
+  value:
+    unknown,
+): value is SevenPointRating {
+  return (
+    typeof value ===
+      "number" &&
+    Number.isInteger(
+      value,
+    ) &&
+    value >=
+      1 &&
+    value <=
+      7
   );
 }
 
@@ -717,7 +798,7 @@ export function isTrialExperienceComplete(
 ): boolean {
   return TRIAL_EXPERIENCE_DIMENSIONS.every(
     (dimension) =>
-      isLikertRating(
+      isSevenPointRating(
         values[
           dimension
         ],
@@ -739,7 +820,7 @@ export function isManipulationCheckComplete(
   );
 }
 
-export function isProbeRecallComplete(
+export function isProbeFreeRecallComplete(
   values:
     ProbeRecallResponses,
 ): boolean {
@@ -768,14 +849,6 @@ export function isProbeRecallComplete(
   }
 
   if (
-    !isProbeRecognitionChoice(
-      values.recognitionChoice,
-    )
-  ) {
-    return false;
-  }
-
-  if (
     values.noticedUpdate ===
       "yes" &&
     values.updateDescription
@@ -787,6 +860,41 @@ export function isProbeRecallComplete(
   }
 
   return true;
+}
+
+export function isProbeRecognitionComplete(
+  values:
+    ProbeRecallResponses,
+): boolean {
+  return isProbeRecognitionChoice(
+    values.recognitionChoice,
+  );
+}
+
+export function isProbeRecallComplete(
+  values:
+    ProbeRecallResponses,
+): boolean {
+  return (
+    isProbeFreeRecallComplete(
+      values,
+    ) &&
+    isProbeRecognitionComplete(
+      values,
+    )
+  );
+}
+
+export function isProbeUpdateMeaningComplete(
+  values:
+    ProbeRecallResponses,
+): boolean {
+  return (
+    typeof values.updateMeaning ===
+      "string" &&
+    values.updateMeaning.trim().length >
+      0
+  );
 }
 
 export function getProbeRecallCorrect(
@@ -803,8 +911,6 @@ export function getProbeRecallCorrect(
     );
 
   return (
-    values.noticedUpdate ===
-      "yes" &&
     values.affectedRoom ===
       taskCopy.correctLocation
   );
@@ -905,6 +1011,34 @@ export function getFinalQuestionnaireValidationMessage(
   } = response;
 
   if (
+    !funneledDebrief.generalStrategy?.trim()
+  ) {
+    return "Please describe the general strategy you used across the three tasks.";
+  }
+
+  if (
+    !isYesNoUnsureResponse(
+      funneledDebrief.consideredOtherGrouping,
+    )
+  ) {
+    return "Please select Yes, No, or Unsure to say whether you considered or tried a different grouping.";
+  }
+
+  if (
+    funneledDebrief.consideredOtherGrouping ===
+      "yes" &&
+    !funneledDebrief.otherGroupingDescription?.trim()
+  ) {
+    return "Please describe the different grouping you considered or tried.";
+  }
+
+  if (
+    !funneledDebrief.groupingReason?.trim()
+  ) {
+    return "Please explain why you kept or changed the AI's grouping.";
+  }
+
+  if (
     attributionCheck
       .primaryInfluence ===
       "" ||
@@ -925,7 +1059,7 @@ export function getFinalQuestionnaireValidationMessage(
         .perceivedAiCompetence,
     )
   ) {
-    return "Please answer all decision attribution questions.";
+    return "Please answer all questions about how you made your decisions.";
   }
 
   if (
@@ -1024,6 +1158,14 @@ export function getFinalQuestionnaireValidationMessage(
       0
   ) {
     return "Please describe what you knew about the study before participating.";
+  }
+
+  if (
+    !isSevenPointRating(
+      attributionCheck.aiAttributionRating,
+    )
+  ) {
+    return "Please rate how much you agree that the recommendations were generated by an AI system, from 1 to 7.";
   }
 
   return "";

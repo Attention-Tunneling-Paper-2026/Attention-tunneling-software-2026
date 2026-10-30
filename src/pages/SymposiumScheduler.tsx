@@ -487,67 +487,12 @@ function getEarliestProbeCandidate(
 }
 
 function getIdleMsInPreviousWindow(
-  onsetAt:
-    number,
-
-  completedIntervals:
-    IdleInterval[],
-
-  lastActivityAt:
-    number | null,
+  onsetAt: number,
+  lastActivityAt: number | null,
 ): number {
-  const windowStartedAt =
-    onsetAt -
-    IDLE_LOOKBACK_MS;
-
-  const intervals = [
-    ...completedIntervals,
-  ];
-
-  // ADVISER FIX: Include the no-input interval still active at probe onset,
-  // independently of the threshold used to emit ordinary idle events.
-  if (
-    lastActivityAt !==
-      null
-  ) {
-    intervals.push({
-      startedAt:
-        lastActivityAt,
-
-      endedAt:
-        onsetAt,
-    });
-  }
-
-  const overlapMs =
-    intervals.reduce(
-      (
-        total,
-        interval,
-      ) =>
-        total +
-        Math.max(
-          0,
-          Math.min(
-            onsetAt,
-            interval.endedAt,
-          ) -
-            Math.max(
-              windowStartedAt,
-              interval.startedAt,
-            ),
-        ),
-      0,
-    );
-
-  return Math.max(
-    0,
-    Math.min(
-      IDLE_LOOKBACK_MS,
-      Math.round(
-        overlapMs,
-      ),
-    ),
+  return Math.min(
+    IDLE_LOOKBACK_MS,
+    Math.max(0, onsetAt - (lastActivityAt ?? onsetAt - IDLE_LOOKBACK_MS)),
   );
 }
 
@@ -745,6 +690,15 @@ function SymposiumSchedulerTrial({
       null,
     );
 
+  const participantLastActivityAtRef =
+    useRef<number | null>(null);
+
+  const probeCompliantAtOnsetRef =
+    useRef<boolean | null>(null);
+
+  const firstIntegrationEditIndexRef =
+    useRef<number | null>(null);
+
   const completedIdleIntervalsRef =
     useRef<IdleInterval[]>(
       [],
@@ -845,12 +799,6 @@ function SymposiumSchedulerTrial({
     useSchedulerStore(
       (state) =>
         state.trialNumber,
-    );
-
-  const placements =
-    useSchedulerStore(
-      (state) =>
-        state.placements,
     );
 
   const initializeTrial =
@@ -998,7 +946,6 @@ function SymposiumSchedulerTrial({
 
   const renderedAssistantText =
     [
-      assistantRecommendation.heading,
       assistantRecommendation.message,
       assistantRecommendation
         .prefillAcknowledgment,
@@ -1079,6 +1026,22 @@ function SymposiumSchedulerTrial({
   const timerExpired =
     remainingSeconds ===
     0;
+
+  function getProbeIntegrationDetected(): boolean | null {
+    return probeShownAtRef.current !== null &&
+      probeCompliantAtOnsetRef.current !== true
+        ? probeIntegrated || firstIntegrationEditIndexRef.current !== null
+        : null;
+  }
+
+  function getPostProbeEditsBeforeIntegration(): number | null {
+    return probeShownAtRef.current !== null &&
+      probeCompliantAtOnsetRef.current !== true
+        ? firstIntegrationEditIndexRef.current === null
+          ? postProbeEditCountRef.current
+          : firstIntegrationEditIndexRef.current - 1
+        : null;
+  }
 
   recordActivityRef.current = (
     now =
@@ -1180,12 +1143,6 @@ function SymposiumSchedulerTrial({
       },
     });
   };
-
-  const currentSnapshot =
-    createScheduleSnapshot(
-      placements,
-      taskId,
-    );
 
   function armSolvedTriggerCandidate(
     snapshot:
@@ -1290,6 +1247,10 @@ function SymposiumSchedulerTrial({
 
     idleLastActivityAtRef.current =
       null;
+
+    participantLastActivityAtRef.current = null;
+    probeCompliantAtOnsetRef.current = null;
+    firstIntegrationEditIndexRef.current = null;
 
     completedIdleIntervalsRef.current =
       [];
@@ -1681,38 +1642,37 @@ function SymposiumSchedulerTrial({
         persistedTimerStartedAt,
       );
 
-    const trialStartedAt =
-      trialAlreadyStarted
-        ? persistedTimerStartedAt
-        : getCurrentTimeMs();
+    if (!trialAlreadyStarted) {
+      markTrialTimerStarted(taskNumber);
+    }
 
-    trialStartedAtRef.current =
-      trialStartedAt;
+    const timerStartedAtIso =
+      useStudySessionStore.getState()
+        .getTrialProgress(taskNumber, taskId)?.timerStartedAtIso;
+
+    const trialStartedAt =
+      typeof timerStartedAtIso === "string"
+        ? Date.parse(timerStartedAtIso)
+        : trialAlreadyStarted
+          ? persistedTimerStartedAt
+          : getCurrentTimeMs();
+
+    trialStartedAtRef.current = trialStartedAt;
 
     idleLastActivityAtRef.current =
-      trialAlreadyStarted
-        ? getCurrentTimeMs()
-        : trialStartedAt;
+      trialAlreadyStarted ? getCurrentTimeMs() : trialStartedAt;
 
     startEventTrial({
       taskId,
       trialId,
-      trialNumber:
-        taskNumber,
+      trialNumber: taskNumber,
       trialOrder,
       conditionOrder,
       isFirstTrial,
       probeExposureNumber,
       probeNaive,
+      timerStartedAtIso: new Date(trialStartedAt).toISOString(),
     });
-
-    if (
-      !trialAlreadyStarted
-    ) {
-      markTrialTimerStarted(
-        taskNumber,
-      );
-    }
 
     const currentPlacements =
       clonePlacements(
@@ -2567,6 +2527,11 @@ function SymposiumSchedulerTrial({
       scoreDelta:
         0,
 
+      postProbeScoreBefore: probeWasShown ? snapshot.postProbeScore : null,
+      postProbeScoreAfter: probeWasShown ? snapshot.postProbeScore : null,
+      probeCompliantAtOnset: probeCompliantAtOnsetRef.current,
+      finalScoreRule: probeWasShown ? "F_P" : "F",
+
       speakerConflictsBefore:
         snapshot.speakerConflictPairCount,
 
@@ -2611,9 +2576,7 @@ function SymposiumSchedulerTrial({
           : undefined,
 
       probeIntegrationDetected:
-        probeWasShown
-          ? probeIntegrated
-          : undefined,
+        getProbeIntegrationDetected(),
 
       postProbeFeasibleBefore:
         timerPostProbeFeasible,
@@ -2651,9 +2614,7 @@ function SymposiumSchedulerTrial({
             : null,
 
         probeIntegrationDetected:
-          probeWasShown
-            ? probeIntegrated
-            : null,
+          getProbeIntegrationDetected(),
 
         postProbeFeasible:
           timerPostProbeFeasible,
@@ -2785,6 +2746,8 @@ function SymposiumSchedulerTrial({
         taskId,
       );
 
+    probeCompliantAtOnsetRef.current = snapshot.semanticProbeCompliant;
+
     const probeOnsetMeasurements = {
       triggerReason,
 
@@ -2803,8 +2766,7 @@ function SymposiumSchedulerTrial({
       idleMsInPrevious60Seconds:
         getIdleMsInPreviousWindow(
           shownAt,
-          completedIdleIntervalsRef.current,
-          idleLastActivityAtRef.current,
+          participantLastActivityAtRef.current,
         ),
     };
 
@@ -2866,6 +2828,10 @@ function SymposiumSchedulerTrial({
         scoreDelta:
           0,
 
+        postProbeScoreBefore: snapshot.postProbeScore,
+        postProbeScoreAfter: snapshot.postProbeScore,
+        probeCompliantAtOnset: probeCompliantAtOnsetRef.current,
+
         speakerConflictsBefore:
           snapshot.speakerConflictPairCount,
 
@@ -2900,10 +2866,10 @@ function SymposiumSchedulerTrial({
           semanticProbe.displayMode,
 
         integrationConsistentEdit:
-          false,
+          probeCompliantAtOnsetRef.current ? null : false,
 
         probeIntegrationDetected:
-          false,
+          getProbeIntegrationDetected(),
 
         latencyFromProbeMs:
           0,
@@ -2954,6 +2920,10 @@ function SymposiumSchedulerTrial({
             elapsedMs,
 
           ...probeOnsetMeasurements,
+
+          probeCompliantAtOnset: probeCompliantAtOnsetRef.current,
+          postProbeScoreBefore: snapshot.postProbeScore,
+          postProbeScoreAfter: snapshot.postProbeScore,
 
           triggerCandidate:
             candidate.reason,
@@ -3339,7 +3309,7 @@ function SymposiumSchedulerTrial({
         semanticProbe.displayMode,
 
       probeIntegrationDetected:
-        probeIntegrated,
+        getProbeIntegrationDetected(),
 
       postProbeFeasibleBefore:
         snapshot.postProbeFeasible,
@@ -3466,7 +3436,7 @@ function SymposiumSchedulerTrial({
         semanticProbe.displayMode,
 
       probeIntegrationDetected:
-        probeIntegrated,
+        getProbeIntegrationDetected(),
 
       metadata: {
         taskId:
@@ -3515,6 +3485,8 @@ function SymposiumSchedulerTrial({
 
       return;
     }
+
+    participantLastActivityAtRef.current = getCurrentTimeMs();
 
     const talkId =
       event.active.data.current
@@ -3650,6 +3622,8 @@ function SymposiumSchedulerTrial({
       return;
     }
 
+    participantLastActivityAtRef.current = getCurrentTimeMs();
+
     const snapshot =
       createScheduleSnapshot(
         clonePlacements(
@@ -3783,6 +3757,8 @@ function SymposiumSchedulerTrial({
 
       return;
     }
+
+    participantLastActivityAtRef.current = getCurrentTimeMs();
 
     const {
       active,
@@ -4061,23 +4037,25 @@ function SymposiumSchedulerTrial({
                 probeShownAtRef.current,
             );
 
-      const firstProbeIntegration =
-        metrics.integrationConsistentEdit &&
-        !probeIntegrated;
+      let postProbeEditIndex: number | null = null;
+      let isFirstPostProbeEdit = false;
 
-      if (
-        firstProbeIntegration
-      ) {
-        setProbeIntegrated(
-          true,
-        );
+      if (probeActive) {
+        postProbeEditCountRef.current += 1;
+        postProbeEditIndex = postProbeEditCountRef.current;
+        isFirstPostProbeEdit = !firstPostProbeEditDetectedRef.current;
+        firstPostProbeEditDetectedRef.current = true;
       }
 
-      if (
-        probeActive
-      ) {
-        postProbeEditCountRef.current +=
-          1;
+      const firstProbeIntegration =
+        probeActive && probeCompliantAtOnsetRef.current !== true
+          ? metrics.integrationConsistentEdit &&
+            firstIntegrationEditIndexRef.current === null
+          : null;
+
+      if (firstProbeIntegration) {
+        firstIntegrationEditIndexRef.current = postProbeEditIndex;
+        setProbeIntegrated(true);
       }
 
       addEvent({
@@ -4157,6 +4135,11 @@ function SymposiumSchedulerTrial({
         scoreDelta:
           metrics.scoreDelta,
 
+        postProbeScoreBefore: metrics.postProbeScoreBefore,
+        postProbeScoreAfter: metrics.postProbeScoreAfter,
+        probeCompliantAtOnset: probeCompliantAtOnsetRef.current,
+        firstProbeIntegration,
+
         speakerConflictsBefore:
           metrics.previousScore
             .violatedSpeakerPairChecks,
@@ -4193,13 +4176,12 @@ function SymposiumSchedulerTrial({
         probeAcknowledged,
 
         integrationConsistentEdit:
-          metrics.integrationConsistentEdit,
+          probeActive && probeCompliantAtOnsetRef.current !== true
+            ? metrics.integrationConsistentEdit
+            : null,
 
         probeIntegrationDetected:
-          probeActive
-            ? probeIntegrated ||
-              firstProbeIntegration
-            : null,
+          getProbeIntegrationDetected(),
 
         postProbeFeasibleBefore:
           metrics.postProbeFeasibleBefore,
@@ -4232,10 +4214,11 @@ function SymposiumSchedulerTrial({
 
           firstProbeIntegration,
 
-          postProbeEditIndex:
-            probeActive
-              ? postProbeEditCountRef.current
-              : null,
+          postProbeEditIndex,
+          isFirstPostProbeEdit,
+          probeCompliantAtOnset: probeCompliantAtOnsetRef.current,
+          postProbeEditsBeforeIntegration:
+            getPostProbeEditsBeforeIntegration(),
 
           completeAssignment:
             metrics.completeAssignment,
@@ -4786,22 +4769,18 @@ function SymposiumSchedulerTrial({
     }
 
     const firstProbeIntegration =
-      metrics.integrationConsistentEdit &&
-      !probeIntegrated;
+      probeActive && probeCompliantAtOnsetRef.current !== true
+        ? metrics.integrationConsistentEdit &&
+          firstIntegrationEditIndexRef.current === null
+        : null;
 
-    if (
-      firstProbeIntegration
-    ) {
-      setProbeIntegrated(
-        true,
-      );
+    if (firstProbeIntegration) {
+      firstIntegrationEditIndexRef.current = postProbeEditIndex;
+      setProbeIntegrated(true);
     }
 
     const probeIntegrationDetectedAfterEdit =
-      probeActive
-        ? probeIntegrated ||
-          firstProbeIntegration
-        : null;
+      getProbeIntegrationDetected();
 
     if (
       metrics.isSalvageAttempt
@@ -4948,6 +4927,11 @@ function SymposiumSchedulerTrial({
       scoreDelta:
         metrics.scoreDelta,
 
+      postProbeScoreBefore: metrics.postProbeScoreBefore,
+      postProbeScoreAfter: metrics.postProbeScoreAfter,
+      probeCompliantAtOnset: probeCompliantAtOnsetRef.current,
+      firstProbeIntegration,
+
       speakerConflictsBefore:
         metrics.previousScore.violatedSpeakerPairChecks,
 
@@ -5008,7 +4992,9 @@ function SymposiumSchedulerTrial({
       probeAcknowledged,
 
       integrationConsistentEdit:
-        metrics.integrationConsistentEdit,
+        probeActive && probeCompliantAtOnsetRef.current !== true
+          ? metrics.integrationConsistentEdit
+          : null,
 
       probeIntegrationDetected:
         probeIntegrationDetectedAfterEdit,
@@ -5146,19 +5132,10 @@ function SymposiumSchedulerTrial({
 
         isFirstPostProbeEdit,
 
+        probeCompliantAtOnset: probeCompliantAtOnsetRef.current,
+
         postProbeEditsBeforeIntegration:
-          probeActive &&
-          !probeIntegrated
-            ? Math.max(
-                0,
-                postProbeEditCountRef.current -
-                  (
-                    firstProbeIntegration
-                      ? 1
-                      : 0
-                  ),
-              )
-            : null,
+          getPostProbeEditsBeforeIntegration(),
 
         firstStrategySwitch,
 
@@ -5275,9 +5252,7 @@ function SymposiumSchedulerTrial({
         : null;
 
     const submissionProbeIntegrationDetected =
-      probeWasShown
-        ? probeIntegrated
-        : null;
+      getProbeIntegrationDetected();
 
     const detectionMiss =
       probeWasShown
@@ -5285,15 +5260,14 @@ function SymposiumSchedulerTrial({
         : null;
 
     const integrationMiss =
-      probeWasShown
-        ? !probeIntegrated
-        : null;
+      submissionProbeIntegrationDetected === null
+        ? null
+        : !submissionProbeIntegrationDetected;
 
     const detectionWithoutIntegration =
-      probeWasShown
-        ? probeAcknowledged &&
-          !probeIntegrated
-        : null;
+      submissionProbeIntegrationDetected === null
+        ? null
+        : probeAcknowledged && !submissionProbeIntegrationDetected;
 
     setActiveTalkId(
       null,
@@ -5434,10 +5408,17 @@ function SymposiumSchedulerTrial({
         snapshot.stateHash,
 
       finalScore:
-        snapshot.score.totalScore,
+        probeWasShown ? snapshot.postProbeScore : snapshot.score.totalScore,
+
+      finalScoreRule:
+        probeWasShown ? "F_P" : "F",
 
       finalScorePercentage:
-        snapshot.score.scorePercentage,
+        (probeWasShown ? snapshot.postProbeScore : snapshot.score.totalScore) /
+          snapshot.score.maximumScore * 100,
+
+      probeCompliantAtOnset: probeCompliantAtOnsetRef.current,
+      postProbeEditsBeforeIntegration: getPostProbeEditsBeforeIntegration(),
 
       finalSpeakerConflictPairs:
         snapshot.speakerConflictPairCount,
@@ -5486,6 +5467,11 @@ function SymposiumSchedulerTrial({
           snapshot.score.totalScore,
         scoreDelta:
           0,
+
+        postProbeScoreBefore: probeWasShown ? snapshot.postProbeScore : null,
+        postProbeScoreAfter: probeWasShown ? snapshot.postProbeScore : null,
+        probeCompliantAtOnset: probeCompliantAtOnsetRef.current,
+        finalScoreRule: probeWasShown ? "F_P" : "F",
         speakerConflictsBefore:
           snapshot.speakerConflictPairCount,
         speakerConflictsAfter:
@@ -5577,6 +5563,11 @@ function SymposiumSchedulerTrial({
       scoreDelta:
         0,
 
+      postProbeScoreBefore: probeWasShown ? snapshot.postProbeScore : null,
+      postProbeScoreAfter: probeWasShown ? snapshot.postProbeScore : null,
+      probeCompliantAtOnset: probeCompliantAtOnsetRef.current,
+      finalScoreRule: probeWasShown ? "F_P" : "F",
+
       speakerConflictsBefore:
         snapshot.speakerConflictPairCount,
 
@@ -5607,8 +5598,7 @@ function SymposiumSchedulerTrial({
           : undefined,
 
       probeIntegrationDetected:
-        submissionProbeIntegrationDetected ??
-        undefined,
+        submissionProbeIntegrationDetected,
 
       latencyFromProbeMs:
         submissionLatencyFromProbeMs,
@@ -5729,6 +5719,11 @@ function SymposiumSchedulerTrial({
       scoreDelta:
         0,
 
+      postProbeScoreBefore: probeWasShown ? snapshot.postProbeScore : null,
+      postProbeScoreAfter: probeWasShown ? snapshot.postProbeScore : null,
+      probeCompliantAtOnset: probeCompliantAtOnsetRef.current,
+      finalScoreRule: probeWasShown ? "F_P" : "F",
+
       speakerConflictsBefore:
         snapshot.speakerConflictPairCount,
 
@@ -5759,8 +5754,7 @@ function SymposiumSchedulerTrial({
           : undefined,
 
       probeIntegrationDetected:
-        submissionProbeIntegrationDetected ??
-        undefined,
+        submissionProbeIntegrationDetected,
 
       latencyFromProbeMs:
         submissionLatencyFromProbeMs,
@@ -5883,6 +5877,18 @@ function SymposiumSchedulerTrial({
       <div
         className={`scheduler-page scheduler-page-${taskId}`}
         data-task-id={taskId}
+        onClickCapture={() => {
+          if (!assistantReady || trialSubmitted || trialLocked) return;
+          participantLastActivityAtRef.current = getCurrentTimeMs();
+          addEvent({
+            ...eventIdentity,
+            eventType: "click",
+            trialNumber: taskNumber,
+            condition: expectedCondition,
+            phase: probeShownAtRef.current !== null ? "post_probe" : "pre_probe",
+            participantCaused: true,
+          });
+        }}
         onPointerDownCapture={() => {
           recordActivityRef.current();
         }}

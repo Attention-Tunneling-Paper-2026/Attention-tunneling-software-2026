@@ -160,6 +160,38 @@ export default function ProcedurePage() {
       false,
     );
 
+  const firstTrialEventIdentity =
+    useMemo(() => {
+      const firstTrial =
+        assignments.find(
+          (assignment) =>
+            assignment.trialOrder === 1,
+        );
+
+      if (!firstTrial) {
+        return null;
+      }
+
+      return {
+        taskId: firstTrial.taskId,
+        skin: firstTrial.taskId,
+        trialId: firstTrial.trialId,
+        compositeTrialId: firstTrial.trialId,
+        trialNumber: firstTrial.trialNumber,
+        trialOrder: firstTrial.trialOrder,
+        trialIndex: firstTrial.globalOptionNumber,
+        globalOptionNumber: firstTrial.globalOptionNumber,
+        outerTaskNumber: firstTrial.outerTaskNumber,
+        innerTaskNumber: firstTrial.innerTaskNumber,
+        globalTrialNumber: firstTrial.globalTrialNumber,
+        condition: firstTrial.condition,
+        conditionOrder: firstTrial.conditionOrder,
+        isFirstTrial: firstTrial.isFirstTrial,
+        probeExposureNumber: firstTrial.probeExposureNumber,
+        probeNaive: firstTrial.probeNaive,
+      };
+    }, [assignments]);
+
   const assignmentReady =
     assignmentStatus ===
       "valid" &&
@@ -172,7 +204,9 @@ export default function ProcedurePage() {
     assignmentSequenceId !==
       null &&
     assignments.length ===
-      TOTAL_STUDY_TRIALS;
+      TOTAL_STUDY_TRIALS &&
+    firstTrialEventIdentity !==
+      null;
 
   const resolvedOrderedPlan =
     useMemo(
@@ -211,7 +245,7 @@ export default function ProcedurePage() {
       ],
     );
 
-  // ADVISER FIX: A valid URL token initializes the exact static three-trial plan.
+// ADVISER FIX: A valid URL token initializes the exact static three-trial plan.
   useEffect(() => {
     initializeSessionFromToken(
       participantTokenFromUrl,
@@ -284,15 +318,19 @@ export default function ProcedurePage() {
     if (
       !sessionStartAlreadyLogged
     ) {
-      // ADVISER FIX: Record the immutable token-table assignment at session start.
+// ADVISER FIX: Record the immutable token-table assignment at session start.
       addEvent({
+        ...firstTrialEventIdentity,
+
+        participantToken,
+
         eventType:
           "session_start",
 
         phase:
           "session",
 
-        // ADVISER FIX: Use the validated token plan in the fixed CSV field.
+// ADVISER FIX: Use the validated token plan in the fixed CSV field.
         conditionOrder,
 
         metadata: {
@@ -311,6 +349,10 @@ export default function ProcedurePage() {
       !procedureAlreadyLogged
     ) {
       addEvent({
+        ...firstTrialEventIdentity,
+
+        participantToken,
+
         eventType:
           "procedure_viewed",
 
@@ -341,6 +383,7 @@ export default function ProcedurePage() {
     assignmentTableVersion,
     conditionOrder,
     events,
+    firstTrialEventIdentity,
     participantToken,
     procedureAccepted,
     resolvedOrderedPlan,
@@ -374,6 +417,10 @@ export default function ProcedurePage() {
       !studyAlreadyStarted
     ) {
       addEvent({
+        ...firstTrialEventIdentity,
+
+        participantToken,
+
         eventType:
           "study_started",
 
@@ -539,9 +586,9 @@ export default function ProcedurePage() {
                 </strong>
 
                 <span>
-                  Complete the short questionnaires shown at
-                  designated points and one final questionnaire
-                  after all three tasks are completed.
+                  Complete a short questionnaire after each task
+                  and a final questionnaire after you finish
+                  all three tasks.
                 </span>
               </div>
             </div>
@@ -673,7 +720,8 @@ export default function ProcedurePage() {
                   <p>
                     Submit the arrangement that you believe
                     best satisfies the task constraints and
-                    requirements, then continue as instructed.
+                    requirements. Then answer the short questionnaire
+                    about that task before continuing.
                   </p>
                 </div>
               </div>

@@ -104,7 +104,7 @@ const NASA_TLX_SCALES:
         "Mental demand",
 
       question:
-        "How mentally demanding was the task?",
+        "How much thinking, remembering, and concentration did the task require?",
 
       ratingLabels:
         INTENSITY_RATING_LABELS,
@@ -118,7 +118,7 @@ const NASA_TLX_SCALES:
         "Physical demand",
 
       question:
-        "How physically demanding was the task?",
+        "How much physical effort did the task require, for example when using the mouse or keyboard?",
 
       ratingLabels:
         INTENSITY_RATING_LABELS,
@@ -129,7 +129,7 @@ const NASA_TLX_SCALES:
         "temporalDemand",
 
       title:
-        "Temporal demand",
+        "Time pressure",
 
       question:
         "How hurried or rushed did you feel while completing the task?",
@@ -146,7 +146,7 @@ const NASA_TLX_SCALES:
         "Performance",
 
       question:
-        "How unsuccessful do you think you were in accomplishing the task?",
+        "How would you rate your performance on the task, from 1 (perfect) to 7 (failure)?",
 
       ratingLabels:
         PERFORMANCE_RATING_LABELS,
@@ -160,7 +160,7 @@ const NASA_TLX_SCALES:
         "Effort",
 
       question:
-        "How hard did you have to work to accomplish your level of performance?",
+        "How hard did you have to work to achieve your result?",
 
       ratingLabels:
         INTENSITY_RATING_LABELS,
@@ -174,7 +174,7 @@ const NASA_TLX_SCALES:
         "Frustration",
 
       question:
-        "How insecure, discouraged, irritated, stressed, or annoyed did you feel?",
+        "How unsure of yourself, discouraged, irritated, stressed, or annoyed did you feel during the task?",
 
       ratingLabels:
         INTENSITY_RATING_LABELS,

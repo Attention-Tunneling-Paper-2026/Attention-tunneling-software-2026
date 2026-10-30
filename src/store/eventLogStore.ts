@@ -1,5 +1,7 @@
 import { create } from "zustand";
 
+import { buildTrialEventRows } from "../metrics/trialMetrics";
+
 import {
   getStudyTaskDefinition,
   isSupportedStudyTaskId,
@@ -41,6 +43,7 @@ const TASK_ORDER: Record<SupportedStudyTaskId, number> = {
 const TRIALS_PER_TASK = 3;
 
 interface StartTrialInput {
+  timerStartedAtIso?: string;
   taskId?: SupportedStudyTaskId;
   trialId?: string;
   trialNumber: StudyTrialNumber;
@@ -74,6 +77,7 @@ interface TrialEventMetadata {
   globalTrialNumber: number;
   startedAt: number;
   startedAtIso: string;
+  timerStartedAtIso?: string;
 }
 
 interface EventLogStore {
@@ -381,9 +385,12 @@ function readInputParticipantToken(
     }
   ).participantToken;
 
-  return typeof participantToken === "string"
-    ? participantToken
-    : undefined;
+  const metadataToken = input.metadata?.participantToken;
+  return typeof participantToken === "string" && participantToken.trim()
+    ? participantToken.trim()
+    : typeof metadataToken === "string" && metadataToken.trim()
+      ? metadataToken.trim()
+      : undefined;
 }
 
 function getEventTaskId(
@@ -820,6 +827,16 @@ const EVENT_CSV_COLUMNS = [
   "probe_onset_error_ms",
   "metadata_json",
   "payload_json",
+  "post_probe_score_before",
+  "post_probe_score_after",
+  "final_score_rule",
+  "probe_compliant_at_onset",
+  "first_probe_integration",
+  "timer_started_at_iso",
+  "participant_caused",
+  "questionnaire_items_json",
+  "recall_submitted_at_iso",
+  "recognition_submitted_at_iso",
 ] as const;
 
 type EventCsvColumn =
@@ -968,6 +985,181 @@ function getEventSupplementValue(
   );
 }
 
+function getValidIso(value: unknown): string | undefined {
+  return typeof value === "string" && Number.isFinite(Date.parse(value))
+    ? value
+    : undefined;
+}
+
+function isParticipantActivity(input: CreateStudyEventInput): boolean {
+  return input.participantCaused ?? [
+    "drag_start", "drop", "move", "swap", "unplace", "illegal_drop", "drag_cancel",
+    "click", "task_selected", "task_details_opened", "task_details_closed",
+    "assistant_analysis_requested", "ai_prompt_sent", "probe_notification_opened",
+    "probe_ack", "probe_acknowledged", "submit_attempt",
+  ].includes(input.eventType);
+}
+
+function routeEventInput(
+  input: CreateStudyEventInput,
+  state: Pick<EventLogStore, "trialMetadata" | "events" | "sessionId">,
+): CreateStudyEventInput {
+  const firstTrialEvent = ["session_start", "procedure_viewed", "study_started"].includes(input.eventType);
+  const lastTrialEvent = ["post_experiment_started", "post_experiment_submitted"].includes(input.eventType);
+  let target: Record<string, unknown> | undefined;
+
+  if (input.eventType === "task_selected" && isPlainRecord(input.metadata?.assignedTrial)) {
+    target = input.metadata.assignedTrial;
+  } else if (firstTrialEvent || lastTrialEvent) {
+    const order = firstTrialEvent ? 1 : 3;
+    const metadata = Object.values(state.trialMetadata).find((trial) => trial?.trialOrder === order);
+    if (metadata) {
+      target = { ...metadata };
+    } else {
+      const planSource = [input, ...state.events.filter((event) => event.sessionId === state.sessionId)];
+      for (const source of planSource) {
+        const plan = source.metadata?.resolvedOrderedPlan;
+        if (Array.isArray(plan)) {
+          target = plan.find((trial): trial is Record<string, unknown> =>
+            isPlainRecord(trial) && trial.trialOrder === order,
+          );
+        }
+        if (target) break;
+      }
+    }
+    if (!target && firstTrialEvent) return { ...input, trialOrder: 0 };
+  }
+
+  if (!target || !isSupportedStudyTaskId(target.taskId) ||
+      (target.trialNumber !== 1 && target.trialNumber !== 2 && target.trialNumber !== 3)) {
+    return input;
+  }
+
+  const taskId = target.taskId;
+  const trialNumber = target.trialNumber;
+  const trialOrder = normalizeTrialOrderValue(
+    typeof target.trialOrder === "number" ? target.trialOrder : undefined,
+    input.trialOrder ?? 0,
+  );
+  const trialId = getCompositeTrialId(taskId, trialNumber);
+  const globalOptionNumber = getGlobalOptionNumber(taskId, trialNumber);
+  return {
+    ...input,
+    taskId,
+    skin: taskId,
+    trialId,
+    compositeTrialId: trialId,
+    trialNumber,
+    trialOrder,
+    condition: getConditionForTrial(trialNumber),
+    isFirstTrial: trialOrder === 1,
+    probeExposureNumber: trialOrder,
+    probeNaive: trialOrder === 1,
+    trialIndex: globalOptionNumber,
+    globalOptionNumber,
+    globalTrialNumber: globalOptionNumber,
+    outerTaskNumber: getOuterTaskNumber(taskId),
+    innerTaskNumber: trialNumber,
+    metadata: {
+      ...input.metadata,
+      taskId,
+      compositeTrialId: trialId,
+      outerTaskNumber: getOuterTaskNumber(taskId),
+      innerTaskNumber: trialNumber,
+      globalOptionNumber,
+      globalTrialNumber: globalOptionNumber,
+    },
+  };
+}
+
+function getExportEvents(
+  state: EventLogStore,
+  trialNumber: StudyTrialNumber | undefined,
+  taskId: SupportedStudyTaskId,
+): StudyEvent[] {
+  const sessionEvents = state.events
+    .filter((event) => event.sessionId === state.sessionId)
+    .map((event) => ({ ...event, ...routeEventInput(event, state) } as StudyEvent))
+    .sort((first, second) => first.eventIndex - second.eventIndex);
+  const probeNaiveTrialIds = new Set(sessionEvents.filter((event) => event.probeNaive).map((event) => event.trialId));
+  if (probeNaiveTrialIds.size > 1) {
+    throw new Error(`Participant ${state.participantId} has more than one probe-naive trial.`);
+  }
+
+  const selected = sessionEvents.filter((event) =>
+    getEventTaskId(event) === taskId &&
+    (trialNumber === undefined || event.trialNumber === trialNumber),
+  );
+  const groups = new Map<string, StudyEvent[]>();
+  for (const event of selected) {
+    const key = getTrialEventKey(event);
+    const group = groups.get(key) ?? [];
+    group.push(event);
+    groups.set(key, group);
+  }
+
+  const normalized = new Map<string, StudyEvent>();
+  for (const group of groups.values()) {
+    const first = group[0];
+    const metadata = state.trialMetadata[getTrialMetadataKey(getEventTaskId(first), first.trialNumber)];
+    const timerStartedAtIso = metadata?.timerStartedAtIso ?? group
+      .map((event) => getValidIso(getEventSupplementValue(event, "timerStartedAtIso")))
+      .find((value) => value !== undefined);
+    const rows = buildTrialEventRows(group, timerStartedAtIso);
+    const rowsById = new Map(rows.map((row) => [row.event_id, row]));
+    for (const event of group) {
+      const row = rowsById.get(event.eventId);
+      if (!row) continue;
+      const booleanValue = (key: string): boolean | null =>
+        typeof row[key] === "number" ? row[key] === 1 : null;
+      const numberValue = (key: string): number | null =>
+        typeof row[key] === "number" ? row[key] : null;
+      const finalEvent = event.eventType === "trial_end" || event.eventType === "trial_submitted";
+      normalized.set(event.eventId, {
+        ...event,
+        elapsedMs: numberValue("elapsed_ms") ?? event.elapsedMs,
+        timerStartedAtIso,
+        participantCaused: isParticipantActivity(event),
+        postProbeScoreBefore: numberValue("post_probe_score_before"),
+        postProbeScoreAfter: numberValue("post_probe_score_after"),
+        finalScoreRule: finalEvent
+          ? typeof row.probe_shown_elapsed_ms === "number" ? "F_P" : "F"
+          : event.finalScoreRule,
+        idleMsInPrevious60Seconds: event.eventType === "probe_shown"
+          ? numberValue("probe_idle_ms_previous_60s") ?? undefined
+          : event.idleMsInPrevious60Seconds,
+        probeCompliantAtOnset: booleanValue("probe_compliant_at_onset"),
+        integrationConsistentEdit: booleanValue("integration_consistent_edit"),
+        firstProbeIntegration: booleanValue("first_probe_integration"),
+        probeIntegrationDetected: booleanValue("probe_integration_detected"),
+        integrationMiss: booleanValue("integration_miss"),
+        detectionWithoutIntegration: booleanValue("detection_without_integration"),
+        metadata: {
+          ...event.metadata,
+          ...(timerStartedAtIso ? { timerStartedAtIso } : {}),
+          firstProbeIntegration: booleanValue("first_probe_integration"),
+          postProbeEditIndex: numberValue("post_probe_edit_index"),
+          isFirstPostProbeEdit: booleanValue("first_post_probe_edit"),
+          postProbeEditsBeforeIntegration: numberValue("post_probe_edits_before_integration"),
+        },
+      });
+    }
+  }
+  return selected.map((event) => normalized.get(event.eventId) ?? event);
+}
+
+function getExportParticipantToken(events: StudyEvent[], fallback: string): string {
+  const tokens = new Set(events.map((event) => event.participantToken?.trim()).filter(Boolean));
+  if (tokens.size > 1) {
+    throw new Error("Cannot export events containing different participant tokens.");
+  }
+  const token = [...tokens][0] || fallback.trim();
+  if (!token || sanitizeFilePart(token) !== token) {
+    throw new Error("The participant token must contain only letters, numbers, underscores, or hyphens for export.");
+  }
+  return token;
+}
+
 interface ProbeCsvContext {
   probeShownEvent?: StudyEvent;
   probeReopenCount: number;
@@ -988,6 +1180,17 @@ function buildProbeCsvContextByTrial(
 ): Map<string, ProbeCsvContext> {
   const contexts =
     new Map<string, ProbeCsvContext>();
+  const trialEnds = new Map<string, { eventIndex: number; priority: number }>();
+  for (const event of events) {
+    const priority = event.eventType === "trial_end" ? 3
+      : event.eventType === "trial_submitted" ? 2
+        : event.eventType === "submit_attempt" &&
+          (event.accepted ?? event.metadata?.accepted) === true ? 1 : 0;
+    const key = getTrialEventKey(event);
+    if (priority > 0 && priority >= (trialEnds.get(key)?.priority ?? 0)) {
+      trialEnds.set(key, { eventIndex: event.eventIndex, priority });
+    }
+  }
 
   for (const event of events) {
     const trialKey =
@@ -1000,6 +1203,7 @@ function buildProbeCsvContextByTrial(
     if (
       event.eventType ===
         "probe_shown" &&
+      event.eventIndex < (trialEnds.get(trialKey)?.eventIndex ?? Infinity) &&
       !existing.probeShownEvent
     ) {
       existing.probeShownEvent =
@@ -1336,6 +1540,26 @@ function createEventCsvRow(
       event.metadata,
     payload_json:
       event.payload,
+    post_probe_score_before:
+      event.postProbeScoreBefore,
+    post_probe_score_after:
+      event.postProbeScoreAfter,
+    final_score_rule:
+      event.finalScoreRule,
+    probe_compliant_at_onset:
+      event.probeCompliantAtOnset,
+    first_probe_integration:
+      event.firstProbeIntegration,
+    timer_started_at_iso:
+      getEventSupplementValue(event, "timerStartedAtIso"),
+    participant_caused:
+      event.participantCaused,
+    questionnaire_items_json:
+      getEventSupplementValue(event, "questionnaireItems"),
+    recall_submitted_at_iso:
+      getEventSupplementValue(event, "recallSubmittedAtIso"),
+    recognition_submitted_at_iso:
+      getEventSupplementValue(event, "recognitionSubmittedAtIso"),
   };
 }
 
@@ -1562,6 +1786,7 @@ export const useEventLogStore =
       trialNumber,
       trialOrder,
       conditionOrder,
+      timerStartedAtIso,
     }) => {
       const state = get();
       const taskId = resolveTaskId(
@@ -1639,6 +1864,8 @@ export const useEventLogStore =
             resolvedStartedAt,
           startedAtIso:
             resolvedStartedAtIso,
+          timerStartedAtIso:
+            getValidIso(timerStartedAtIso) ?? existingMetadata?.timerStartedAtIso,
         };
 
       set({
@@ -1674,6 +1901,7 @@ export const useEventLogStore =
 
     addEvent: (input) => {
       const state = get();
+      input = routeEventInput(input, state);
       const trialNumber =
         input.trialNumber ??
         state.trialNumber;
@@ -1807,17 +2035,31 @@ export const useEventLogStore =
           taskId,
           trialNumber,
         );
-      const elapsedMs =
-        normalizedTrialOrder > 0
-          ? Math.max(
-              0,
-              currentTime -
-                startedAt,
-            )
-          : 0;
+      const timerStartedAtIso = getValidIso(input.timerStartedAtIso) ??
+        getValidIso(input.metadata?.timerStartedAtIso) ?? storedMetadata?.timerStartedAtIso;
+      const elapsedMs = timerStartedAtIso
+        ? Date.parse(timestampIso) - Date.parse(timerStartedAtIso)
+        : normalizedTrialOrder > 0 ? Math.max(0, currentTime - startedAt) : 0;
+      const questionnaireItems = input.questionnaireItems?.map((item) => ({ ...item }));
+      const participantCaused = isParticipantActivity(input);
+      const lastActivity = input.eventType === "probe_shown"
+        ? [...state.events].reverse().find((event) =>
+            event.sessionId === state.sessionId && getEventTaskId(event) === taskId &&
+            event.trialNumber === trialNumber && isParticipantActivity(event),
+          )
+        : undefined;
+      const idleMsInPrevious60Seconds = input.eventType === "probe_shown"
+        ? lastActivity
+          ? Math.min(60000, Math.max(0, Date.parse(timestampIso) - Date.parse(lastActivity.timestampIso)))
+          : undefined
+        : input.idleMsInPrevious60Seconds;
 
       const event = {
         ...input,
+        timerStartedAtIso,
+        participantCaused,
+        idleMsInPrevious60Seconds,
+        ...(questionnaireItems ? { questionnaireItems } : {}),
         eventId: createId(),
         eventIndex,
         participantId:
@@ -1932,6 +2174,16 @@ export const useEventLogStore =
               : null,
           sessionStartedAtIso:
             state.sessionStartedAtIso,
+          ...(timerStartedAtIso ? { timerStartedAtIso } : {}),
+          ...(questionnaireItems
+            ? { questionnaireItems: questionnaireItems.map((item) => ({ ...item })) }
+            : {}),
+          ...(input.recallSubmittedAtIso !== undefined
+            ? { recallSubmittedAtIso: input.recallSubmittedAtIso }
+            : {}),
+          ...(input.recognitionSubmittedAtIso !== undefined
+            ? { recognitionSubmittedAtIso: input.recognitionSubmittedAtIso }
+            : {}),
         },
         payload:
           input.payload
@@ -1967,7 +2219,13 @@ export const useEventLogStore =
                   startedAtIso,
                 },
               }
-            : currentState.trialMetadata;
+            : { ...currentState.trialMetadata };
+        if (timerStartedAtIso && nextTrialMetadata[trialKey]) {
+          nextTrialMetadata[trialKey] = {
+            ...nextTrialMetadata[trialKey]!,
+            timerStartedAtIso,
+          };
+        }
         const eventStartsTrial =
           input.eventType ===
             "trial_start" &&
@@ -2020,19 +2278,7 @@ export const useEventLogStore =
         state.taskId,
       );
 
-      return state.events
-        .filter(
-          (event) =>
-            event.sessionId === state.sessionId &&
-            getEventTaskId(event) === taskId &&
-            event.trialNumber === trialNumber,
-        )
-        .sort(
-          (first, second) =>
-            (first.tMs ?? first.elapsedMs) -
-              (second.tMs ?? second.elapsedMs) ||
-            first.eventIndex - second.eventIndex,
-        );
+      return getExportEvents(state, trialNumber, taskId);
     },
 
     clearEvents: () => {
@@ -2059,61 +2305,13 @@ export const useEventLogStore =
       requestedTaskId,
     ) => {
       const state = get();
-      const probeNaiveTrialIds = new Set(
-        state.events
-          .filter(
-            (event) =>
-              event.participantId === state.participantId &&
-              event.probeNaive,
-          )
-          .map((event) => event.trialId),
-      );
-
-      if (probeNaiveTrialIds.size > 1) {
-        throw new Error(
-          `Participant ${state.participantId} has more than one probe-naive trial.`,
-        );
-      }
-
-      const taskId = resolveTaskId(
-        requestedTaskId,
-        state.taskId,
-      );
-      const events = state.events
-        .filter(
-          (event) =>
-            event.sessionId ===
-              state.sessionId &&
-            getEventTaskId(event) ===
-              taskId &&
-            event.phase !==
-              "session" &&
-            event.phase !==
-              "consent" &&
-            (
-              trialNumber ===
-                undefined ||
-              event.trialNumber ===
-                trialNumber
-            ),
-        )
-        .sort(
-          (first, second) =>
-            (
-              first.tMs ??
-              first.elapsedMs
-            ) -
-              (
-                second.tMs ??
-                second.elapsedMs
-              ) ||
-            first.eventIndex -
-              second.eventIndex,
-        );
-
-      return serializeEventsCsv(
-        events,
-      );
+      const taskId = resolveTaskId(requestedTaskId, state.taskId);
+      const events = getExportEvents(state, trialNumber, taskId);
+      const participantToken = getExportParticipantToken(events, state.participantToken);
+      return serializeEventsCsv(events.map((event) => ({
+        ...event,
+        participantToken: event.participantToken?.trim() || participantToken,
+      })));
     },
 
     downloadEvents: (
@@ -2121,14 +2319,12 @@ export const useEventLogStore =
       requestedTaskId,
     ) => {
       const state = get();
-      const safeParticipant =
-        sanitizeFilePart(
-          state.participantToken,
-        );
       const taskId = resolveTaskId(
         requestedTaskId,
         state.taskId,
       );
+      const events = getExportEvents(state, trialNumber, taskId);
+      const safeParticipant = getExportParticipantToken(events, state.participantToken);
       const fileName =
         trialNumber === undefined
           ? `${safeParticipant}_${taskId}_event.csv`

@@ -8,6 +8,10 @@ import {
   getFinalQuestionnaireValidationMessage as validateFinalQuestionnaire,
   isFinalQuestionnaireComplete as finalQuestionnaireIsComplete,
   isLikertRating,
+  isSevenPointRating,
+  isProbeFreeRecallComplete,
+  isProbeRecognitionComplete,
+  isProbeUpdateMeaningComplete,
   isNasaTlxValue,
   isProbeRecognitionChoice,
   isTrialQuestionnaireComplete as trialQuestionnaireIsComplete,
@@ -18,6 +22,7 @@ import type {
   FinalQuestionnaireResponse,
   FunneledDebriefResponses,
   LikertRating,
+  SevenPointRating,
   ManipulationCheckDimension,
   ManipulationCheckRatings,
   NasaTlxDimension,
@@ -106,7 +111,7 @@ interface QuestionnaireStore
       TrialExperienceDimension,
 
     value:
-      LikertRating,
+      SevenPointRating,
 
     taskId?:
       StudyTaskId,
@@ -141,6 +146,26 @@ interface QuestionnaireStore
     taskId?:
       StudyTaskId,
   ) => void;
+
+  submitProbeRecall: (
+    trialNumber:
+      StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
+  ) =>
+    | TrialQuestionnaireResponse
+    | undefined;
+
+  submitProbeRecognition: (
+    trialNumber:
+      StudyTrialNumber,
+
+    taskId?:
+      StudyTaskId,
+  ) =>
+    | TrialQuestionnaireResponse
+    | undefined;
 
   submitTrialQuestionnaire: (
     trialNumber:
@@ -401,6 +426,17 @@ function normalizeLikertRating(
     : null;
 }
 
+function normalizeSevenPointRating(
+  value:
+    SevenPointRating | null | undefined,
+): SevenPointRating | null {
+  return isSevenPointRating(
+    value,
+  )
+    ? value
+    : null;
+}
+
 function cloneNasaTlxRatings(
   values:
     NasaTlxRatings,
@@ -444,17 +480,17 @@ function cloneExperienceRatings(
 ): TrialExperienceRatings {
   return {
     scheduleCompleteness:
-      normalizeLikertRating(
+      normalizeSevenPointRating(
         values.scheduleCompleteness,
       ),
 
     aiHelpfulness:
-      normalizeLikertRating(
+      normalizeSevenPointRating(
         values.aiHelpfulness,
       ),
 
     aiCompetence:
-      normalizeLikertRating(
+      normalizeSevenPointRating(
         values.aiCompetence,
       ),
   };
@@ -522,6 +558,10 @@ function cloneProbeRecallResponses(
     recognitionChoice:
       values.recognitionChoice ??
       "",
+
+    updateMeaning:
+      values.updateMeaning ??
+      "",
   };
 }
 
@@ -567,6 +607,14 @@ function cloneTrialResponse(
       cloneProbeRecallResponses(
         response.probeRecall,
       ),
+
+    recallSubmittedAtIso:
+      response.recallSubmittedAtIso ??
+      null,
+
+    recognitionSubmittedAtIso:
+      response.recognitionSubmittedAtIso ??
+      null,
   };
 }
 
@@ -602,6 +650,12 @@ function cloneFinalQuestionnaire(
         normalizeLikertRating(
           response.attributionCheck
             .perceivedAiCompetence,
+        ),
+
+      aiAttributionRating:
+        normalizeSevenPointRating(
+          response.attributionCheck
+            .aiAttributionRating,
         ),
     },
 
@@ -715,6 +769,34 @@ function hasEveryExpectedSubmittedResponse(
             response.taskId,
           ) === taskId,
       ).length === 1,
+  );
+}
+
+function hasEverySubmittedProbeRecall(
+  responses:
+    TrialQuestionnaireResponse[],
+): boolean {
+  return (
+    hasEveryExpectedSubmittedResponse(responses) &&
+    responses.every(
+      (response) =>
+        response.recallSubmittedAtIso != null &&
+        isProbeFreeRecallComplete(response.probeRecall),
+    )
+  );
+}
+
+function hasEverySubmittedProbeRecognition(
+  responses:
+    TrialQuestionnaireResponse[],
+): boolean {
+  return (
+    hasEverySubmittedProbeRecall(responses) &&
+    responses.every(
+      (response) =>
+        response.recognitionSubmittedAtIso != null &&
+        isProbeRecognitionComplete(response.probeRecall),
+    )
   );
 }
 
@@ -909,7 +991,7 @@ export const useQuestionnaireStore =
           "symposium",
       ) => {
         if (
-          !isLikertRating(
+          !isSevenPointRating(
             value,
           )
         ) {
@@ -1014,7 +1096,6 @@ export const useQuestionnaireStore =
         taskId =
           "symposium",
       ) => {
-        // ADVISER FIX: Delayed recall remains editable after per-trial submission until final export.
         const resolvedTaskId =
           normalizeTaskId(
             taskId,
@@ -1032,7 +1113,27 @@ export const useQuestionnaireStore =
                       resolvedTaskId,
                     ) ||
                     response.exportedAtIso !==
+                      null ||
+                    state.finalQuestionnaire.submittedAtIso !==
                       null
+                  ) {
+                    return response;
+                  }
+
+                  if (
+                    dimension === "recognitionChoice"
+                      ? !hasEverySubmittedProbeRecall(state.trialResponses) ||
+                        response.recognitionSubmittedAtIso != null
+                      : dimension === "updateMeaning"
+                        ? !hasEverySubmittedProbeRecognition(state.trialResponses)
+                        : response.recallSubmittedAtIso != null
+                  ) {
+                    return response;
+                  }
+
+                  if (
+                    dimension === "updateMeaning" &&
+                    typeof value !== "string"
                   ) {
                     return response;
                   }
@@ -1071,6 +1172,95 @@ export const useQuestionnaireStore =
               ),
           }),
         );
+      },
+
+      submitProbeRecall: (
+        trialNumber,
+        taskId =
+          "symposium",
+      ) => {
+        const state = get();
+        const response = findTrialResponse(
+          state.trialResponses,
+          trialNumber,
+          normalizeTaskId(taskId),
+        );
+
+        if (!response) {
+          return undefined;
+        }
+
+        if (response.recallSubmittedAtIso != null) {
+          return cloneTrialResponse(response);
+        }
+
+        if (
+          response.exportedAtIso !== null ||
+          state.finalQuestionnaire.submittedAtIso !== null ||
+          !hasEveryExpectedSubmittedResponse(state.trialResponses) ||
+          !state.finalQuestionnaire.funneledDebrief.generalStrategy?.trim() ||
+          !isProbeFreeRecallComplete(response.probeRecall)
+        ) {
+          return undefined;
+        }
+
+        const submittedResponse: TrialQuestionnaireResponse = {
+          ...response,
+          recallSubmittedAtIso: new Date().toISOString(),
+        };
+
+        set((currentState) => ({
+          trialResponses: replaceTrialResponse(
+            currentState.trialResponses,
+            submittedResponse,
+          ),
+        }));
+
+        return cloneTrialResponse(submittedResponse);
+      },
+
+      submitProbeRecognition: (
+        trialNumber,
+        taskId =
+          "symposium",
+      ) => {
+        const state = get();
+        const response = findTrialResponse(
+          state.trialResponses,
+          trialNumber,
+          normalizeTaskId(taskId),
+        );
+
+        if (!response) {
+          return undefined;
+        }
+
+        if (response.recognitionSubmittedAtIso != null) {
+          return cloneTrialResponse(response);
+        }
+
+        if (
+          response.exportedAtIso !== null ||
+          state.finalQuestionnaire.submittedAtIso !== null ||
+          !hasEverySubmittedProbeRecall(state.trialResponses) ||
+          !isProbeRecognitionComplete(response.probeRecall)
+        ) {
+          return undefined;
+        }
+
+        const submittedResponse: TrialQuestionnaireResponse = {
+          ...response,
+          recognitionSubmittedAtIso: new Date().toISOString(),
+        };
+
+        set((currentState) => ({
+          trialResponses: replaceTrialResponse(
+            currentState.trialResponses,
+            submittedResponse,
+          ),
+        }));
+
+        return cloneTrialResponse(submittedResponse);
       },
 
       submitTrialQuestionnaire: (
@@ -1285,9 +1475,9 @@ export const useQuestionnaireStore =
             if (
               dimension !==
                 "primaryInfluence" &&
-              !isLikertRating(
-                value,
-              )
+              !(dimension === "aiAttributionRating"
+                ? isSevenPointRating(value)
+                : isLikertRating(value))
             ) {
               return {};
             }
@@ -1329,6 +1519,15 @@ export const useQuestionnaireStore =
               return {};
             }
 
+            if (
+              dimension === "generalStrategy" &&
+              state.trialResponses.some(
+                (response) => response.recallSubmittedAtIso != null,
+              )
+            ) {
+              return {};
+            }
+
             return {
               finalQuestionnaire: {
                 ...state.finalQuestionnaire,
@@ -1353,10 +1552,33 @@ export const useQuestionnaireStore =
       },
 
       getFinalQuestionnaireValidationMessage:
-        () =>
-          validateFinalQuestionnaire(
-            get().finalQuestionnaire,
-          ),
+        () => {
+          const state = get();
+
+          if (!state.finalQuestionnaire.funneledDebrief.generalStrategy?.trim()) {
+            return "Please describe the general strategy you used across the three tasks.";
+          }
+
+          if (!hasEveryExpectedSubmittedResponse(state.trialResponses)) {
+            return "Please complete the questionnaire after each of the three tasks.";
+          }
+
+          if (!hasEverySubmittedProbeRecall(state.trialResponses)) {
+            return "Please submit your recall answers for all three tasks before continuing to recognition.";
+          }
+
+          if (!hasEverySubmittedProbeRecognition(state.trialResponses)) {
+            return "Please submit your recognition answers for all three tasks.";
+          }
+
+          if (state.trialResponses.some(
+            (response) => !isProbeUpdateMeaningComplete(response.probeRecall),
+          )) {
+            return "Please explain what the update required you to change in each task. If you do not know, write that.";
+          }
+
+          return validateFinalQuestionnaire(state.finalQuestionnaire);
+        },
 
       submitFinalQuestionnaire:
         () => {
@@ -1385,9 +1607,7 @@ export const useQuestionnaireStore =
           }
 
           if (
-            !finalQuestionnaireIsComplete(
-              response,
-            )
+            get().getFinalQuestionnaireValidationMessage().length > 0
           ) {
             return undefined;
           }

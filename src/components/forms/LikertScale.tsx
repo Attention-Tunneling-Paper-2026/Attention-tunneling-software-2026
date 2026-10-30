@@ -3,7 +3,7 @@ import {
 } from "react";
 
 import {
-  LIKERT_RATINGS,
+  SEVEN_POINT_RATINGS,
 } from "../../types/questionnaire";
 
 export interface LikertScaleProps {
@@ -47,7 +47,7 @@ function createLikertOptions(
     return [];
   }
 
-  return LIKERT_RATINGS.filter(
+  return SEVEN_POINT_RATINGS.filter(
     (rating) =>
       rating >=
         min &&
@@ -197,17 +197,7 @@ export default function LikertScale({
           id={
             statusId
           }
-          className={[
-            "likert-value",
-            "questionnaire-rating-value",
-
-            selectedValue ===
-            null
-              ? "questionnaire-rating-value-empty"
-              : "questionnaire-rating-value-answered",
-          ].join(
-            " ",
-          )}
+          className="likert-value questionnaire-rating-value"
           aria-live="polite"
         >
           {selectedValue ===

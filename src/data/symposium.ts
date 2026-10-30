@@ -33,7 +33,7 @@ export function isSupportedStudyTaskId(
 
 export const SYMPOSIUM_TASK_VERSION = "symposium-v3";
 export const AI_ARTIFACT_VERSION = "symposium-ai-artifact-v1";
-export const AI_MESSAGE_VERSION = "symposium-ai-message-v2";
+export const AI_MESSAGE_VERSION = "symposium-ai-message-v3";
 export const SEMANTIC_PROBE_VERSION = "room-c-projector-failure-v2";
 export const SCORING_VERSION = "symposium-score-v3";
 
@@ -41,7 +41,7 @@ export const DELIVERY_TASK_VERSION = "delivery-v1";
 export const DELIVERY_AI_ARTIFACT_VERSION =
   "delivery-ai-artifact-v1";
 export const DELIVERY_AI_MESSAGE_VERSION =
-  "delivery-ai-message-v1";
+  "delivery-ai-message-v2";
 export const DELIVERY_SEMANTIC_PROBE_VERSION =
   "van-c-refrigeration-failure-v1";
 export const DELIVERY_SCORING_VERSION = "delivery-score-v1";
@@ -50,7 +50,7 @@ export const CLINIC_TASK_VERSION = "clinic-v1";
 export const CLINIC_AI_ARTIFACT_VERSION =
   "clinic-ai-artifact-v1";
 export const CLINIC_AI_MESSAGE_VERSION =
-  "clinic-ai-message-v1";
+  "clinic-ai-message-v2";
 export const CLINIC_SEMANTIC_PROBE_VERSION =
   "ward-c-icu-certification-loss-v1";
 export const CLINIC_SCORING_VERSION = "clinic-score-v1";
@@ -954,7 +954,7 @@ export const SYMPOSIUM_ANALYSIS_BENCHMARKS = {
   bestInsideAiFamilyPostProbePercentage: 46.1,
 
   paretoEfficiencyReference:
-    "verified_pre_probe_global_optimum" as const,
+    "pre_probe_optimum_80" as const,
   totalAssignments: 12,
   strategySwitchThresholdProportion: 0.5,
   strategySwitchThresholdAssignments: 6,
@@ -996,6 +996,25 @@ export function getVerifiedGlobalOptimumScore(
     : benchmarks.verifiedPreProbeGlobalOptimumScore;
 }
 
+export function getParetoEfficiencyReference(
+  probeActive: boolean,
+): "pre_probe_optimum_80" | "post_probe_optimum_72.5" {
+  return probeActive
+    ? "post_probe_optimum_72.5"
+    : "pre_probe_optimum_80";
+}
+
+export function calculatePostProbeScore(
+  unadjustedScore: number,
+  placements: Placement[],
+  taskId: SupportedStudyTaskId = "symposium",
+): number {
+  return unadjustedScore - 12 * getUnresolvedPostProbeTalkIds(
+    placements,
+    taskId,
+  ).length;
+}
+
 export function calculateParetoEfficiencyProportion(
   submittedScore: number,
   probeActive: boolean,
@@ -1005,12 +1024,10 @@ export function calculateParetoEfficiencyProportion(
     return null;
   }
 
-  void probeActive;
-
-  const referenceScore =
-    TASK_ANALYSIS_BENCHMARKS_BY_ID[
-      taskId
-    ].verifiedPreProbeGlobalOptimumScore;
+  const referenceScore = getVerifiedGlobalOptimumScore(
+    probeActive,
+    taskId,
+  );
 
   return referenceScore > 0
     ? submittedScore / referenceScore
@@ -1069,13 +1086,13 @@ export interface AssistantRecommendation {
 }
 
 const SHARED_AI_RECOMMENDATION =
-  "I recommend organizing the symposium into topic tracks: NLP talks in Room A, Health talks in Room B, and Robotics talks in Room C. Arrange the talks according to speaker availability and room requirements.";
+  "Here's how I'd approach this. Organize the schedule by topic tracks: put the NLP talks in Room A, the Health talks in Room B, and the Robotics talks in Room C. Within each room, order the talks by speaker availability.";
 
 const SHARED_DELIVERY_AI_RECOMMENDATION =
-  "I recommend organizing the delivery plan by region: North shipments in Van A, Central shipments in Van B, and South shipments in Van C. Arrange the shipments according to driver availability and vehicle requirements.";
+  "Here's how I'd approach this. Organize the dispatch plan by delivery region: put the North region shipments in Van A, the Central region shipments in Van B, and the South region shipments in Van C. Within each van, order the shipments by driver availability.";
 
 const SHARED_CLINIC_AI_RECOMMENDATION =
-  "I recommend organizing the clinic roster by clinical specialty: assign Emergency Care to Ward A, General Medicine to Ward B, and Critical Care to Ward C. Within each ward, arrange duties according to nurse availability and ward requirements. Review every assignment against the task constraints and revise any placement that creates a conflict.";
+  "Here's how I'd approach this. Organize the roster by clinical specialty: put the Emergency Care duties in Ward A, the General Medicine duties in Ward B, and the Critical Care duties in Ward C. Within each ward, order the duties by nurse availability.";
 
 export const AI_RECOMMENDATION_BY_LEVEL: Record<
   ConcretizationLevel,
@@ -1090,13 +1107,13 @@ export const AI_RECOMMENDATION_BY_LEVEL: Record<
     heading: "Scheduling recommendation",
     message: SHARED_AI_RECOMMENDATION,
     prefillAcknowledgment:
-      "I placed four starting talks in the suggested structure.",
+      "To get you started, I've placed a few talks on the schedule using this structure. Complete the remaining assignments and revise any placement that conflicts with the task constraints.",
   },
   C: {
     heading: "Scheduling recommendation",
     message: SHARED_AI_RECOMMENDATION,
     prefillAcknowledgment:
-      "I placed a complete proposed schedule in the suggested structure.",
+      "I've filled in the complete schedule using this structure. Review each placement and revise any that conflicts with the task constraints.",
   },
 };
 
@@ -1113,13 +1130,13 @@ export const DELIVERY_AI_RECOMMENDATION_BY_LEVEL: Record<
     heading: "Dispatch recommendation",
     message: SHARED_DELIVERY_AI_RECOMMENDATION,
     prefillAcknowledgment:
-      "I placed four starting shipments in the suggested structure.",
+      "To get you started, I've placed a few shipments on the dispatch plan using this structure. Complete the remaining assignments and revise any placement that conflicts with the task constraints.",
   },
   C: {
     heading: "Dispatch recommendation",
     message: SHARED_DELIVERY_AI_RECOMMENDATION,
     prefillAcknowledgment:
-      "I placed a complete proposed dispatch plan in the suggested structure.",
+      "I've filled in the complete dispatch plan using this structure. Review each placement and revise any that conflicts with the task constraints.",
   },
 };
 
@@ -1127,7 +1144,6 @@ export const CLINIC_AI_RECOMMENDATION_BY_LEVEL: Record<
   ConcretizationLevel,
   AssistantRecommendation
 > = {
-  // ADVISER FIX: Clinic A, B, and C use identical recommendation content.
   A: {
     heading: "Roster recommendation",
     message: SHARED_CLINIC_AI_RECOMMENDATION,
@@ -1136,12 +1152,14 @@ export const CLINIC_AI_RECOMMENDATION_BY_LEVEL: Record<
   B: {
     heading: "Roster recommendation",
     message: SHARED_CLINIC_AI_RECOMMENDATION,
-    prefillAcknowledgment: null,
+    prefillAcknowledgment:
+      "To get you started, I've placed a few duties on the roster using this structure. Complete the remaining assignments and revise any placement that conflicts with the task constraints.",
   },
   C: {
     heading: "Roster recommendation",
     message: SHARED_CLINIC_AI_RECOMMENDATION,
-    prefillAcknowledgment: null,
+    prefillAcknowledgment:
+      "I've filled in the complete roster using this structure. Review each placement and revise any that conflicts with the task constraints.",
   },
 };
 
@@ -1358,19 +1376,11 @@ export function getPostProbeIntegrationTalkIds(
     );
 
     const requiredItemMovedIntoRequiredRoom =
-      talk.demo &&
+      probe.requiredTalkIds.includes(talk.id) &&
       previousRoom !== probe.requiredProjectorRoom &&
       nextRoom === probe.requiredProjectorRoom;
 
-    const nonRequiredItemMovedOutOfRequiredRoom =
-      !talk.demo &&
-      previousRoom === probe.requiredProjectorRoom &&
-      nextRoom !== probe.requiredProjectorRoom;
-
-    if (
-      requiredItemMovedIntoRequiredRoom ||
-      nonRequiredItemMovedOutOfRequiredRoom
-    ) {
+    if (requiredItemMovedIntoRequiredRoom) {
       integratedTalkIds.add(talk.id);
     }
   }

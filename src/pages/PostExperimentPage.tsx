@@ -51,6 +51,7 @@ import {
 
 import type {
   StudyEvent,
+  QuestionnaireItemResponse,
 } from "../types/events";
 
 import type {
@@ -66,6 +67,9 @@ import type {
 import {
   isLikertRating,
   isProbeRecallComplete,
+  isProbeFreeRecallComplete,
+  isProbeRecognitionComplete,
+  isSevenPointRating,
 } from "../types/questionnaire";
 
 import type {
@@ -621,6 +625,8 @@ interface DelayedRecallSectionProps {
   response:
     TrialQuestionnaireResponse;
 
+  mode: "recall" | "recognition";
+
   disabled:
     boolean;
 
@@ -641,6 +647,7 @@ function DelayedRecallSection({
   condition,
   probeVersion,
   response,
+  mode,
   disabled,
   onChange,
 }: DelayedRecallSectionProps) {
@@ -670,7 +677,7 @@ function DelayedRecallSection({
           aria-hidden="true"
         />
       }
-      title={`Task update recall — Task ${trialOrder}: ${taskCopy.taskTitle}`}
+      title={`Task ${trialOrder}: ${taskCopy.taskTitle}`}
       description="Please answer these questions from memory without returning to the task."
     >
       <div
@@ -681,6 +688,7 @@ function DelayedRecallSection({
         data-condition={condition}
         data-probe-version={probeVersion}
       >
+        {mode === "recall" && (<>
         <fieldset className="radio-question-card">
           <legend>
             <strong>
@@ -919,6 +927,9 @@ function DelayedRecallSection({
           }}
         />
 
+        </>)}
+
+        {mode === "recognition" && (
         <fieldset className="radio-question-card">
           <legend>
             <strong>
@@ -986,6 +997,7 @@ function DelayedRecallSection({
             )}
           </div>
         </fieldset>
+        )}
       </div>
     </QuestionnaireSection>
   );
@@ -1544,6 +1556,84 @@ function getPostExperimentRecallColumns(
   return columns;
 }
 
+function getDataParticipantToken(rows: Array<Record<string, unknown>>): string {
+  const tokens = new Set(rows.map((row) => row.participant_token));
+  if (tokens.size !== 1) throw new Error("The export contains more than one participant token.");
+  const token = Array.from(tokens)[0];
+  if (typeof token !== "string" || !token.trim()) {
+    throw new Error("The export is missing its participant token.");
+  }
+  return token;
+}
+
+function collectQuestionnaireItems(
+  form: HTMLFormElement,
+  records: DelayedRecallRecord[],
+): QuestionnaireItemResponse[] {
+  const controls = Array.from(form.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+    'input[type="radio"], textarea',
+  ));
+  const suffixIds: Record<string, string> = {
+    "primary-influence": "primary_influence", "ai-influence": "ai_influence",
+    "ai-reliance": "ai_reliance", "decision-confidence": "decision_confidence",
+    "ai-competence": "perceived_ai_competence", "perceived-purpose": "perceived_study_purpose",
+    "ai-differences": "noticed_ai_differences", "ai-difference-description": "ai_difference_description",
+    "task-update-impact": "task_update_impact", "task-update-description": "task_update_description",
+    "unusual-features": "noticed_anything_unusual", "suspicion-description": "suspicion_description",
+    "prior-study-knowledge": "prior_study_knowledge", "prior-knowledge-description": "prior_knowledge_description",
+    "additional-feedback": "additional_feedback",
+  };
+  const names: Record<string, string> = {};
+  for (const record of records) {
+    const scope = `delayed_recall_${record.taskId}_${record.trial.trialNumber}`;
+    const prefix = `trial_${record.trialOrder}`;
+    names[`noticed_update_${scope}`] = `${prefix}_probe_recall_noticed_update`;
+    names[`update-description-${scope}`] = `${prefix}_probe_recall_description`;
+    names[`affected_location_${scope}`] = `${prefix}_probe_recall_affected_resource`;
+    names[`recall_confidence_${scope}`] = `${prefix}_probe_recall_confidence`;
+    names[`probe_recognition_${scope}`] = `${prefix}_probe_recognition_choice`;
+  }
+  const seen = new Set<string>();
+  const items: QuestionnaireItemResponse[] = [];
+  for (const control of controls) {
+    const name = control.name || control.id;
+    if (seen.has(name)) continue;
+    seen.add(name);
+    const card = control.closest(".questionnaire-rating-card, .radio-question-card, .open-response-card");
+    const questionText = (card?.querySelector(".questionnaire-rating-question") ??
+      card?.querySelector("legend > span") ?? card?.querySelector("label > span") ??
+      card?.querySelector("label > strong"))?.textContent?.trim();
+    if (!questionText) throw new Error("A question could not be recorded. Please try again.");
+    const scale = card?.classList.contains("questionnaire-rating-card") ?? false;
+    const options = controls.filter((item) => item.name === name && item.tagName === "INPUT") as HTMLInputElement[];
+    const selected = options.find((item) => item.checked);
+    const labels = card?.querySelectorAll(".questionnaire-rating-labels small");
+    const suffix = Object.keys(suffixIds).find((key) => name.endsWith(`-${key}`));
+    const itemId = names[name] ?? (suffix ? suffixIds[suffix] : name);
+    items.push({
+      itemId, questionText,
+      scaleMinimum: scale ? Math.min(...options.map((item) => Number(item.value))) : null,
+      scaleMaximum: scale ? Math.max(...options.map((item) => Number(item.value))) : null,
+      scaleMinimumLabel: scale ? labels?.[0]?.textContent?.trim() ?? null : null,
+      scaleMaximumLabel: scale ? labels?.[1]?.textContent?.trim() ?? null : null,
+      answer: control.tagName === "TEXTAREA" ? control.value :
+        selected ? scale ? Number(selected.value) : selected.value : null,
+    });
+  }
+  return items;
+}
+
+function TextQuestion({ id, question, value, onChange, disabled, required = true }: {
+  id: string; question: string; value: string; onChange: (value: string) => void;
+  disabled: boolean; required?: boolean;
+}) {
+  return <div className="open-response-card">
+    <label htmlFor={id}><strong>{question}</strong></label>
+    <textarea id={id} name={id} value={value} required={required} disabled={disabled}
+      rows={4} onChange={(event) => onChange(event.target.value)} />
+  </div>;
+}
+
 export default function PostExperimentPage() {
   const navigate =
     useNavigate();
@@ -1554,7 +1644,7 @@ export default function PostExperimentPage() {
         state.participantId,
     );
 
-  const participantToken =
+  const sessionParticipantToken =
     useStudySessionStore(
       (state) =>
         state.participantToken,
@@ -1722,6 +1812,20 @@ export default function PostExperimentPage() {
         state.events,
     );
 
+  const sessionDataTokens = Array.from(new Set(
+    events.filter((event) => event.sessionId === sessionId)
+      .map((event) => event.participantToken?.trim())
+      .filter((token): token is string => Boolean(token)),
+  ));
+  const participantToken = sessionDataTokens.length === 1
+    ? sessionDataTokens[0]
+    : sessionParticipantToken;
+
+  const [requestedStage, setRequestedStage] = useState<
+    "strategy" | "recall" | "recognition" | "details"
+  >("strategy");
+  const stageSubmissionRef = useRef(false);
+
   const addEvent =
     useEventLogStore(
       (state) =>
@@ -1854,6 +1958,15 @@ export default function PostExperimentPage() {
         trialResponses,
       ],
     );
+
+  const recallSubmitted = delayedRecallRecords.length === TOTAL_STUDY_TRIALS &&
+    delayedRecallRecords.every((record) => record.response.recallSubmittedAtIso != null);
+  const recognitionSubmitted = delayedRecallRecords.length === TOTAL_STUDY_TRIALS &&
+    delayedRecallRecords.every((record) => record.response.recognitionSubmittedAtIso != null);
+  const strategySubmitted = events.some((event) => event.sessionId === sessionId &&
+    event.eventType === "form_submitted" && event.metadata?.formId === "general_strategy");
+  const stage = recognitionSubmitted ? "details" : recallSubmitted ? "recognition" :
+    strategySubmitted || requestedStage !== "strategy" ? "recall" : "strategy";
 
   const finalTrial =
     orderedTrials[
@@ -2242,6 +2355,10 @@ export default function PostExperimentPage() {
       eventType:
         "post_experiment_started",
 
+      taskId: finalTaskId ?? undefined,
+      trialId: getCompositeTrialId(finalTrial),
+      participantToken,
+
       trialNumber:
         finalTrial.trialNumber,
 
@@ -2327,6 +2444,81 @@ export default function PostExperimentPage() {
     sessionId,
   ]);
 
+  function logStageSubmission(
+    formId: string,
+    questionnaireItems: QuestionnaireItemResponse[],
+    record?: DelayedRecallRecord,
+    response?: TrialQuestionnaireResponse,
+  ) {
+    const trial = record?.trial ?? finalTrial;
+    if (!trial) return;
+    const taskId = record?.taskId ?? getTrialTaskId(trial);
+    if (useEventLogStore.getState().getEventsForTrial(trial.trialNumber, taskId)
+      .some((event) => event.eventType === "form_submitted" && event.metadata?.formId === formId)) return;
+    addEvent({
+      eventType: "form_submitted", participantToken, taskId,
+      trialId: getCompositeTrialId(trial), trialNumber: trial.trialNumber,
+      trialOrder: trial.trialOrder, condition: trial.condition, conditionOrder: trial.conditionOrder,
+      isFirstTrial: trial.isFirstTrial, probeExposureNumber: trial.probeExposureNumber,
+      probeNaive: trial.probeNaive, phase: "post_experiment", questionnaireItems,
+      recallSubmittedAtIso: response?.recallSubmittedAtIso ?? null,
+      recognitionSubmittedAtIso: response?.recognitionSubmittedAtIso ?? null,
+      metadata: {
+        formId, questionnaireItems, taskId, trialNumber: trial.trialNumber,
+        trialOrder: trial.trialOrder, probeVersion: record?.probeVersion,
+        recallSubmittedAtIso: response?.recallSubmittedAtIso ?? null,
+        recognitionSubmittedAtIso: response?.recognitionSubmittedAtIso ?? null,
+        probeRecall: response ? { ...response.probeRecall } : undefined,
+      },
+    });
+  }
+
+  function handleStageSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (submitting || stageSubmissionRef.current) return;
+    if (stage === "details") {
+      handleSubmit(event);
+      return;
+    }
+    stageSubmissionRef.current = true;
+    try {
+      if (sessionDataTokens.length !== 1) throw new Error("The participant token in the recorded data could not be verified.");
+      const items = collectQuestionnaireItems(event.currentTarget, delayedRecallRecords);
+      const store = useQuestionnaireStore.getState();
+      if (stage === "strategy") {
+        if (!store.finalQuestionnaire.funneledDebrief.generalStrategy?.trim()) {
+          throw new Error("Please describe the general strategy you used across the three tasks.");
+        }
+        logStageSubmission("general_strategy", items);
+        setRequestedStage("recall");
+      } else {
+        if (delayedRecallRecords.length !== TOTAL_STUDY_TRIALS) throw new Error("The responses for all three tasks could not be loaded.");
+        const currentRecords = delayedRecallRecords.map((record) => ({ ...record,
+          response: store.getTrialResponse(record.trial.trialNumber, record.taskId) ?? record.response,
+        }));
+        const valid = stage === "recall" ? isProbeFreeRecallComplete : isProbeRecognitionComplete;
+        if (currentRecords.some((record) => !valid(record.response.probeRecall))) {
+          throw new Error("Please answer the required questions for all three tasks before continuing.");
+        }
+        for (const record of currentRecords) {
+          const response = stage === "recall"
+            ? store.submitProbeRecall(record.trial.trialNumber, record.taskId)
+            : store.submitProbeRecognition(record.trial.trialNumber, record.taskId);
+          if (!response) throw new Error("These answers could not be submitted. Please try again.");
+          logStageSubmission(stage === "recall" ? "delayed_probe_recall" : "delayed_probe_recognition",
+            items.filter((item) => item.itemId.startsWith(`trial_${record.trialOrder}_`)), record, response);
+        }
+        setRequestedStage(stage === "recall" ? "recognition" : "details");
+      }
+      setValidationMessage("");
+      window.scrollTo(0, 0);
+    } catch (error) {
+      setValidationMessage(getErrorMessage(error));
+    } finally {
+      stageSubmissionRef.current = false;
+    }
+  }
+
   function handleSubmit(
     event:
       FormEvent<HTMLFormElement>,
@@ -2370,6 +2562,24 @@ export default function PostExperimentPage() {
       return;
     }
 
+    let questionnaireItems: QuestionnaireItemResponse[];
+    try {
+      if (sessionDataTokens.length !== 1) throw new Error("The participant token in the recorded data could not be verified.");
+      for (const record of delayedRecallRecords) {
+        const rows = buildTrialEventRows(useEventLogStore.getState()
+          .getEventsForTrial(record.trial.trialNumber, record.taskId));
+        if (getDataParticipantToken(rows) !== participantToken) throw new Error("The trial files contain inconsistent participant tokens.");
+      }
+      const previousItems = useEventLogStore.getState().events
+        .filter((item) => item.sessionId === sessionId && item.eventType === "form_submitted" &&
+          ["general_strategy", "delayed_probe_recall", "delayed_probe_recognition"].includes(String(item.metadata?.formId)))
+        .flatMap((item) => item.questionnaireItems ?? []);
+      questionnaireItems = [...previousItems, ...collectQuestionnaireItems(event.currentTarget, delayedRecallRecords)];
+    } catch (error) {
+      setValidationMessage(getErrorMessage(error));
+      return;
+    }
+
     setValidationMessage(
       "",
     );
@@ -2399,163 +2609,7 @@ export default function PostExperimentPage() {
       new Date()
         .toISOString();
 
-    // ADVISER FIX: Log one delayed-recall event against each exact trial identity.
-    for (
-      const record of
-        delayedRecallRecords
-    ) {
-      const probe =
-        getSemanticProbe(
-          record.taskId,
-        );
-
-      const alreadyLogged =
-        useEventLogStore
-          .getState()
-          .getEventsForTrial(
-            record.trial
-              .trialNumber,
-            record.taskId,
-          )
-          .some(
-            (loggedEvent) =>
-              loggedEvent.eventType ===
-                "form_submitted" &&
-              isPlainRecord(
-                loggedEvent.metadata,
-              ) &&
-              loggedEvent.metadata.formId ===
-                "delayed_probe_recall",
-          );
-
-      if (
-        alreadyLogged
-      ) {
-        continue;
-      }
-
-      const recall = {
-        ...record.response
-          .probeRecall,
-      };
-
-      addEvent({
-        eventType:
-          "form_submitted",
-
-        participantToken,
-
-        taskId:
-          record.taskId,
-
-        skin:
-          record.taskId,
-
-        trialId:
-          getCompositeTrialId(
-            record.trial,
-          ),
-
-        compositeTrialId:
-          getCompositeTrialId(
-            record.trial,
-          ),
-
-        trialNumber:
-          record.trial
-            .trialNumber,
-
-        trialOrder:
-          record.trial
-            .trialOrder,
-
-        globalOptionNumber:
-          getGlobalTrialNumber(
-            record.trial,
-          ),
-
-        globalTrialNumber:
-          getGlobalTrialNumber(
-            record.trial,
-          ),
-
-        outerTaskNumber:
-          getOuterTaskNumber(
-            record.trial,
-          ),
-
-        innerTaskNumber:
-          getInnerTaskNumber(
-            record.trial,
-          ) as StudyTrialProgress["trialNumber"],
-
-        condition:
-          record.trial
-            .condition,
-
-        conditionOrder:
-          record.trial
-            .conditionOrder,
-
-        isFirstTrial:
-          record.trial
-            .isFirstTrial,
-
-        probeExposureNumber:
-          record.trial
-            .probeExposureNumber,
-
-        probeNaive:
-          record.trial
-            .probeNaive,
-
-        phase:
-          "post_experiment",
-
-        messageId:
-          probe.id,
-
-        contentVersion:
-          record.probeVersion,
-
-        metadata: {
-          formId:
-            "delayed_probe_recall",
-
-          participantToken,
-
-          taskId:
-            record.taskId,
-
-          trialNumber:
-            record.trial
-              .trialNumber,
-
-          trialOrder:
-            record.trialOrder,
-
-          condition:
-            record.trial
-              .condition,
-
-          probeId:
-            probe.id,
-
-          probeVersion:
-            record.probeVersion,
-
-          recallCollectedAtIso,
-
-          probeRecall:
-            recall,
-        },
-
-        payload: {
-          probeRecall:
-            recall,
-        },
-      });
-    }
+    logStageSubmission("post_experiment_questionnaire", questionnaireItems);
 
     if (
       !markDelayedRecallCollected()
@@ -2590,6 +2644,10 @@ export default function PostExperimentPage() {
         eventType:
           "post_experiment_submitted",
 
+      taskId: finalTaskId ?? undefined,
+      trialId: getCompositeTrialId(finalTrial),
+      participantToken,
+
       trialNumber:
         finalTrial.trialNumber,
 
@@ -2614,7 +2672,10 @@ export default function PostExperimentPage() {
       phase:
         "post_experiment",
 
+      questionnaireItems,
+
       metadata: {
+        questionnaireItems,
         page:
           "post_experiment",
 
@@ -2708,291 +2769,6 @@ export default function PostExperimentPage() {
             .submittedAtIso,
         },
       });
-    }
-
-    // ADVISER FIX: Export each finalized trial only after its delayed recall event exists.
-    const trialExportErrors:
-      string[] = [];
-
-    for (
-      const record of
-        delayedRecallRecords
-    ) {
-      const exportAttemptAtIso =
-        new Date()
-          .toISOString();
-
-      const currentTrial =
-        useStudySessionStore
-          .getState()
-          .getTrialProgress(
-            record.trial
-              .trialNumber,
-            record.taskId,
-          ) ??
-        record.trial;
-
-      const trialEvents =
-        useEventLogStore
-          .getState()
-          .getEventsForTrial(
-            record.trial
-              .trialNumber,
-            record.taskId,
-          );
-
-      const eventsFileName =
-        getTrialEventsCsvFileName(
-          participantToken,
-          record.trial
-            .trialNumber,
-          record.trial
-            .condition,
-          record.taskId,
-        );
-
-      const summaryFileName =
-        getTrialSummaryCsvFileName(
-          participantToken,
-          record.trial
-            .trialNumber,
-          record.trial
-            .condition,
-          record.taskId,
-        );
-
-      let eventsExported =
-        currentTrial
-          .eventsCsvExportStatus ===
-        "exported";
-
-      let summaryExported =
-        currentTrial
-          .summaryCsvExportStatus ===
-        "exported";
-
-      if (
-        !eventsExported
-      ) {
-        setTrialCsvExportStatus(
-          record.trial
-            .trialNumber,
-          "events",
-          "exporting",
-          undefined,
-          record.taskId,
-          exportAttemptAtIso,
-        );
-
-        try {
-          downloadCsv(
-            eventsFileName,
-            buildTrialEventRows(
-              trialEvents,
-            ),
-          );
-
-          if (
-            !markTrialEventsCsvExported(
-              record.trial
-                .trialNumber,
-              record.taskId,
-              exportAttemptAtIso,
-            )
-          ) {
-            throw new Error(
-              "The event CSV downloaded, but its completed status could not be recorded.",
-            );
-          }
-
-          eventsExported =
-            true;
-        } catch (
-          error
-        ) {
-          const errorMessage =
-            getErrorMessage(
-              error,
-            );
-
-          trialExportErrors.push(
-            `${eventsFileName}: ${errorMessage}`,
-          );
-
-          setTrialCsvExportStatus(
-            record.trial
-              .trialNumber,
-            "events",
-            "failed",
-            errorMessage,
-            record.taskId,
-            exportAttemptAtIso,
-          );
-        }
-      }
-
-      if (
-        !summaryExported
-      ) {
-        setTrialCsvExportStatus(
-          record.trial
-            .trialNumber,
-          "summary",
-          "exporting",
-          undefined,
-          record.taskId,
-          exportAttemptAtIso,
-        );
-
-        try {
-          downloadCsv(
-            summaryFileName,
-            buildTrialSummaryRows({
-              participantId,
-
-              sessionId,
-
-              trial:
-                currentTrial,
-
-              questionnaireResponse:
-                record.response,
-
-              events:
-                trialEvents,
-            }),
-          );
-
-          if (
-            !markTrialSummaryCsvExported(
-              record.trial
-                .trialNumber,
-              record.taskId,
-              exportAttemptAtIso,
-            )
-          ) {
-            throw new Error(
-              "The summary CSV downloaded, but its completed status could not be recorded.",
-            );
-          }
-
-          summaryExported =
-            true;
-        } catch (
-          error
-        ) {
-          const errorMessage =
-            getErrorMessage(
-              error,
-            );
-
-          trialExportErrors.push(
-            `${summaryFileName}: ${errorMessage}`,
-          );
-
-          setTrialCsvExportStatus(
-            record.trial
-              .trialNumber,
-            "summary",
-            "failed",
-            errorMessage,
-            record.taskId,
-            exportAttemptAtIso,
-          );
-        }
-      }
-
-      if (
-        eventsExported &&
-        summaryExported
-      ) {
-        markTrialQuestionnaireExported(
-          record.trial
-            .trialNumber,
-          record.taskId,
-        );
-      }
-
-      addEvent({
-        eventType:
-          "trial_csv_exported",
-
-        participantToken,
-
-        taskId:
-          record.taskId,
-
-        trialId:
-          getCompositeTrialId(
-            record.trial,
-          ),
-
-        trialNumber:
-          record.trial
-            .trialNumber,
-
-        trialOrder:
-          record.trial
-            .trialOrder,
-
-        condition:
-          record.trial
-            .condition,
-
-        conditionOrder:
-          record.trial
-            .conditionOrder,
-
-        isFirstTrial:
-          record.trial
-            .isFirstTrial,
-
-        probeExposureNumber:
-          record.trial
-            .probeExposureNumber,
-
-        probeNaive:
-          record.trial
-            .probeNaive,
-
-        phase:
-          "post_experiment",
-
-        accepted:
-          eventsExported &&
-          summaryExported,
-
-        metadata: {
-          eventsFileName,
-
-          summaryFileName,
-
-          eventsExported,
-
-          summaryExported,
-
-          delayedRecallCollected:
-            true,
-
-          exportedAtIso:
-            exportAttemptAtIso,
-        },
-      });
-    }
-
-    if (
-      trialExportErrors.length >
-      0
-    ) {
-      setSubmitting(
-        false,
-      );
-
-      setValidationMessage(
-        "The delayed recall was saved, but one or more finalized trial CSV files could not be downloaded. Select Continue again to retry only missing files.",
-      );
-
-      return;
     }
 
     const exportedAtIso =
@@ -3208,6 +2984,20 @@ export default function PostExperimentPage() {
             delayedRecallRecords,
             recallCollectedAtIso,
           ),
+
+          general_strategy: submittedResponse.funneledDebrief.generalStrategy ?? "",
+          considered_other_grouping: submittedResponse.funneledDebrief.consideredOtherGrouping ?? "",
+          other_grouping_description: submittedResponse.funneledDebrief.consideredOtherGrouping === "yes"
+            ? submittedResponse.funneledDebrief.otherGroupingDescription ?? "" : "",
+          grouping_reason: submittedResponse.funneledDebrief.groupingReason ?? "",
+          trial_1_update_meaning: delayedRecallRecords.find((record) => record.trialOrder === 1)?.response.probeRecall.updateMeaning ?? "",
+          trial_2_update_meaning: delayedRecallRecords.find((record) => record.trialOrder === 2)?.response.probeRecall.updateMeaning ?? "",
+          trial_3_update_meaning: delayedRecallRecords.find((record) => record.trialOrder === 3)?.response.probeRecall.updateMeaning ?? "",
+          ai_attribution_rating: submittedResponse.attributionCheck.aiAttributionRating ?? null,
+          ...Object.fromEntries(delayedRecallRecords.flatMap((record) => [
+            [`trial_${record.trialOrder}_recall_submitted_at_iso`, record.response.recallSubmittedAtIso ?? null],
+            [`trial_${record.trialOrder}_recognition_submitted_at_iso`, record.response.recognitionSubmittedAtIso ?? null],
+          ])),
         },
       ];
 
@@ -3216,13 +3006,20 @@ export default function PostExperimentPage() {
         rows,
       );
 
-      markFinalQuestionnaireExported();
+      const exportedQuestionnaire = markFinalQuestionnaireExported();
+      if (!exportedQuestionnaire?.exportedAtIso) throw new Error("The questionnaire export time could not be recorded.");
 
-      markPostExperimentCsvExported();
+      if (!markPostExperimentCsvExported(exportedQuestionnaire.exportedAtIso)) {
+        throw new Error("The questionnaire export status could not be recorded.");
+      }
 
       addEvent({
         eventType:
           "post_experiment_csv_exported",
+
+        taskId: finalTaskId ?? undefined,
+        trialId: getCompositeTrialId(finalTrial),
+        participantToken,
 
         trialNumber:
           finalTrial.trialNumber,
@@ -3298,6 +3095,299 @@ export default function PostExperimentPage() {
       }
     }
 
+    const questionnaireExportedAtIso = useQuestionnaireStore.getState().finalQuestionnaire.exportedAtIso;
+    if (!questionnaireExportedAtIso) {
+      setSubmitting(false);
+      setValidationMessage("The questionnaire export time is missing. Please try again.");
+      return;
+    }
+
+    // ADVISER FIX: Export each finalized trial only after its delayed recall event exists.
+    const trialExportErrors:
+      string[] = [];
+
+    for (
+      const record of
+        delayedRecallRecords
+    ) {
+      const exportAttemptAtIso =
+        new Date()
+          .toISOString();
+
+      const currentTrial =
+        useStudySessionStore
+          .getState()
+          .getTrialProgress(
+            record.trial
+              .trialNumber,
+            record.taskId,
+          ) ??
+        record.trial;
+
+      const trialEvents =
+        useEventLogStore
+          .getState()
+          .getEventsForTrial(
+            record.trial
+              .trialNumber,
+            record.taskId,
+          );
+
+      const eventRows = buildTrialEventRows(trialEvents);
+      const trialParticipantToken = getDataParticipantToken(eventRows);
+
+      const eventsFileName =
+        getTrialEventsCsvFileName(
+          trialParticipantToken,
+          record.trial
+            .trialNumber,
+          record.trial
+            .condition,
+          record.taskId,
+        );
+
+      const summaryFileName =
+        getTrialSummaryCsvFileName(
+          trialParticipantToken,
+          record.trial
+            .trialNumber,
+          record.trial
+            .condition,
+          record.taskId,
+        );
+
+      let eventsExported =
+        currentTrial
+          .eventsCsvExportStatus ===
+        "exported";
+
+      let summaryExported =
+        currentTrial
+          .summaryCsvExportStatus ===
+        "exported";
+
+      if (
+        !eventsExported
+      ) {
+        setTrialCsvExportStatus(
+          record.trial
+            .trialNumber,
+          "events",
+          "exporting",
+          undefined,
+          record.taskId,
+          exportAttemptAtIso,
+        );
+
+        try {
+          downloadCsv(
+            eventsFileName,
+            eventRows,
+          );
+
+          if (
+            !markTrialEventsCsvExported(
+              record.trial
+                .trialNumber,
+              record.taskId,
+              exportAttemptAtIso,
+            )
+          ) {
+            throw new Error(
+              "The event CSV downloaded, but its completed status could not be recorded.",
+            );
+          }
+
+          eventsExported =
+            true;
+        } catch (
+          error
+        ) {
+          const errorMessage =
+            getErrorMessage(
+              error,
+            );
+
+          trialExportErrors.push(
+            `${eventsFileName}: ${errorMessage}`,
+          );
+
+          setTrialCsvExportStatus(
+            record.trial
+              .trialNumber,
+            "events",
+            "failed",
+            errorMessage,
+            record.taskId,
+            exportAttemptAtIso,
+          );
+        }
+      }
+
+      if (
+        !summaryExported && eventsExported
+      ) {
+        setTrialCsvExportStatus(
+          record.trial
+            .trialNumber,
+          "summary",
+          "exporting",
+          undefined,
+          record.taskId,
+          exportAttemptAtIso,
+        );
+
+        try {
+          const latestTrial = useStudySessionStore.getState()
+            .getTrialProgress(record.trial.trialNumber, record.taskId) ?? currentTrial;
+          const summaryExportedAtIso = new Date().toISOString();
+          if (!latestTrial.eventsCsvExportedAtIso) throw new Error("The events export time is missing.");
+          const summaryRows = buildTrialSummaryRows({
+            participantId, sessionId, trial: latestTrial,
+            questionnaireResponse: record.response, events: trialEvents,
+            exportTimestamps: {
+              eventsCsvExportedAtIso: latestTrial.eventsCsvExportedAtIso,
+              summaryCsvExportedAtIso: summaryExportedAtIso,
+              questionnaireExportedAtIso,
+            },
+          });
+          if (getDataParticipantToken(summaryRows) !== trialParticipantToken) {
+            throw new Error("The summary participant token does not match the trial data.");
+          }
+          downloadCsv(summaryFileName, summaryRows);
+
+          if (
+            !markTrialSummaryCsvExported(
+              record.trial
+                .trialNumber,
+              record.taskId,
+              summaryExportedAtIso,
+            )
+          ) {
+            throw new Error(
+              "The summary CSV downloaded, but its completed status could not be recorded.",
+            );
+          }
+
+          summaryExported =
+            true;
+        } catch (
+          error
+        ) {
+          const errorMessage =
+            getErrorMessage(
+              error,
+            );
+
+          trialExportErrors.push(
+            `${summaryFileName}: ${errorMessage}`,
+          );
+
+          setTrialCsvExportStatus(
+            record.trial
+              .trialNumber,
+            "summary",
+            "failed",
+            errorMessage,
+            record.taskId,
+            exportAttemptAtIso,
+          );
+        }
+      }
+
+      if (
+        eventsExported &&
+        summaryExported
+      ) {
+        markTrialQuestionnaireExported(
+          record.trial
+            .trialNumber,
+          record.taskId,
+        );
+      }
+
+      addEvent({
+        eventType:
+          "trial_csv_exported",
+
+        participantToken,
+
+        taskId:
+          record.taskId,
+
+        trialId:
+          getCompositeTrialId(
+            record.trial,
+          ),
+
+        trialNumber:
+          record.trial
+            .trialNumber,
+
+        trialOrder:
+          record.trial
+            .trialOrder,
+
+        condition:
+          record.trial
+            .condition,
+
+        conditionOrder:
+          record.trial
+            .conditionOrder,
+
+        isFirstTrial:
+          record.trial
+            .isFirstTrial,
+
+        probeExposureNumber:
+          record.trial
+            .probeExposureNumber,
+
+        probeNaive:
+          record.trial
+            .probeNaive,
+
+        phase:
+          "post_experiment",
+
+        accepted:
+          eventsExported &&
+          summaryExported,
+
+        metadata: {
+          eventsFileName,
+
+          summaryFileName,
+
+          eventsExported,
+
+          summaryExported,
+
+          delayedRecallCollected:
+            true,
+
+          exportedAtIso:
+            exportAttemptAtIso,
+        },
+      });
+    }
+
+    if (
+      trialExportErrors.length >
+      0
+    ) {
+      setSubmitting(
+        false,
+      );
+
+      setValidationMessage(
+        "The delayed recall was saved, but one or more finalized trial CSV files could not be downloaded. Select Continue again to retry only missing files.",
+      );
+
+      return;
+    }
+
     const completed =
       completePostExperiment();
 
@@ -3361,76 +3451,75 @@ export default function PostExperimentPage() {
       <form
         className="study-page-content questionnaire-form"
         onSubmit={
-          handleSubmit
+          handleStageSubmit
         }
       >
-        <section className="questionnaire-completion-note">
-          <CheckCircle2
-            size={20}
-            aria-hidden="true"
-          />
-
-          <p>
-            You have completed all three experiment tasks.
-            First answer the task-update questions from memory,
-            then answer the questions about your overall experience.
-          </p>
-        </section>
-
-        {delayedRecallRecords.map(
-          (record) => (
-            <DelayedRecallSection
-              key={`${record.taskId}:${record.trial.trialNumber}`}
-              taskId={
-                record.taskId
-              }
-              trialNumber={
-                record.trial
-                  .trialNumber
-              }
-              trialOrder={
-                record.trialOrder
-              }
-              condition={
-                record.trial
-                  .condition
-              }
-              probeVersion={
-                record.probeVersion
-              }
-              response={
-                record.response
-              }
-              disabled={
-                submitting
-              }
-              onChange={(
-                dimension,
-                value,
-              ) => {
-                setProbeRecallValue(
-                  record.trial
-                    .trialNumber,
-                  dimension,
-                  value,
-                  record.taskId,
-                );
-              }}
-            />
-          ),
+        {stage === "strategy" && (
+          <TextQuestion id="general_strategy"
+            question="Describe the general strategy you used across the three tasks."
+            value={funneledDebrief.generalStrategy ?? ""} disabled={submitting}
+            onChange={(value) => setFunneledDebriefValue("generalStrategy", value)} />
         )}
 
-        <DebriefForm
-          values={
-            debriefValues
-          }
-          onChange={
-            handleDebriefChange
-          }
-          disabled={
-            submitting
-          }
-        />
+        {(stage === "recall" || stage === "recognition") && delayedRecallRecords.map((record) => (
+          <DelayedRecallSection key={`${record.taskId}:${record.trial.trialNumber}`}
+            taskId={record.taskId} trialNumber={record.trial.trialNumber}
+            trialOrder={record.trialOrder} condition={record.trial.condition}
+            probeVersion={record.probeVersion} response={record.response} mode={stage}
+            disabled={submitting || (stage === "recall"
+              ? record.response.recallSubmittedAtIso != null : record.response.recognitionSubmittedAtIso != null)}
+            onChange={(dimension, value) => setProbeRecallValue(
+              record.trial.trialNumber, dimension, value, record.taskId,
+            )} />
+        ))}
+
+        {stage === "details" && (<>
+          {delayedRecallRecords.map((record) => (
+            <QuestionnaireSection key={`${record.taskId}:${record.trial.trialNumber}`}
+              icon={<Bell size={22} aria-hidden="true" />}
+              title={`Task ${record.trialOrder}: ${TASK_RECALL_COPY[record.taskId].taskTitle}`}
+              description="Explain what the update meant for your solution. If you do not know, write that.">
+              <TextQuestion id={`trial_${record.trialOrder}_update_meaning`}
+                question="What did this update require you to change?"
+                value={record.response.probeRecall.updateMeaning ?? ""}
+                disabled={submitting || finalQuestionnaire.submittedAtIso !== null}
+                onChange={(value) => setProbeRecallValue(record.trial.trialNumber, "updateMeaning", value, record.taskId)} />
+            </QuestionnaireSection>
+          ))}
+
+          <fieldset className="radio-question-card" disabled={submitting || finalQuestionnaire.submittedAtIso !== null}>
+            <legend><span>Did you consider or try a different grouping from the one the AI recommended?</span></legend>
+            <div className="radio-question-options">
+              {(["yes", "no", "unsure"] as const).map((value) => (
+                <label className="radio-question-option" key={value}>
+                  <input type="radio" name="considered_other_grouping" value={value} required
+                    checked={funneledDebrief.consideredOtherGrouping === value}
+                    onChange={() => setFunneledDebriefValue("consideredOtherGrouping", value)} />
+                  <span>{value === "yes" ? "Yes" : value === "no" ? "No" : "Unsure"}</span>
+                </label>
+              ))}
+            </div>
+          </fieldset>
+          {funneledDebrief.consideredOtherGrouping === "yes" && (
+            <TextQuestion id="other_grouping_description" question="Describe the grouping you considered or tried."
+              value={funneledDebrief.otherGroupingDescription ?? ""}
+              disabled={submitting || finalQuestionnaire.submittedAtIso !== null}
+              onChange={(value) => setFunneledDebriefValue("otherGroupingDescription", value)} />
+          )}
+          <TextQuestion id="grouping_reason" question="Why did you keep or change the AI's grouping?"
+            value={funneledDebrief.groupingReason ?? ""} disabled={submitting || finalQuestionnaire.submittedAtIso !== null}
+            onChange={(value) => setFunneledDebriefValue("groupingReason", value)} />
+
+          <DebriefForm values={debriefValues} onChange={handleDebriefChange}
+            disabled={submitting || finalQuestionnaire.submittedAtIso !== null} />
+
+          <LikertScale name="ai_attribution_rating" title="Source of the recommendations"
+            description="The recommendations I received were generated by an AI system."
+            lowLabel="Strongly disagree" highLabel="Strongly agree" min={1} max={7}
+            value={attributionCheck.aiAttributionRating ?? null}
+            disabled={submitting || finalQuestionnaire.submittedAtIso !== null}
+            onChange={(value) => { if (isSevenPointRating(value)) setAttributionCheckValue("aiAttributionRating", value); }} />
+        </>)}
 
         {validationMessage && (
           <div
@@ -3448,9 +3537,9 @@ export default function PostExperimentPage() {
           />
 
           <p>
-            Your final responses will be recorded, then the
-            finalized trial CSV files and post-experiment CSV
-            will be downloaded after submission.
+            {stage === "details"
+              ? "Your responses will be saved when you continue."
+              : "Select Continue when you have finished this page. You cannot return to a submitted page."}
           </p>
         </section>
 
@@ -3464,7 +3553,7 @@ export default function PostExperimentPage() {
           >
             {submitting
               ? "Preparing study files"
-              : "Continue to disclosure"}
+              : stage === "details" ? "Continue to disclosure" : "Continue"}
 
             {!submitting && (
               <ArrowRight

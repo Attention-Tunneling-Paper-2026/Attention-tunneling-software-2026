@@ -101,7 +101,7 @@ const influenceOptions: ResponseOption<Exclude<
 >>[] = [
   {
     value: "own_reasoning",
-    label: "My own reasoning and judgment",
+    label: "My own thinking and judgment",
   },
   {
     value: "ai_recommendation",
@@ -109,7 +109,7 @@ const influenceOptions: ResponseOption<Exclude<
   },
   {
     value: "task_rules",
-    label: "The task constraints",
+    label: "The task rules",
   },
   {
     value: "task_update",
@@ -210,7 +210,7 @@ export function getDebriefValidationMessage(
       values.perceivedAiCompetence,
     )
   ) {
-    return "Please answer all decision attribution questions using the 1 to 5 response scale.";
+    return "Please select what influenced your decisions most and answer all four rating questions on the 1 to 5 scale.";
   }
 
   if (
@@ -261,14 +261,14 @@ export function getDebriefValidationMessage(
   if (
     values.priorStudyKnowledge === ""
   ) {
-    return "Please indicate whether you had prior knowledge of the study.";
+    return "Please indicate whether anyone told you about the study before you took part.";
   }
 
   if (
     values.priorStudyKnowledge === "yes" &&
     values.priorKnowledgeDescription.trim().length === 0
   ) {
-    return "Please describe what you knew about the study before participating.";
+    return "Please describe what you knew about the study before taking part.";
   }
 
   return "";
@@ -437,12 +437,12 @@ export default function DebriefForm({
       <section className="debrief-form-section">
         <div className="debrief-form-section-header">
           <h2>
-            Decision attribution
+            What influenced your decisions
           </h2>
 
           <p>
-            Consider what influenced your final
-            scheduling decisions across the tasks.
+            Think about what influenced your final
+            decisions across all three tasks.
           </p>
         </div>
 
@@ -450,7 +450,7 @@ export default function DebriefForm({
           <RadioQuestion
             name={`${generatedId}-primary-influence`}
             title="Primary influence"
-            description="Which factor had the greatest influence on your final schedules overall?"
+            description="Thinking about all three tasks, what influenced your final decisions the most?"
             options={influenceOptions}
             value={values.primaryInfluence}
             required
@@ -466,7 +466,7 @@ export default function DebriefForm({
           <LikertScale
             name={`${generatedId}-ai-influence`}
             title="AI influence"
-            description="The AI recommendations influenced my final scheduling decisions."
+            description="The AI recommendations influenced the final decisions I made in the tasks."
             lowLabel="Strongly disagree"
             highLabel="Strongly agree"
             value={values.aiInfluence}
@@ -486,7 +486,7 @@ export default function DebriefForm({
           <LikertScale
             name={`${generatedId}-ai-reliance`}
             title="Reliance on the AI"
-            description="When I was uncertain, I relied on the AI recommendation."
+            description="When I was unsure what to do, I relied on the AI recommendation."
             lowLabel="Strongly disagree"
             highLabel="Strongly agree"
             value={values.aiReliance}
@@ -506,7 +506,7 @@ export default function DebriefForm({
           <LikertScale
             name={`${generatedId}-decision-confidence`}
             title="Decision confidence"
-            description="I was confident in the final schedules I submitted."
+            description="I felt confident about the final solutions I submitted."
             lowLabel="Strongly disagree"
             highLabel="Strongly agree"
             value={values.decisionConfidence}
@@ -525,8 +525,8 @@ export default function DebriefForm({
 
           <LikertScale
             name={`${generatedId}-ai-competence`}
-            title="Overall AI competence"
-            description="The AI assistant appeared competent across the scheduling tasks."
+            title="Overall AI ability"
+            description="The AI assistant seemed capable of helping me solve the tasks."
             lowLabel="Strongly disagree"
             highLabel="Strongly agree"
             value={
@@ -535,7 +535,7 @@ export default function DebriefForm({
             min={POST_EXPERIMENT_LIKERT_MIN}
             max={POST_EXPERIMENT_LIKERT_MAX}
             required
-            ariaLabel="Overall AI competence, rated from 1 strongly disagree to 5 strongly agree"
+            ariaLabel="Overall AI ability, rated from 1 strongly disagree to 5 strongly agree"
             disabled={disabled}
             onChange={(value) =>
               updateValue(
@@ -562,7 +562,7 @@ export default function DebriefForm({
         <OpenResponse
           id={`${generatedId}-perceived-purpose`}
           title="What do you think this study was investigating?"
-          description="Describe the purpose of the study as you understood it."
+          description="What do you think the researchers were trying to find out in this study?"
           value={values.perceivedPurpose}
           rows={5}
           maxLength={1500}
@@ -584,8 +584,8 @@ export default function DebriefForm({
           </h2>
 
           <p>
-            Reflect on whether the AI assistance appeared
-            different across the tasks.
+            Think about whether the help provided by the AI
+            differed across the three tasks.
           </p>
         </div>
 
@@ -593,7 +593,7 @@ export default function DebriefForm({
           <RadioQuestion
             name={`${generatedId}-ai-differences`}
             title="Differences between tasks"
-            description="Did the AI assistant appear to provide different amounts of detail or different forms of assistance across the tasks?"
+            description="Did the amount of detail or the type of help provided by the AI differ between the tasks?"
             options={yesNoUnsureOptions}
             value={
               values.noticedAiDifferences
@@ -615,7 +615,7 @@ export default function DebriefForm({
             <OpenResponse
               id={`${generatedId}-ai-difference-description`}
               title="Please describe any differences you noticed"
-              description="You may describe the content, detail, presentation, or usefulness of the AI assistance."
+              description="What differences did you notice in what the AI said, how much detail it gave, how it presented its help, or how useful its help was?"
               value={
                 values.aiDifferenceDescription
               }
@@ -642,8 +642,8 @@ export default function DebriefForm({
           </h2>
 
           <p>
-            Consider the information update that appeared
-            while you were scheduling.
+            Think about the information updates that appeared
+            while you were working on the tasks.
           </p>
         </div>
 
@@ -651,7 +651,7 @@ export default function DebriefForm({
           <RadioQuestion
             name={`${generatedId}-task-update-impact`}
             title="Effect of the update"
-            description="Did an update that appeared during a task change your scheduling approach or final decision?"
+            description="Did an update shown during any task change how you approached that task or the final solution you submitted?"
             options={yesNoUnsureOptions}
             value={
               values.taskUpdateImpact
@@ -673,7 +673,7 @@ export default function DebriefForm({
             <OpenResponse
               id={`${generatedId}-task-update-description`}
               title="Please describe the effect of the update"
-              description="Explain what you changed, considered changing, or decided not to change."
+              description="How did the update affect your decisions? Describe what you changed, thought about changing, or decided to keep the same."
               value={
                 values.taskUpdateDescription
               }
@@ -696,20 +696,20 @@ export default function DebriefForm({
       <section className="debrief-form-section">
         <div className="debrief-form-section-header">
           <h2>
-            Study awareness
+            What you noticed or knew about the study
           </h2>
 
           <p>
-            These questions help us understand how
-            participants interpreted the study.
+            These questions ask what you noticed during the study
+            and what you knew before taking part.
           </p>
         </div>
 
         <div className="questionnaire-question-list">
           <RadioQuestion
             name={`${generatedId}-unusual-features`}
-            title="Unusual features or suspicions"
-            description="Did you notice anything unusual or form any suspicions about the task, AI assistant, or study purpose?"
+            title="Anything unusual or unexpected"
+            description="Did you notice anything unusual or have any suspicions about the tasks, AI assistant, or the purpose of the study?"
             options={yesNoUnsureOptions}
             value={
               values.noticedAnythingUnusual
@@ -750,8 +750,8 @@ export default function DebriefForm({
 
           <RadioQuestion
             name={`${generatedId}-prior-study-knowledge`}
-            title="Prior knowledge"
-            description="Before participating, had anyone told you about the study purpose, expected results, or different AI assistance conditions?"
+            title="What you knew before taking part"
+            description="Before you took part, had anyone told you what this study was testing, what results the researchers expected, or that the AI would provide different types of help?"
             options={yesNoUnsureOptions}
             value={
               values.priorStudyKnowledge
@@ -772,7 +772,7 @@ export default function DebriefForm({
             "unsure" ? (
             <OpenResponse
               id={`${generatedId}-prior-knowledge-description`}
-              title="Please describe what you knew"
+              title="Please describe what you knew before taking part"
               value={
                 values.priorKnowledgeDescription
               }
@@ -799,7 +799,7 @@ export default function DebriefForm({
           </h2>
 
           <p>
-            This final response is optional.
+            This feedback is optional.
           </p>
         </div>
 

@@ -63,6 +63,7 @@ export const STUDY_EVENT_TYPES = [
   "form_submitted",
   "session_end",
   "export_downloaded",
+  "click",
 ] as const;
 
 export type StudyEventType =
@@ -162,6 +163,16 @@ export type StudyEventMetadata =
 export type StudyEventPayload =
   Record<string, unknown>;
 
+export interface QuestionnaireItemResponse {
+  itemId: string;
+  questionText: string;
+  scaleMinimum: number | null;
+  scaleMaximum: number | null;
+  scaleMinimumLabel: string | null;
+  scaleMaximumLabel: string | null;
+  answer: string | number | boolean | null;
+}
+
 export interface StudyEventMeasurements {
   /*
    * Legacy Symposium field names are retained because the shared scheduler
@@ -215,6 +226,10 @@ export interface StudyEventMeasurements {
   scoreAfter?: number;
   scoreDelta?: number;
 
+  postProbeScoreBefore?: number | null;
+  postProbeScoreAfter?: number | null;
+  finalScoreRule?: "F" | "F_P";
+
   /*
    * speakerConflicts* is the compatibility field used for the shared-actor
    * conflict metric. In the other skins it represents driver or nurse
@@ -260,7 +275,9 @@ export interface StudyEventMeasurements {
   editsMadeSoFar?: number;
   idleMsInPrevious60Seconds?: number;
 
-  integrationConsistentEdit?: boolean;
+  probeCompliantAtOnset?: boolean | null;
+  integrationConsistentEdit?: boolean | null;
+  firstProbeIntegration?: boolean | null;
   probeIntegrationDetected?: boolean | null;
 
   detectionMiss?: boolean | null;
@@ -302,6 +319,13 @@ export interface StudyEventMeasurements {
   messageId?: string;
   contentVersion?: string;
   probeCompliant?: boolean | null;
+
+  timerStartedAtIso?: string | null;
+  participantCaused?: boolean;
+
+  questionnaireItems?: QuestionnaireItemResponse[];
+  recallSubmittedAtIso?: string | null;
+  recognitionSubmittedAtIso?: string | null;
 }
 
 export interface StudyEvent
