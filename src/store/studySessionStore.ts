@@ -4,12 +4,7 @@ import {
 
 import assignmentTable from "../data/assignment.json";
 
-/*
- * Study allocation invariant:
- * - A validated P001-P054 token resolves to exactly three ordered trials.
- * - Each plan contains every task domain and every condition exactly once.
- * - The static assignment table is the sole source of runtime allocation.
- */
+
 
 import {
   DEFAULT_CONDITION_ORDER,
@@ -814,7 +809,7 @@ function staticAssignmentTableIsValid():
     Object.keys(
       records,
     ).length !==
-      54
+      90
   ) {
     return false;
   }
@@ -826,7 +821,7 @@ function staticAssignmentTableIsValid():
     let participantNumber =
       1;
     participantNumber <=
-      54;
+      90;
     participantNumber +=
       1
   ) {
@@ -887,7 +882,7 @@ function staticAssignmentTableIsValid():
       sequenceCounts.get(
         sequenceId,
       ) ===
-      3,
+      5,
   );
 }
 
