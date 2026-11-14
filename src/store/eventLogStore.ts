@@ -1081,9 +1081,19 @@ function getExportEvents(
     .filter((event) => event.sessionId === state.sessionId)
     .map((event) => ({ ...event, ...routeEventInput(event, state) } as StudyEvent))
     .sort((first, second) => first.eventIndex - second.eventIndex);
-  const probeNaiveTrialIds = new Set(sessionEvents.filter((event) => event.probeNaive).map((event) => event.trialId));
-  if (probeNaiveTrialIds.size > 1) {
-    throw new Error(`Participant ${state.participantId} has more than one probe-naive trial.`);
+  // Use the export's trial key so ID aliases cannot count as separate trials.
+  const probeNaiveTrialKeys = new Set(
+    sessionEvents
+      .filter((event) => event.probeNaive)
+      .map(getTrialEventKey),
+  );
+  if (probeNaiveTrialKeys.size > 1) {
+    // Keep the original event flags for review. An analysis metadata
+    // inconsistency must not stop questionnaire submission or data recovery.
+    console.warn(
+      `Participant ${state.participantId} has more than one probe-naive trial. Review trial order and probe_shown events before analysis.`,
+      [...probeNaiveTrialKeys],
+    );
   }
 
   const selected = sessionEvents.filter((event) =>
