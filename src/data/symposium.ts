@@ -1085,29 +1085,35 @@ export interface AssistantRecommendation {
    prefillAcknowledgment: string | null;
 }
 
-const SHARED_AI_RECOMMENDATION = `Hey! I’d give each room a topic track so related talks stay together:
+const SHARED_AI_RECOMMENDATION = `Hey! I think grouping talks on the same topic in the same room would be a good starting point. This keeps related talks together and makes it easier to follow how the schedule is organized:
 
 • Room A: NLP talks
 • Room B: Health talks
 • Room C: Robotics talks
 
-From there, check when each speaker is available and pick a time slot for their talk.`;
+Next, choose a time slot for each talk based on when its speaker is available. If a speaker has two talks at the same time, adjust their placements to resolve the conflict.
 
-const SHARED_DELIVERY_AI_RECOMMENDATION = `Hey! My suggestion is to sort the shipments by region first. Here’s how I’d split them:
+Take a careful look at all the task constraints and preferences as you work. Check the room requirements and speaker availability, then review the whole schedule to see whether any assignments still need adjusting.`;
+
+const SHARED_DELIVERY_AI_RECOMMENDATION = `Hey! I think grouping shipments going to the same region in the same van would be a good starting point. This keeps shipments for each region together and makes it easier to follow how the dispatch plan is organized:
 
 • Van A: North shipments
 • Van B: Central shipments
 • Van C: South shipments
 
-Then set the dispatch times based on when each driver is available.`;
+Next, choose a delivery window for each shipment based on when its driver is available. If a driver has two shipments at the same time, adjust their placements to resolve the conflict.
 
-const SHARED_CLINIC_AI_RECOMMENDATION = `Hey! For the roster, I’d use clinical specialty to decide which duties go in each ward:
+Take a careful look at all the task constraints and preferences as you work. Check the van requirements and driver availability, then review the whole dispatch plan to see whether any assignments still need adjusting.`;
+
+const SHARED_CLINIC_AI_RECOMMENDATION = `Hey! I think grouping duties for the same type of care in the same ward would be a good starting point. This keeps related duties together and makes it easier to follow how the roster is organized:
 
 • Ward A: Emergency Care duties
 • Ward B: General Medicine duties
 • Ward C: Critical Care duties
 
-Within each ward, match the duties to shifts when the assigned nurses are available.`;
+Next, choose a shift for each duty based on when its nurse is available. If a nurse has two duties during the same shift, adjust their placements to resolve the conflict.
+
+Take a careful look at all the task constraints and preferences as you work. Check the ward requirements and nurse availability, then review the whole roster to see whether any assignments still need adjusting.`;
 
 const SHARED_PREFILL_ACKNOWLEDGMENT =
   "I’ve added placements to the board to get you started.";
