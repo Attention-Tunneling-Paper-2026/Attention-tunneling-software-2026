@@ -799,90 +799,11 @@ function findStrategySwitchEvent(
   sortedEvents:
     StudyEvent[],
 ): StudyEvent | undefined {
-  const acceptedEdits =
-    sortedEvents.filter(
-      isAcceptedEdit,
-    );
-
-  const firstCompleteAssignmentEvent =
-    findFirstCompleteAssignmentEvent(
-      sortedEvents,
-    );
-
-  if (
-    !firstCompleteAssignmentEvent
-  ) {
-    return undefined;
-  }
-
-  const firstSearchEditIndex =
-    firstCompleteAssignmentEvent.eventType ===
-      "trial_start"
-      ? 0
-      : acceptedEdits.findIndex(
-          (event) =>
-            event.eventId ===
-            firstCompleteAssignmentEvent.eventId,
-        ) +
-        1;
-
-  let previousHammingDistance =
-    getHammingDistanceAfter(
-      firstCompleteAssignmentEvent,
-    );
-
-  /*
-   * FIX: Empty/partial A/B construction is not a strategy switch.
-   * The risk window starts only after the first complete assignment, and a
-   * switch requires a real crossing from d_H <= 6 to d_H > 6.
-   */
-  for (
-    let index =
-      Math.max(
-        0,
-        firstSearchEditIndex,
-      );
-    index <
-      acceptedEdits.length;
-    index +=
-      1
-  ) {
-    const event =
-      acceptedEdits[
-        index
-      ];
-
-    const hammingDistanceBefore =
-      eventNumber(
-        event,
-        "hammingDistanceFromAIBefore",
-        "hammingDistanceFromAIBefore",
-      ) ??
-      previousHammingDistance;
-
-    const hammingDistanceAfter =
-      getHammingDistanceAfter(
-        event,
-      );
-
-    if (
-      hammingDistanceBefore !==
-        null &&
-      hammingDistanceBefore <=
-        STRATEGY_SWITCH_HAMMING_THRESHOLD &&
-      hammingDistanceAfter !==
-        null &&
-      hammingDistanceAfter >
-        STRATEGY_SWITCH_HAMMING_THRESHOLD
-    ) {
-      return event;
-    }
-
-    previousHammingDistance =
-      hammingDistanceAfter;
-  }
-
-  return undefined;
+  // The methodology defines a switch as the first complete state with
+  // more than six item placements different from the AI solution.
+  // This includes a first completed board already beyond the threshold.
+  // Use the same event as scrap; scrap latency starts at first completion.
+  return findScrapEvent(sortedEvents);
 }
 
 function countTrue(
@@ -2575,7 +2496,7 @@ export function buildTrialEventRows(
             ? event === scrapEvent
             : null,
         destructive_edit_definition:
-          "first_complete_board_with_hamming_gt_6_from_first_complete_board",
+          "first_complete_state_with_hamming_gt_6_from_ai_latency_from_first_complete_board",
         structural_departure_edit:
           event.isDestructiveEdit ??
           null,
@@ -3235,7 +3156,7 @@ export function buildTrialSummaryRows({
       );
 
   /*
-   * FIX: Summary metrics use the same post-construction crossing event that
+   * FIX: Summary metrics use the same first qualifying complete-state event that
    * is exported in the raw event CSV.
    */
   const strategySwitchEvent =
@@ -4290,7 +4211,7 @@ export function buildTrialSummaryRows({
               0,
         ).length,
       destructive_edit_definition:
-        "first_complete_board_with_hamming_gt_6_from_first_complete_board",
+        "first_complete_state_with_hamming_gt_6_from_ai_latency_from_first_complete_board",
       destructive_edit_occurred:
         scrapObserved,
       destructive_edit_count:
