@@ -33,7 +33,7 @@ export function isSupportedStudyTaskId(
 
 export const SYMPOSIUM_TASK_VERSION = "symposium-v3";
 export const AI_ARTIFACT_VERSION = "symposium-ai-artifact-v1";
-export const AI_MESSAGE_VERSION = "symposium-ai-message-v3";
+export const AI_MESSAGE_VERSION = "symposium-ai-message-v4";
 export const SEMANTIC_PROBE_VERSION = "room-c-projector-failure-v2";
 export const SCORING_VERSION = "symposium-score-v3";
 
@@ -41,7 +41,7 @@ export const DELIVERY_TASK_VERSION = "delivery-v1";
 export const DELIVERY_AI_ARTIFACT_VERSION =
    "delivery-ai-artifact-v1";
 export const DELIVERY_AI_MESSAGE_VERSION =
-   "delivery-ai-message-v2";
+   "delivery-ai-message-v3";
 export const DELIVERY_SEMANTIC_PROBE_VERSION =
    "van-c-refrigeration-failure-v1";
 export const DELIVERY_SCORING_VERSION = "delivery-score-v1";
@@ -50,7 +50,7 @@ export const CLINIC_TASK_VERSION = "clinic-v1";
 export const CLINIC_AI_ARTIFACT_VERSION =
    "clinic-ai-artifact-v1";
 export const CLINIC_AI_MESSAGE_VERSION =
-   "clinic-ai-message-v2";
+   "clinic-ai-message-v3";
 export const CLINIC_SEMANTIC_PROBE_VERSION =
    "ward-c-icu-certification-loss-v1";
 export const CLINIC_SCORING_VERSION = "clinic-score-v1";
@@ -1085,35 +1085,35 @@ export interface AssistantRecommendation {
    prefillAcknowledgment: string | null;
 }
 
-const SHARED_AI_RECOMMENDATION = `Hey! I think grouping talks on the same topic in the same room would be a good starting point. This keeps related talks together and makes it easier to follow how the schedule is organized:
+const SHARED_AI_RECOMMENDATION = `Hey! I suggest grouping talks on the same topic in the same room. This keeps related talks together and makes the schedule easier to follow:
 
 • Room A: NLP talks
 • Room B: Health talks
 • Room C: Robotics talks
 
-Next, choose a time slot for each talk based on when its speaker is available. If a speaker has two talks at the same time, adjust their placements to resolve the conflict.
+Next, choose each talk's time slot based on speaker availability. If a speaker has two talks at the same time, adjust their placements to resolve the conflict.
 
-Take a careful look at all the task constraints and preferences as you work. Check the room requirements and speaker availability, then review the whole schedule to see whether any assignments still need adjusting.`;
+Check all task constraints and preferences, including room requirements and speaker availability. Review the whole schedule and adjust any assignments that need changing.`;
 
-const SHARED_DELIVERY_AI_RECOMMENDATION = `Hey! I think grouping shipments going to the same region in the same van would be a good starting point. This keeps shipments for each region together and makes it easier to follow how the dispatch plan is organized:
+const SHARED_DELIVERY_AI_RECOMMENDATION = `Hey! I suggest grouping shipments going to the same region in the same van. This keeps shipments for each region together and makes the dispatch plan easier to follow:
 
 • Van A: North shipments
 • Van B: Central shipments
 • Van C: South shipments
 
-Next, choose a delivery window for each shipment based on when its driver is available. If a driver has two shipments at the same time, adjust their placements to resolve the conflict.
+Next, choose each shipment's delivery window based on driver availability. If a driver has two shipments at the same time, adjust their placements to resolve the conflict.
 
-Take a careful look at all the task constraints and preferences as you work. Check the van requirements and driver availability, then review the whole dispatch plan to see whether any assignments still need adjusting.`;
+Check all task constraints and preferences, including van requirements and driver availability. Review the whole dispatch plan and adjust any assignments that need changing.`;
 
-const SHARED_CLINIC_AI_RECOMMENDATION = `Hey! I think grouping duties for the same type of care in the same ward would be a good starting point. This keeps related duties together and makes it easier to follow how the roster is organized:
+const SHARED_CLINIC_AI_RECOMMENDATION = `Hey! I suggest grouping duties for the same type of care in the same ward. This keeps related duties together and makes the roster easier to follow:
 
 • Ward A: Emergency Care duties
 • Ward B: General Medicine duties
 • Ward C: Critical Care duties
 
-Next, choose a shift for each duty based on when its nurse is available. If a nurse has two duties during the same shift, adjust their placements to resolve the conflict.
+Next, choose each duty's shift based on nurse availability. If a nurse has two duties during the same shift, adjust their placements to resolve the conflict.
 
-Take a careful look at all the task constraints and preferences as you work. Check the ward requirements and nurse availability, then review the whole roster to see whether any assignments still need adjusting.`;
+Check all task constraints and preferences, including ward requirements and nurse availability. Review the whole roster and adjust any assignments that need changing.`;
 
 const SHARED_PREFILL_ACKNOWLEDGMENT =
   "I’ve added placements to the board to get you started.";
